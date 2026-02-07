@@ -158,7 +158,7 @@ export class ExecutionEngine {
       totalCost,
       errors,
       executionTime,
-    });
+    };
   }
 
   /**
