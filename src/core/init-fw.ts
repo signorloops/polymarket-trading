@@ -1,0 +1,313 @@
+/**
+ * InitFW - Initialization algorithm for Frank-Wolfe
+ *
+ * Provides good initial points for Frank-Wolfe optimization by:
+ * 1. Using warm-start from previous solutions
+ * 2. Applying vertex selection heuristics
+ * 3. Running a few iterations of conditional gradient
+ *
+ * A good initialization can significantly reduce the number of Frank-Wolfe iterations
+ * needed for convergence.
+ */
+
+import { vectorScale, vectorAdd, vectorDot, zeros, ones } from '../utils/math.js';
+import { getLogger } from '../utils/logger.js';
+import { ALGORITHM_CONFIG } from '../utils/config.js';
+
+export interface InitFWOptions {
+  /** Use warm-start if available */
+  warmStart?: number[] | null;
+  /** Number of initialization iterations */
+  initIterations?: number;
+  /** Random seed for stochastic initialization */
+  randomSeed?: number;
+}
+
+export interface InitFWResult {
+  /** Initial point for Frank-Wolfe */
+  initialPoint: number[];
+  /** Estimated quality of initialization (lower is better) */
+  quality: number;
+  /** Method used for initialization */
+  method: 'warm-start' | 'uniform' | 'vertex' | 'gradient';
+}
+
+/**
+ * Initialize Frank-Wolfe with a good starting point
+ *
+ * @param dimension Dimension of the problem (number of markets)
+ * @param gradientFn Function to compute gradient at a point
+ * @param objectiveFn Function to compute objective value
+ * @param options Initialization options
+ * @returns Initialization result
+ */
+export function initFW(
+  dimension: number,
+  gradientFn: (mu: number[]) => number[],
+  objectiveFn: (mu: number[]) => number,
+  options: InitFWOptions = {}
+): InitFWResult {
+  const logger = getLogger().child({ module: 'InitFW' });
+  const { warmStart = null, initIterations = 5 } = options;
+
+  // Try warm-start first if available
+  if (warmStart !== null && warmStart.length === dimension) {
+    const isValid = validatePoint(warmStart);
+    if (isValid) {
+      logger.debug('Using warm-start initialization');
+      return {
+        initialPoint: warmStart,
+        quality: objectiveFn(warmStart),
+        method: 'warm-start',
+      };
+    }
+  }
+
+  // Try gradient-based vertex selection
+  const vertexInit = vertexInitialization(dimension, gradientFn);
+  const vertexQuality = objectiveFn(vertexInit);
+
+  // Try uniform initialization
+  const uniformInit = vectorScale(ones(dimension), 1 / dimension);
+  const uniformQuality = objectiveFn(uniformInit);
+
+  // Run a few iterations of conditional gradient from uniform
+  const gradientInit = conditionalGradientInit(
+    dimension,
+    gradientFn,
+    objectiveFn,
+    initIterations
+  );
+  const gradientQuality = objectiveFn(gradientInit);
+
+  // Select the best initialization
+  let bestPoint = uniformInit;
+  let bestQuality = uniformQuality;
+  let bestMethod: InitFWResult['method'] = 'uniform';
+
+  if (vertexQuality < bestQuality) {
+    bestPoint = vertexInit;
+    bestQuality = vertexQuality;
+    bestMethod = 'vertex';
+  }
+
+  if (gradientQuality < bestQuality) {
+    bestPoint = gradientInit;
+    bestQuality = gradientQuality;
+    bestMethod = 'gradient';
+  }
+
+  logger.debug('InitFW completed', {
+    method: bestMethod,
+    quality: bestQuality,
+    dimension,
+  });
+
+  return {
+    initialPoint: bestPoint,
+    quality: bestQuality,
+    method: bestMethod,
+  };
+}
+
+/**
+ * Vertex initialization: select the vertex with minimum gradient
+ */
+function vertexInitialization(
+  dimension: number,
+  gradientFn: (mu: number[]) => number[]
+): number[] {
+  // Start from uniform to get a representative gradient
+  const uniform = vectorScale(ones(dimension), 1 / dimension);
+  const gradient = gradientFn(uniform);
+
+  // Find the coordinate with minimum gradient
+  let minIdx = 0;
+  let minGrad = gradient[0]!;
+
+  for (let i = 1; i < dimension; i++) {
+    if (gradient[i]! < minGrad) {
+      minGrad = gradient[i]!;
+      minIdx = i;
+    }
+  }
+
+  // Create vertex with 1 at minIdx
+  const vertex = zeros(dimension);
+  vertex[minIdx] = 1;
+
+  return vertex;
+}
+
+/**
+ * Run a few iterations of conditional gradient for initialization
+ */
+function conditionalGradientInit(
+  dimension: number,
+  gradientFn: (mu: number[]) => number[],
+  objectiveFn: (mu: number[]) => number,
+  iterations: number
+): number[] {
+  let mu = vectorScale(ones(dimension), 1 / dimension);
+
+  for (let iter = 0; iter < iterations; iter++) {
+    const gradient = gradientFn(mu);
+
+    // Find vertex minimizing <gradient, v>
+    let minIdx = 0;
+    let minValue = gradient[0]!;
+
+    for (let i = 1; i < dimension; i++) {
+      if (gradient[i]! < minValue) {
+        minValue = gradient[i]!;
+        minIdx = i;
+      }
+    }
+
+    // Create vertex
+    const s = zeros(dimension);
+    s[minIdx] = 1;
+
+    // Step size (decreasing)
+    const gamma = 2 / (iter + 2);
+
+    // Update: mu = (1 - gamma) * mu + gamma * s
+    mu = vectorAdd(vectorScale(mu, 1 - gamma), vectorScale(s, gamma));
+
+    // Project onto simplex to maintain feasibility
+    mu = projectOntoSimplex(mu);
+  }
+
+  return mu;
+}
+
+/**
+ * Validate that a point is in the probability simplex
+ */
+function validatePoint(point: number[]): boolean {
+  // Check non-negativity
+  if (point.some((x) => x < -1e-10)) {
+    return false;
+  }
+
+  // Check sum = 1
+  const sum = point.reduce((s, x) => s + x, 0);
+  if (Math.abs(sum - 1) > 1e-6) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Project onto probability simplex
+ */
+function projectOntoSimplex(v: number[]): number[] {
+  const n = v.length;
+  const sorted = [...v].sort((a, b) => b - a);
+
+  let cumsum = 0;
+  let rho = 0;
+
+  for (let i = 0; i < n; i++) {
+    cumsum += sorted[i]!;
+    if (sorted[i]! > (cumsum - 1) / (i + 1)) {
+      rho = i;
+    }
+  }
+
+  const lambda = (cumsum - 1) / (rho + 1);
+  return v.map((x) => Math.max(x - lambda, 0));
+}
+
+/**
+ * Cache for warm-start values
+ */
+const warmStartCache = new Map<string, number[]>();
+
+/**
+ * Store a warm-start value for future use
+ */
+export function storeWarmStart(key: string, point: number[]): void {
+  warmStartCache.set(key, [...point]);
+}
+
+/**
+ * Retrieve a warm-start value
+ */
+export function getWarmStart(key: string): number[] | undefined {
+  return warmStartCache.get(key);
+}
+
+/**
+ * Clear the warm-start cache
+ */
+export function clearWarmStartCache(): void {
+  warmStartCache.clear();
+}
+
+/**
+ * Initialize with barrier-aware strategy
+ * For LMSR markets, use a point away from the boundary
+ */
+export function initFWBarrier(
+  dimension: number,
+  gradientFn: (mu: number[], epsilon: number) => number[],
+  objectiveFn: (mu: number[], epsilon: number) => number,
+  epsilon: number,
+  options: InitFWOptions = {}
+): InitFWResult {
+  const logger = getLogger().child({ module: 'InitFWBarrier' });
+
+  // For barrier methods, start slightly away from boundary
+  const barrierUniform = vectorScale(ones(dimension), 1 / dimension);
+
+  // Add small perturbation to avoid exact boundary
+  for (let i = 0; i < dimension; i++) {
+    barrierUniform[i]! += epsilon * (Math.random() - 0.5);
+  }
+
+  // Renormalize
+  const sum = barrierUniform.reduce((s, x) => s + x, 0);
+  const normalized = barrierUniform.map((x) => x / sum);
+
+  // Run conditional gradient with barrier
+  let mu = [...normalized];
+  const iterations = options.initIterations ?? 5;
+
+  for (let iter = 0; iter < iterations; iter++) {
+    const gradient = gradientFn(mu, epsilon);
+
+    // Find vertex
+    let minIdx = 0;
+    let minValue = gradient[0]!;
+
+    for (let i = 1; i < dimension; i++) {
+      if (gradient[i]! < minValue) {
+        minValue = gradient[i]!;
+        minIdx = i;
+      }
+    }
+
+    const s = zeros(dimension);
+    s[minIdx] = 1;
+
+    const gamma = 2 / (iter + 2);
+    mu = vectorAdd(vectorScale(mu, 1 - gamma), vectorScale(s, gamma));
+    mu = projectOntoSimplex(mu);
+  }
+
+  const quality = objectiveFn(mu, epsilon);
+
+  logger.debug('InitFW Barrier completed', {
+    dimension,
+    epsilon,
+    quality,
+  });
+
+  return {
+    initialPoint: mu,
+    quality,
+    method: 'gradient',
+  };
+}
