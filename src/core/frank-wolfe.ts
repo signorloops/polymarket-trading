@@ -65,6 +65,10 @@ export function linearMinimizationOracle(
 
   // For a simplex constraint (sum = 1, all >= 0), the LMO picks the
   // coordinate with minimum gradient component
+  if (n === 0) {
+    throw new Error('Empty gradient array');
+  }
+
   const vertex = new Array(n).fill(0);
   let minIdx = 0;
   let minValue = gradient[0]!;

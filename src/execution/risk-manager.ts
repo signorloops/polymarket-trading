@@ -139,7 +139,7 @@ export class RiskManager {
       } else {
         // Add to position (average down/up)
         const totalValue = existingPosition.size * existingPosition.avgPrice + filledSize * orderStatus.avgPrice;
-        const newAvgPrice = totalValue / newSize;
+        const newAvgPrice = newSize !== 0 ? totalValue / newSize : existingPosition.avgPrice;
 
         existingPosition.size = newSize;
         existingPosition.avgPrice = newAvgPrice;
