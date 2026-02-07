@@ -1,0 +1,391 @@
+/**
+ * Market Dependency Graph
+ *
+ * Models relationships between prediction markets based on:
+ * 1. Event relationships (mutually exclusive, conditional)
+ * 2. Temporal dependencies (before/after)
+ * 3. Combinatorial constraints (election scenarios, tournament brackets)
+ *
+ * This graph is used to construct the marginal polytope constraints
+ * for cross-market arbitrage detection.
+ */
+
+import { getLogger } from '../utils/logger.js';
+
+export interface MarketNode {
+  id: string;
+  eventId: string;
+  outcome: string;
+  price: number;
+  metadata: Record<string, unknown>;
+}
+
+export interface EventNode {
+  id: string;
+  type: 'binary' | 'categorical' | 'conditional';
+  outcomes: string[];
+  markets: string[];
+  parentEvent?: string;
+  condition?: string;
+}
+
+export interface DependencyEdge {
+  from: string;
+  to: string;
+  type: 'mutually_exclusive' | 'conditional' | 'temporal' | 'implies';
+  weight: number;
+}
+
+export interface ArbitrageCycle {
+  markets: string[];
+  expectedReturn: number;
+  constraint: string;
+}
+
+/**
+ * MarketDependencyGraph manages the relationships between markets
+ */
+export class MarketDependencyGraph {
+  private markets: Map<string, MarketNode> = new Map();
+  private events: Map<string, EventNode> = new Map();
+  private edges: DependencyEdge[] = [];
+  private adjacencyList: Map<string, Set<string>> = new Map();
+  private logger = getLogger().child({ module: 'MarketDependencyGraph' });
+
+  /**
+   * Add a market node
+   */
+  addMarket(market: MarketNode): void {
+    this.markets.set(market.id, market);
+
+    if (!this.adjacencyList.has(market.id)) {
+      this.adjacencyList.set(market.id, new Set());
+    }
+
+    this.logger.debug(`Added market ${market.id}`);
+  }
+
+  /**
+   * Add an event node
+   */
+  addEvent(event: EventNode): void {
+    this.events.set(event.id, event);
+    this.logger.debug(`Added event ${event.id} with ${event.outcomes.length} outcomes`);
+  }
+
+  /**
+   * Add a dependency edge
+   */
+  addEdge(edge: DependencyEdge): void {
+    this.edges.push(edge);
+
+    // Update adjacency list
+    if (!this.adjacencyList.has(edge.from)) {
+      this.adjacencyList.set(edge.from, new Set());
+    }
+    this.adjacencyList.get(edge.from)!.add(edge.to);
+
+    this.logger.debug(`Added ${edge.type} edge: ${edge.from} -> ${edge.to}`);
+  }
+
+  /**
+   * Get markets for an event
+   */
+  getMarketsForEvent(eventId: string): MarketNode[] {
+    const event = this.events.get(eventId);
+    if (!event) return [];
+
+    return event.markets
+      .map((id) => this.markets.get(id))
+      .filter((m): m is MarketNode => m !== undefined);
+  }
+
+  /**
+   * Get events that are mutually exclusive
+   */
+  getMutuallyExclusiveEvents(eventId: string): string[] {
+    const result: string[] = [];
+
+    for (const edge of this.edges) {
+      if (edge.type === 'mutually_exclusive') {
+        if (edge.from === eventId) {
+          result.push(edge.to);
+        } else if (edge.to === eventId) {
+          result.push(edge.from);
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Get conditional events (events that depend on another)
+   */
+  getConditionalEvents(parentEventId: string): EventNode[] {
+    const result: EventNode[] = [];
+
+    for (const event of this.events.values()) {
+      if (event.parentEvent === parentEventId) {
+        result.push(event);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Find arbitrage cycles in the dependency graph
+   * A cycle represents a potential arbitrage opportunity
+   */
+  findArbitrageCycles(): ArbitrageCycle[] {
+    const cycles: ArbitrageCycle[] = [];
+    const visited = new Set<string>();
+    const recursionStack = new Set<string>();
+
+    const dfs = (nodeId: string, path: string[]): void => {
+      visited.add(nodeId);
+      recursionStack.add(nodeId);
+
+      const neighbors = this.adjacencyList.get(nodeId) || new Set();
+
+      for (const neighbor of neighbors) {
+        if (!visited.has(neighbor)) {
+          dfs(neighbor, [...path, neighbor]);
+        } else if (recursionStack.has(neighbor)) {
+          // Found a cycle
+          const cycleStart = path.indexOf(neighbor);
+          const cycle = path.slice(cycleStart);
+          cycles.push(this.analyzeCycle(cycle));
+        }
+      }
+
+      recursionStack.delete(nodeId);
+    };
+
+    for (const marketId of this.markets.keys()) {
+      if (!visited.has(marketId)) {
+        dfs(marketId, [marketId]);
+      }
+    }
+
+    return cycles;
+  }
+
+  /**
+   * Build constraint matrix for the marginal polytope
+   */
+  buildConstraintMatrix(): {
+    coefficients: number[][];
+    rhs: number[];
+    types: ('equality' | 'inequality')[];
+    descriptions: string[];
+  } {
+    const coefficients: number[][] = [];
+    const rhs: number[] = [];
+    const types: ('equality' | 'inequality')[] = [];
+    const descriptions: string[] = [];
+
+    const marketList = Array.from(this.markets.keys());
+    const n = marketList.length;
+
+    // 1. Probability sum constraints for each event
+    for (const event of this.events.values()) {
+      const constraint = new Array(n).fill(0);
+
+      for (const marketId of event.markets) {
+        const idx = marketList.indexOf(marketId);
+        if (idx >= 0) {
+          constraint[idx] = 1;
+        }
+      }
+
+      coefficients.push(constraint);
+      rhs.push(1);
+      types.push('equality');
+      descriptions.push(`Event ${event.id}: probability sum = 1`);
+    }
+
+    // 2. Mutually exclusive event constraints
+    for (const edge of this.edges) {
+      if (edge.type === 'mutually_exclusive') {
+        const event1 = this.events.get(edge.from);
+        const event2 = this.events.get(edge.to);
+
+        if (event1 && event2) {
+          const constraint = new Array(n).fill(0);
+
+          for (const marketId of event1.markets) {
+            const idx = marketList.indexOf(marketId);
+            if (idx >= 0) constraint[idx] = 1;
+          }
+
+          for (const marketId of event2.markets) {
+            const idx = marketList.indexOf(marketId);
+            if (idx >= 0) constraint[idx] = 1;
+          }
+
+          coefficients.push(constraint);
+          rhs.push(1);
+          types.push('inequality');
+          descriptions.push(`Mutually exclusive: ${edge.from} + ${edge.to} <= 1`);
+        }
+      }
+    }
+
+    // 3. Conditional probability constraints
+    for (const event of this.events.values()) {
+      if (event.parentEvent) {
+        const parent = this.events.get(event.parentEvent);
+        if (parent) {
+          // P(child) <= P(parent)
+          const constraint = new Array(n).fill(0);
+
+          for (const marketId of event.markets) {
+            const idx = marketList.indexOf(marketId);
+            if (idx >= 0) constraint[idx] = 1;
+          }
+
+          for (const marketId of parent.markets) {
+            const idx = marketList.indexOf(marketId);
+            if (idx >= 0) constraint[idx] = -1;
+          }
+
+          coefficients.push(constraint);
+          rhs.push(0);
+          types.push('inequality');
+          descriptions.push(`Conditional: ${event.id} <= ${parent.id}`);
+        }
+      }
+    }
+
+    // 4. Non-negativity constraints
+    for (let i = 0; i < n; i++) {
+      const constraint = new Array(n).fill(0);
+      constraint[i] = 1;
+
+      coefficients.push(constraint);
+      rhs.push(0);
+      types.push('inequality');
+      descriptions.push(`Market ${marketList[i]}: non-negative`);
+    }
+
+    return { coefficients, rhs, types, descriptions };
+  }
+
+  /**
+   * Get connected components (groups of related markets)
+   */
+  getConnectedComponents(): string[][] {
+    const visited = new Set<string>();
+    const components: string[][] = [];
+
+    const dfs = (startId: string, component: string[]): void => {
+      visited.add(startId);
+      component.push(startId);
+
+      const neighbors = this.adjacencyList.get(startId) || new Set();
+      for (const neighbor of neighbors) {
+        if (!visited.has(neighbor)) {
+          dfs(neighbor, component);
+        }
+      }
+    };
+
+    for (const marketId of this.markets.keys()) {
+      if (!visited.has(marketId)) {
+        const component: string[] = [];
+        dfs(marketId, component);
+        components.push(component);
+      }
+    }
+
+    return components;
+  }
+
+  /**
+   * Update market price
+   */
+  updatePrice(marketId: string, price: number): void {
+    const market = this.markets.get(marketId);
+    if (market) {
+      market.price = price;
+    }
+  }
+
+  /**
+   * Get all markets in a component
+   */
+  getComponentMarkets(marketId: string): MarketNode[] {
+    const visited = new Set<string>();
+    const result: MarketNode[] = [];
+
+    const dfs = (id: string): void => {
+      visited.add(id);
+      const market = this.markets.get(id);
+      if (market) {
+        result.push(market);
+      }
+
+      const neighbors = this.adjacencyList.get(id) || new Set();
+      for (const neighbor of neighbors) {
+        if (!visited.has(neighbor)) {
+          dfs(neighbor);
+        }
+      }
+    };
+
+    dfs(marketId);
+    return result;
+  }
+
+  /**
+   * Clear the graph
+   */
+  clear(): void {
+    this.markets.clear();
+    this.events.clear();
+    this.edges = [];
+    this.adjacencyList.clear();
+    this.logger.debug('Cleared dependency graph');
+  }
+
+  private analyzeCycle(marketIds: string[]): ArbitrageCycle {
+    const markets = marketIds
+      .map((id) => this.markets.get(id))
+      .filter((m): m is MarketNode => m !== undefined);
+
+    // Calculate expected return based on price inconsistencies
+    let expectedReturn = 0;
+    for (let i = 0; i < markets.length; i++) {
+      const current = markets[i]!;
+      const next = markets[(i + 1) % markets.length]!;
+      expectedReturn += Math.abs(current.price - next.price);
+    }
+
+    return {
+      markets: marketIds,
+      expectedReturn,
+      constraint: `Cycle: ${marketIds.join(' -> ')}`,
+    };
+  }
+}
+
+/**
+ * Global dependency graph instance
+ */
+let globalGraph: MarketDependencyGraph | null = null;
+
+export function getDependencyGraph(): MarketDependencyGraph {
+  if (!globalGraph) {
+    globalGraph = new MarketDependencyGraph();
+  }
+  return globalGraph;
+}
+
+/**
+ * Reset the global graph (for testing)
+ */
+export function resetDependencyGraph(): void {
+  globalGraph = null;
+}
