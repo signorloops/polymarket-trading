@@ -20,6 +20,7 @@ import {
   vectorLog,
   vectorExp,
   clip,
+  projectOntoSimplex,
 } from '../utils/math.js';
 import { getLogger } from '../utils/logger.js';
 import { ALGORITHM_CONFIG } from '../utils/config.js';
@@ -329,33 +330,6 @@ function lineSearchKL(mu: number[], s: number[], gradient: number[]): number {
   }
 
   return bestGamma;
-}
-
-/**
- * Project a vector onto the probability simplex
- * Uses a simple algorithm that preserves the sum = 1 constraint
- */
-function projectOntoSimplex(v: number[]): number[] {
-  const n = v.length;
-
-  // Sort in descending order
-  const sorted = [...v].sort((a, b) => b - a);
-
-  // Find the threshold
-  let cumsum = 0;
-  let rho = 0;
-
-  for (let i = 0; i < n; i++) {
-    cumsum += sorted[i]!;
-    if (sorted[i]! > (cumsum - 1) / (i + 1)) {
-      rho = i;
-    }
-  }
-
-  const lambda = (cumsum - 1) / (rho + 1);
-
-  // Project
-  return v.map((x) => Math.max(x - lambda, 0));
 }
 
 /**

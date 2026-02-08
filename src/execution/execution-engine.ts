@@ -53,7 +53,25 @@ export interface TradeLeg {
 export class ExecutionEngine {
   private pendingOrders: Map<string, TradeOrder> = new Map();
   private orderStatuses: Map<string, OrderStatus> = new Map();
+  private cleanupInterval: NodeJS.Timeout | null = null;
   private logger = getLogger().child({ module: 'ExecutionEngine' });
+
+  constructor() {
+    // Start automatic cleanup every 5 minutes
+    this.cleanupInterval = setInterval(() => {
+      this.clearOldOrders(3600000); // Clean orders older than 1 hour
+    }, 300000);
+  }
+
+  /**
+   * Stop the execution engine and cleanup resources
+   */
+  stop(): void {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
+  }
 
   /**
    * Execute a single order

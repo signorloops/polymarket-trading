@@ -10,7 +10,7 @@
  * needed for convergence.
  */
 
-import { vectorScale, vectorAdd, vectorDot, zeros, ones } from '../utils/math.js';
+import { vectorScale, vectorAdd, vectorDot, zeros, ones, projectOntoSimplex } from '../utils/math.js';
 import { getLogger } from '../utils/logger.js';
 import { ALGORITHM_CONFIG } from '../utils/config.js';
 
@@ -197,27 +197,6 @@ function validatePoint(point: number[]): boolean {
   }
 
   return true;
-}
-
-/**
- * Project onto probability simplex
- */
-function projectOntoSimplex(v: number[]): number[] {
-  const n = v.length;
-  const sorted = [...v].sort((a, b) => b - a);
-
-  let cumsum = 0;
-  let rho = 0;
-
-  for (let i = 0; i < n; i++) {
-    cumsum += sorted[i]!;
-    if (sorted[i]! > (cumsum - 1) / (i + 1)) {
-      rho = i;
-    }
-  }
-
-  const lambda = (cumsum - 1) / (rho + 1);
-  return v.map((x) => Math.max(x - lambda, 0));
 }
 
 /**

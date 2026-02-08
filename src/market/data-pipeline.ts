@@ -154,13 +154,14 @@ export class DataPipeline {
   }
 
   private handleMessage(message: unknown): void {
-    if (typeof message !== 'object' || message === null) {
+    if (!this.isValidMessage(message)) {
+      this.logger.warn('Invalid message received', { message });
       return;
     }
 
-    const msg = message as Record<string, unknown>;
+    const msg = message;
 
-    switch (msg['event_type']) {
+    switch (msg.event_type) {
       case 'trade':
         this.handleTradeMessage(msg);
         break;
@@ -175,6 +176,10 @@ export class DataPipeline {
         // Unknown message type, ignore
         break;
     }
+  }
+
+  private isValidMessage(msg: unknown): msg is { event_type: string } & Record<string, unknown> {
+    return typeof msg === 'object' && msg !== null && 'event_type' in msg && typeof (msg as Record<string, unknown>).event_type === 'string';
   }
 
   private handleTradeMessage(msg: Record<string, unknown>): void {

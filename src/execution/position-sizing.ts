@@ -70,11 +70,17 @@ export function calculatePositionSize(input: PositionSizingInput): PositionSizin
   const { probability, price, capital, orderBook, side } = input;
 
   // Validate inputs
+  if (!Number.isFinite(probability) || !Number.isFinite(price) || !Number.isFinite(capital)) {
+    throw new Error('Invalid numeric input: values must be finite numbers');
+  }
   if (probability <= 0 || probability >= 1) {
     throw new Error('Probability must be between 0 and 1');
   }
   if (price <= 0 || price >= 1) {
     throw new Error('Price must be between 0 and 1');
+  }
+  if (capital < 0) {
+    throw new Error('Capital must be non-negative');
   }
 
   // Calculate Kelly fraction

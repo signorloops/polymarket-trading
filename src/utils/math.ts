@@ -229,3 +229,31 @@ export function std(a: number[]): number {
   const variance = a.reduce((sum, val) => sum + Math.pow(val - m, 2), 0) / (a.length - 1);
   return Math.sqrt(variance);
 }
+
+/**
+ * Project a vector onto the probability simplex
+ * Uses an efficient algorithm that preserves the sum = 1 constraint
+ */
+export function projectOntoSimplex(v: number[]): number[] {
+  const n = v.length;
+  if (n === 0) return [];
+
+  // Sort in descending order
+  const sorted = [...v].sort((a, b) => b - a);
+
+  // Find the threshold
+  let cumsum = 0;
+  let rho = 0;
+
+  for (let i = 0; i < n; i++) {
+    cumsum += sorted[i]!;
+    if (sorted[i]! > (cumsum - 1) / (i + 1)) {
+      rho = i;
+    }
+  }
+
+  const lambda = (cumsum - 1) / (rho + 1);
+
+  // Project
+  return v.map((x) => Math.max(x - lambda, 0));
+}
