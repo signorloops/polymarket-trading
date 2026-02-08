@@ -15,6 +15,7 @@ export class Logger {
   private level: LogLevel;
   private silent: boolean;
   private context: Record<string, unknown>;
+  private structured: boolean;
 
   private static readonly LEVEL_PRIORITY: Record<LogLevel, number> = {
     debug: 0,
@@ -23,17 +24,30 @@ export class Logger {
     error: 3,
   };
 
-  constructor(level: LogLevel = 'info', silent = false, context: Record<string, unknown> = {}) {
+  constructor(
+    level: LogLevel = 'info',
+    silent = false,
+    context: Record<string, unknown> = {},
+    structured = false
+  ) {
     this.level = level;
     this.silent = silent;
     this.context = context;
+    this.structured = structured;
   }
 
   /**
    * Create a child logger with additional context
    */
   child(additionalContext: Record<string, unknown>): Logger {
-    return new Logger(this.level, this.silent, { ...this.context, ...additionalContext });
+    return new Logger(this.level, this.silent, { ...this.context, ...additionalContext }, this.structured);
+  }
+
+  /**
+   * Set structured logging mode (JSON output)
+   */
+  setStructured(structured: boolean): void {
+    this.structured = structured;
   }
 
   /**
@@ -54,7 +68,18 @@ export class Logger {
     return Logger.LEVEL_PRIORITY[level] >= Logger.LEVEL_PRIORITY[this.level];
   }
 
-  private formatLogEntry(entry: LogEntry): string {
+  private formatLogEntry(entry: LogEntry, structured: boolean): string {
+    if (structured) {
+      // JSON structured logging for production
+      return JSON.stringify({
+        timestamp: entry.timestamp,
+        level: entry.level,
+        message: entry.message,
+        ...entry.context,
+      });
+    }
+
+    // Human-readable format for development
     const contextStr = entry.context
       ? ' ' + JSON.stringify(entry.context)
       : '';
@@ -73,7 +98,7 @@ export class Logger {
       context: { ...this.context, ...additionalContext },
     };
 
-    const formatted = this.formatLogEntry(entry);
+    const formatted = this.formatLogEntry(entry, this.structured);
 
     switch (level) {
       case 'debug':
@@ -114,8 +139,8 @@ let globalLogger: Logger | null = null;
 /**
  * Initialize the global logger
  */
-export function initLogger(level: LogLevel = 'info', silent = false): Logger {
-  globalLogger = new Logger(level, silent);
+export function initLogger(level: LogLevel = 'info', silent = false, structured = false): Logger {
+  globalLogger = new Logger(level, silent, {}, structured);
   return globalLogger;
 }
 
