@@ -74,7 +74,7 @@ export class PolymarketClient {
   private apiKey: string;
 
   constructor(apiKey?: string) {
-    this.apiKey = apiKey ?? NETWORK_CONFIG.POLYMARKET_API_KEY;
+    this.apiKey = apiKey ?? NETWORK_CONFIG.POLYMARKET_API_KEY ?? '';
 
     this.client = axios.create({
       baseURL: 'https://api.polymarket.com',

@@ -44,7 +44,7 @@ export class PolymarketWebSocketClient {
 
   constructor(url?: string, apiKey?: string) {
     this.url = url ?? NETWORK_CONFIG.WS_URL;
-    this.apiKey = apiKey ?? NETWORK_CONFIG.POLYMARKET_API_KEY;
+    this.apiKey = apiKey ?? NETWORK_CONFIG.POLYMARKET_API_KEY ?? '';
   }
 
   connect(): void {

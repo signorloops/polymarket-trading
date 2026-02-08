@@ -303,6 +303,20 @@ export class OrderBook {
       .sort((a, b) => a.price - b.price);
   }
 
+  /**
+   * Get total bid depth (sum of all bid sizes)
+   */
+  getBidDepth(): number {
+    return this.calculateDepth('bid');
+  }
+
+  /**
+   * Get total ask depth (sum of all ask sizes)
+   */
+  getAskDepth(): number {
+    return this.calculateDepth('ask');
+  }
+
   private calculateDepth(side: 'bid' | 'ask'): number {
     const levels = side === 'bid' ? this.bids : this.asks;
     return Array.from(levels.values()).reduce((sum, size) => sum + size, 0);

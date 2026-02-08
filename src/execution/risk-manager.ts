@@ -34,6 +34,13 @@ export interface RiskCheckResult {
   riskLevel: 'low' | 'medium' | 'high' | 'critical';
 }
 
+export interface RiskManagerConfig {
+  maxExposure?: number;
+  maxBetFraction?: number;
+  maxDailyLoss?: number;
+  emergencyStopThreshold?: number;
+}
+
 export class RiskManager {
   private positions: Map<string, Position> = new Map();
   private dailyPnL: number = 0;
@@ -42,6 +49,27 @@ export class RiskManager {
   private circuitBreakerTriggered: boolean = false;
   private lastReset: number = Date.now();
   private logger = getLogger().child({ module: 'RiskManager' });
+  private config: Required<RiskManagerConfig>;
+
+  constructor(config: RiskManagerConfig = {}) {
+    this.config = {
+      maxExposure: config.maxExposure ?? RISK_CONFIG.MAX_EXPOSURE,
+      maxBetFraction: config.maxBetFraction ?? 0.5,
+      maxDailyLoss: config.maxDailyLoss ?? RISK_CONFIG.MAX_DAILY_LOSS,
+      emergencyStopThreshold: config.emergencyStopThreshold ?? RISK_CONFIG.EMERGENCY_STOP_THRESHOLD,
+    };
+  }
+
+  /**
+   * Update risk manager configuration
+   */
+  updateConfig(config: RiskManagerConfig): void {
+    this.config = {
+      ...this.config,
+      ...config,
+    };
+    this.logger.info('Risk manager config updated', this.config);
+  }
 
   /**
    * Check if a trade is allowed based on risk limits
@@ -62,7 +90,7 @@ export class RiskManager {
     }
 
     // Check daily loss limit
-    if (this.dailyPnL < -RISK_CONFIG.MAX_DAILY_LOSS) {
+    if (this.dailyPnL < -this.config.maxDailyLoss) {
       this.triggerCircuitBreaker('Daily loss limit exceeded');
       return {
         allowed: false,
@@ -77,7 +105,7 @@ export class RiskManager {
     const newExposure = currentExposure + Math.abs(positionChange);
 
     // Check max exposure
-    if (newExposure > RISK_CONFIG.MAX_EXPOSURE) {
+    if (newExposure > this.config.maxExposure) {
       return {
         allowed: false,
         reason: `Max exposure would be exceeded: ${newExposure} > ${RISK_CONFIG.MAX_EXPOSURE}`,
@@ -182,7 +210,7 @@ export class RiskManager {
     }
 
     // Check if exposure is within limits
-    if (exposure > RISK_CONFIG.MAX_EXPOSURE * 0.1) {
+    if (exposure > this.config.maxExposure * 0.1) {
       return {
         action: 'unwind',
         reason: `Partial fill exposure ${exposure} exceeds 10% of max exposure`,
@@ -227,7 +255,7 @@ export class RiskManager {
   checkEmergencyStop(): boolean {
     const metrics = this.getRiskMetrics();
 
-    if (metrics.unrealizedPnL < -RISK_CONFIG.EMERGENCY_STOP_THRESHOLD) {
+    if (metrics.unrealizedPnL < -this.config.emergencyStopThreshold) {
       this.logger.error('Emergency stop triggered', {
         unrealizedPnL: metrics.unrealizedPnL,
         threshold: RISK_CONFIG.EMERGENCY_STOP_THRESHOLD,
