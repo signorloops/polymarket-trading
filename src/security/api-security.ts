@@ -48,12 +48,15 @@ export class ApiKeyManager {
    * Register a new API key
    */
   registerKey(keyId: string, apiKey: string, apiSecret: string, expiresAt?: number): void {
-    this.credentials.set(keyId, {
+    const creds: ApiCredentials = {
       apiKey,
       apiSecret,
       createdAt: Date.now(),
-      expiresAt,
-    });
+    };
+    if (expiresAt !== undefined) {
+      creds.expiresAt = expiresAt;
+    }
+    this.credentials.set(keyId, creds);
     this.logger.info(`Registered API key: ${keyId}`);
   }
 
