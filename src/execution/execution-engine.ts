@@ -9,57 +9,26 @@
  */
 
 import { getLogger } from '../utils/logger.js';
-import { TRADING_CONFIG, NETWORK_CONFIG } from '../utils/config.js';
+import { TRADING_CONFIG } from '../utils/config.js';
+import type { TradeOrder, OrderStatus, ExecutionResult, TradeLeg } from './types.js';
+import { OrderManager } from './order-manager.js';
 
-export interface TradeOrder {
-  id: string;
-  marketId: string;
-  side: 'buy' | 'sell';
-  size: number;
-  price: number;
-  orderType: 'limit' | 'market';
-  timeInForce?: 'GTC' | 'IOC' | 'FOK';
-}
-
-export interface OrderStatus {
-  orderId: string;
-  status: 'pending' | 'open' | 'filled' | 'partial' | 'cancelled' | 'error';
-  filledSize: number;
-  remainingSize: number;
-  avgPrice: number;
-  timestamp: number;
-  error?: string;
-}
-
-export interface ExecutionResult {
-  success: boolean;
-  orders: OrderStatus[];
-  totalFilled: number;
-  totalCost: number;
-  errors: string[];
-  executionTime: number;
-}
-
-export interface TradeLeg {
-  marketId: string;
-  side: 'buy' | 'sell';
-  size: number;
-  expectedPrice: number;
-}
+export type { TradeOrder, OrderStatus, ExecutionResult, TradeLeg };
 
 /**
  * ExecutionEngine handles order submission and tracking
  */
 export class ExecutionEngine {
-  private pendingOrders: Map<string, TradeOrder> = new Map();
-  private orderStatuses: Map<string, OrderStatus> = new Map();
+  private orderManager: OrderManager;
   private cleanupInterval: NodeJS.Timeout | null = null;
   private logger = getLogger().child({ module: 'ExecutionEngine' });
 
-  constructor() {
+  constructor(orderManager?: OrderManager) {
+    this.orderManager = orderManager ?? new OrderManager();
+
     // Start automatic cleanup every 5 minutes
     this.cleanupInterval = setInterval(() => {
-      this.clearOldOrders(3600000); // Clean orders older than 1 hour
+      this.orderManager.clearOldOrders(3600000); // Clean orders older than 1 hour
     }, 300000);
   }
 
@@ -84,13 +53,13 @@ export class ExecutionEngine {
       price: order.price,
     });
 
-    this.pendingOrders.set(order.id, order);
+    this.orderManager.addPending(order);
 
     try {
       // Simulate order submission (replace with actual API call)
       const status = await this.submitOrder(order);
-      this.orderStatuses.set(order.id, status);
-      this.pendingOrders.delete(order.id);
+      this.orderManager.updateStatus(status);
+      this.orderManager.removePending(order.id);
 
       return status;
     } catch (error) {
@@ -104,8 +73,8 @@ export class ExecutionEngine {
         error: error instanceof Error ? error.message : String(error),
       };
 
-      this.orderStatuses.set(order.id, errorStatus);
-      this.pendingOrders.delete(order.id);
+      this.orderManager.updateStatus(errorStatus);
+      this.orderManager.removePending(order.id);
 
       this.logger.error(`Order ${order.id} failed`, { error: errorStatus.error });
       return errorStatus;
@@ -229,7 +198,7 @@ export class ExecutionEngine {
   async cancelOrder(orderId: string): Promise<boolean> {
     this.logger.info(`Cancelling order ${orderId}`);
 
-    const order = this.pendingOrders.get(orderId);
+    const order = this.orderManager.getPending(orderId);
     if (!order) {
       this.logger.warn(`Order ${orderId} not found or not pending`);
       return false;
@@ -248,8 +217,8 @@ export class ExecutionEngine {
         timestamp: Date.now(),
       };
 
-      this.orderStatuses.set(orderId, status);
-      this.pendingOrders.delete(orderId);
+      this.orderManager.updateStatus(status);
+      this.orderManager.removePending(orderId);
 
       return true;
     } catch (error) {
@@ -264,34 +233,28 @@ export class ExecutionEngine {
    * Get status of an order
    */
   getOrderStatus(orderId: string): OrderStatus | undefined {
-    return this.orderStatuses.get(orderId);
+    return this.orderManager.getStatus(orderId);
   }
 
   /**
    * Get all pending orders
    */
   getPendingOrders(): TradeOrder[] {
-    return Array.from(this.pendingOrders.values());
+    return this.orderManager.getAllPending();
   }
 
   /**
    * Get all order statuses
    */
   getAllOrderStatuses(): OrderStatus[] {
-    return Array.from(this.orderStatuses.values());
+    return this.orderManager.getAllStatuses();
   }
 
   /**
    * Clear completed orders older than specified time
    */
   clearOldOrders(maxAgeMs: number = 3600000): void {
-    const cutoff = Date.now() - maxAgeMs;
-
-    for (const [orderId, status] of this.orderStatuses.entries()) {
-      if (status.timestamp < cutoff && status.status !== 'pending' && status.status !== 'open') {
-        this.orderStatuses.delete(orderId);
-      }
-    }
+    this.orderManager.clearOldOrders(maxAgeMs);
   }
 
   private async submitOrder(order: TradeOrder): Promise<OrderStatus> {
