@@ -11,9 +11,13 @@
     "lint:fix": "eslint src/**/*.ts --fix",
     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\"",
-    "test": "jest",
-    "test:coverage": "jest --coverage",
-    "typecheck": "tsc --noEmit"
+    "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
+    "test:coverage": "NODE_OPTIONS='--experimental-vm-modules' jest --coverage",
+    "typecheck": "tsc --noEmit",
+    "benchmark": "npm run build && node dist/benchmarks/math.bench.js",
+    "benchmark:math": "npm run build && node dist/benchmarks/math.bench.js",
+    "benchmark:fw": "npm run build && node dist/benchmarks/frank-wolfe.bench.js",
+    "benchmark:orderbook": "npm run build && node dist/benchmarks/orderbook.bench.js"
   },
   "keywords": [
     "polymarket",
@@ -40,6 +44,7 @@
   "dependencies": {
     "axios": "^1.13.4",
     "dotenv": "^17.2.4",
-    "ws": "^8.19.0"
+    "ws": "^8.19.0",
+    "zod": "^4.3.6"
   }
 }

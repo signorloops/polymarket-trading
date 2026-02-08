@@ -11,11 +11,7 @@ export default {
       'ts-jest',
       {
         useESM: true,
-        tsconfig: {
-          module: 'NodeNext',
-          moduleResolution: 'NodeNext',
-          esModuleInterop: true,
-        },
+        tsconfig: 'tsconfig.test.json',
       },
     ],
   },
@@ -30,4 +26,7 @@ export default {
     },
   },
   verbose: true,
+  workerIdleMemoryLimit: '512MB',
+  maxWorkers: 2,
+  forceExit: true,
 };
