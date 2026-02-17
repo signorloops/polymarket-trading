@@ -11,129 +11,16 @@
  * - LMO: Find vertex v that minimizes ⟨∇f(μ), v⟩
  */
 
-import {
-  vectorSubtract,
-  vectorDot,
-  vectorScale,
-  vectorAdd,
-  projectOntoSimplex,
-} from '../utils/math.js';
+import { vectorSubtract, vectorDot, vectorScale, vectorAdd, projectOntoSimplex } from '../utils/math.js';
 import { getLogger } from '../utils/logger.js';
 import { ALGORITHM_CONFIG } from '../utils/config.js';
+import type { FrankWolfeResult, FrankWolfeOptions, Constraint } from './frank-wolfe-types.js';
+import { lineSearchKL, adaptiveStepSize } from './line-search.js';
 
-export interface FrankWolfeResult {
-  /** Optimal point */
-  mu: number[];
-  /** Objective value (KL divergence) */
-  objective: number;
-  /** Frank-Wolfe gap (optimality measure) */
-  gap: number;
-  /** Number of iterations */
-  iterations: number;
-  /** Whether converged */
-  converged: boolean;
-  /** History of objective values */
-  history: number[];
-}
-
-export interface FrankWolfeOptions {
-  maxIterations?: number;
-  tolerance?: number;
-  stepSize?: 'line-search' | 'fixed' | 'adaptive';
-  initialStepSize?: number;
-  verbose?: boolean;
-}
-
-/**
- * Linear Minimization Oracle (LMO)
- * Finds the vertex of the polytope that minimizes the inner product with gradient
- *
- * For the marginal polytope, vertices correspond to deterministic outcomes
- *
- * @param gradient Current gradient
- * @param constraints Polytope constraints
- * @returns Vertex minimizing ⟨gradient, v⟩
- */
-export function linearMinimizationOracle(
-  gradient: number[],
-  constraints: { coefficients: number[]; rhs: number; type: 'equality' | 'inequality' }[]
-): number[] {
-  const n = gradient.length;
-  if (n === 0) {
-    throw new Error('Empty gradient array');
-  }
-
-  const fallbackSimplexVertex = (): number[] => {
-    const vertex: number[] = Array.from<number>({ length: n }).fill(0);
-    let minIdx = 0;
-    let minValue = gradient[0] ?? Infinity;
-
-    for (let i = 1; i < n; i++) {
-      const gradientValue = gradient[i] ?? Infinity;
-      if (gradientValue < minValue) {
-        minValue = gradientValue;
-        minIdx = i;
-      }
-    }
-
-    vertex[minIdx] = 1;
-    return vertex;
-  };
-
-  const equalityConstraints = constraints.filter(
-    (constraint) =>
-      constraint.type === 'equality' &&
-      constraint.coefficients.length === n &&
-      constraint.coefficients.some((c) => c > 0)
-  );
-
-  if (equalityConstraints.length === 0) {
-    return fallbackSimplexVertex();
-  }
-
-  const vertex: number[] = Array.from<number>({ length: n }).fill(0);
-  let hasAssignedCoordinate = false;
-
-  // For product-of-simplex style constraints (common in this project),
-  // pick the best coordinate within each equality group independently.
-  for (const constraint of equalityConstraints) {
-    const support: number[] = [];
-    for (let i = 0; i < n; i++) {
-      const coeffValue = constraint.coefficients[i] ?? 0;
-      if (coeffValue > 0) {
-        support.push(i);
-      }
-    }
-
-    if (support.length === 0) {
-      continue;
-    }
-
-    const firstIdx = support[0] ?? 0;
-    let bestIdx = firstIdx;
-    const firstGradient = gradient[firstIdx] ?? 0;
-    const firstCoeff = constraint.coefficients[firstIdx] ?? 1;
-    let bestScore = firstGradient / firstCoeff;
-
-    for (let i = 1; i < support.length; i++) {
-      const idx = support[i] ?? 0;
-      const gradientValue = gradient[idx] ?? 0;
-      const coeffValue = constraint.coefficients[idx] ?? 1;
-      const score = gradientValue / coeffValue;
-      if (score < bestScore) {
-        bestScore = score;
-        bestIdx = idx;
-      }
-    }
-
-    const coeff = constraint.coefficients[bestIdx] ?? 1;
-    const assignedValue = coeff !== 0 ? constraint.rhs / coeff : 0;
-    vertex[bestIdx] = Math.max(0, assignedValue);
-    hasAssignedCoordinate = true;
-  }
-
-  return hasAssignedCoordinate ? vertex : fallbackSimplexVertex();
-}
+export type { FrankWolfeResult, FrankWolfeOptions, Constraint };
+export { linearMinimizationOracle } from './lmo.js';
+export { lineSearchKL, adaptiveStepSize } from './line-search.js';
+export { isProfitableArbitrage, computeTradeRecommendation } from './arbitrage-utils.js';
 
 /**
  * Standard Frank-Wolfe algorithm
@@ -208,7 +95,7 @@ export function frankWolfe(
       // Exact line search for KL divergence
       gamma = lineSearchKL(mu, s, gradient);
     } else if (stepSize === 'adaptive') {
-      gamma = 2 / (iter + 2);
+      gamma = adaptiveStepSize(iter);
     } else {
       gamma = options.initialStepSize ?? 0.1;
     }
@@ -324,7 +211,7 @@ export function barrierFrankWolfe(
     }
 
     // Step size (adaptive)
-    const gamma = 2 / (iter + 2);
+    const gamma = adaptiveStepSize(iter);
 
     // Update
     mu = vectorAdd(vectorScale(mu, 1 - gamma), vectorScale(s, gamma));
@@ -351,64 +238,4 @@ export function barrierFrankWolfe(
     converged: false,
     history,
   };
-}
-
-/**
- * Line search for KL divergence minimization
- * Finds optimal step size γ that minimizes D((1-γ)μ + γs || θ)
- */
-function lineSearchKL(mu: number[], s: number[], gradient: number[]): number {
-  // For KL divergence, the optimal step size can be computed analytically
-  // or approximated using bisection
-  const d = vectorSubtract(s, mu);
-
-  // Try different step sizes and pick the best
-  let bestGamma = 0;
-  let bestValue = Infinity;
-
-  for (let i = 1; i <= 20; i++) {
-    const gamma = i / 20;
-    const newMu = vectorAdd(mu, vectorScale(d, gamma));
-
-    // Compute objective (approximate)
-    const value = vectorDot(gradient, vectorSubtract(newMu, mu));
-
-    if (value < bestValue) {
-      bestValue = value;
-      bestGamma = gamma;
-    }
-  }
-
-  return bestGamma;
-}
-
-/**
- * Check if the Frank-Wolfe result indicates profitable arbitrage
- *
- * @param result Frank-Wolfe result
- * @param minProfit Minimum profit threshold
- * @returns Whether arbitrage is profitable
- */
-export function isProfitableArbitrage(
-  result: FrankWolfeResult,
-  minProfit: number = ALGORITHM_CONFIG.MIN_PROFIT_THRESHOLD
-): boolean {
-  // Guaranteed profit = divergence - gap
-  const guaranteedProfit = result.objective - result.gap;
-  return guaranteedProfit >= minProfit;
-}
-
-/**
- * Compute the trade recommendation from Frank-Wolfe result
- *
- * @param result Frank-Wolfe result
- * @param prices Current market prices
- * @returns Recommended trade vector
- */
-export function computeTradeRecommendation(
-  result: FrankWolfeResult,
-  prices: number[]
-): number[] {
-  // Trade = projection - prices (positive = buy, negative = sell)
-  return result.mu.map((mu_i, i) => mu_i - (prices[i] ?? 0));
 }

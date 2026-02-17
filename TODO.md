@@ -35,9 +35,10 @@
 - [x] API 集成（Polymarket 客户端）
 - [x] 测试覆盖（286 个测试，100% 通过）
 - [x] ESLint 规范整改（0 错误）
-- [x] 代码拆分（部分完成，frank-wolfe.ts 仍需拆分）
-- [x] 环境配置（.env 文件创建）
-- [x] 文档完善（README、API 文档）
+- [x] 代码拆分（frank-wolfe.ts 拆分为 5 个模块）
+- [x] 环境配置（.env 文件创建，API 凭证配置）
+- [x] 文档完善（README、API 文档、监控文档）
+- [x] 监控配置（Prometheus + Grafana 仪表板）
 
 ## 已知问题
 - 无
