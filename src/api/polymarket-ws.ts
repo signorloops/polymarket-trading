@@ -18,8 +18,8 @@ export interface WsTrade {
 
 export interface WsOrderBookUpdate {
   marketId: string;
-  bids: Array<{ price: string; size: string }>;
-  asks: Array<{ price: string; size: string }>;
+  bids: { price: string; size: string }[];
+  asks: { price: string; size: string }[];
   timestamp: string;
 }
 
@@ -125,10 +125,12 @@ export class PolymarketWebSocketClient {
 
     this.ws.on('message', (data: WebSocket.Data) => {
       try {
-        const message = JSON.parse(data.toString());
+        const dataStr = typeof data === 'string' ? data : Buffer.from(data).toString();
+        const message: unknown = JSON.parse(dataStr);
         this.handleMessage(message);
       } catch (error) {
-        this.logger.error('Failed to parse message', { error, data: data.toString() });
+        const dataStr = typeof data === 'string' ? data : Buffer.from(data).toString();
+        this.logger.error('Failed to parse message', { error: error instanceof Error ? error.message : String(error), data: dataStr });
       }
     });
 
@@ -152,7 +154,7 @@ export class PolymarketWebSocketClient {
 
   private handleMessage(message: unknown): void {
     if (!this.isValidMessage(message)) {
-      this.logger.warn('Invalid message received', { message });
+      this.logger.warn('Invalid message received', { message: JSON.stringify(message) });
       return;
     }
 
@@ -210,7 +212,7 @@ export class PolymarketWebSocketClient {
       60000
     );
 
-    this.logger.info(`Scheduling reconnect in ${delay}ms`, {
+    this.logger.info(`Scheduling reconnect in ${String(delay)}ms`, {
       attempt: this.reconnectAttempts,
     });
 
@@ -243,9 +245,7 @@ export class PolymarketWebSocketClient {
 let globalWsClient: PolymarketWebSocketClient | null = null;
 
 export function getPolymarketWebSocketClient(url?: string, apiKey?: string): PolymarketWebSocketClient {
-  if (!globalWsClient) {
-    globalWsClient = new PolymarketWebSocketClient(url, apiKey);
-  }
+  globalWsClient ??= new PolymarketWebSocketClient(url, apiKey);
   return globalWsClient;
 }
 

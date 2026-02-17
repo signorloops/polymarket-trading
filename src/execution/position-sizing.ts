@@ -182,16 +182,24 @@ export function calculateMultiLegPositionSize(
   }
 
   const n = probabilities.length;
-  const sizes: number[] = new Array(n).fill(0);
+  const sizes: number[] = new Array(n).fill(0) as number[];
 
   // Calculate individual position sizes
   for (let i = 0; i < n; i++) {
+    const prob = probabilities[i];
+    const price = prices[i];
+    const orderBook = orderBooks[i];
+
+    if (prob === undefined || price === undefined || orderBook === undefined) {
+      continue;
+    }
+
     const result = calculatePositionSize({
-      probability: probabilities[i]!,
-      price: prices[i]!,
+      probability: prob,
+      price: price,
       capital: capital / n, // Split capital equally
-      orderBook: orderBooks[i]!,
-      side: probabilities[i]! > prices[i]! ? 'buy' : 'sell',
+      orderBook: orderBook,
+      side: prob > price ? 'buy' : 'sell',
     });
 
     sizes[i] = result.size;
@@ -206,9 +214,13 @@ export function calculateMultiLegPositionSize(
   let expectedProfit = 0;
 
   for (let i = 0; i < n; i++) {
-    const p = probabilities[i]!;
-    const price = prices[i]!;
-    const size = normalizedSizes[i]!;
+    const p = probabilities[i];
+    const price = prices[i];
+    const size = normalizedSizes[i];
+
+    if (p === undefined || price === undefined || size === undefined) {
+      continue;
+    }
 
     // Maximum loss is the full position size
     maxLoss += size;
@@ -297,7 +309,7 @@ export function validateRiskLimits(
   if (currentExposure + size > RISK_CONFIG.MAX_EXPOSURE) {
     return {
       valid: false,
-      reason: `Position would exceed max exposure: ${currentExposure + size} > ${RISK_CONFIG.MAX_EXPOSURE}`,
+      reason: `Position would exceed max exposure: ${String(currentExposure + size)} > ${String(RISK_CONFIG.MAX_EXPOSURE)}`,
     };
   }
 
@@ -305,7 +317,7 @@ export function validateRiskLimits(
   if (size > capital * KELLY_CONFIG.MAX_BET_FRACTION) {
     return {
       valid: false,
-      reason: `Position exceeds max bet fraction: ${size} > ${capital * KELLY_CONFIG.MAX_BET_FRACTION}`,
+      reason: `Position exceeds max bet fraction: ${String(size)} > ${String(capital * KELLY_CONFIG.MAX_BET_FRACTION)}`,
     };
   }
 

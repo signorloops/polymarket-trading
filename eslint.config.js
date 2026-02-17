@@ -16,6 +16,8 @@ export default ts.config(
     rules: {
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/explicit-function-return-type': 'off',
+      '@typescript-eslint/no-deprecated': 'off',
+      '@typescript-eslint/consistent-generic-constructors': 'off',
       '@typescript-eslint/no-explicit-any': 'error',
     },
   },

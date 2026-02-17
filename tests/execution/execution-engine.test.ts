@@ -2,6 +2,7 @@
  * Execution Engine Tests
  */
 
+import { jest } from '@jest/globals';
 import {
   ExecutionEngine,
   getExecutionEngine,
@@ -306,11 +307,14 @@ describe('ExecutionEngine', () => {
     });
 
     it('should reset instance when reset called', () => {
+      const clearIntervalSpy = jest.spyOn(global, 'clearInterval');
       const engine1 = getExecutionEngine();
       resetExecutionEngine();
       const engine2 = getExecutionEngine();
 
+      expect(clearIntervalSpy).toHaveBeenCalled();
       expect(engine1).not.toBe(engine2);
+      clearIntervalSpy.mockRestore();
     });
   });
 

@@ -13,15 +13,16 @@ import {
   vectorSubtract,
   vectorDot,
   klDivergence,
-  vectorScale,
-  vectorAdd,
-  vectorLog,
-  vectorExp,
   vectorSum,
-  zeros,
 } from '../utils/math.js';
 import { getLogger } from '../utils/logger.js';
 import { ALGORITHM_CONFIG } from '../utils/config.js';
+
+export interface Constraint {
+  coefficients: number[];
+  rhs: number;
+  type: 'equality' | 'inequality';
+}
 
 export interface BregmanProjectionResult {
   /** Projected point (valid probability distribution) */
@@ -48,7 +49,7 @@ export interface BregmanProjectionResult {
  */
 export function bregmanProjection(
   priceVector: number[],
-  constraints: Array<{ coefficients: number[]; rhs: number; type: 'equality' | 'inequality' }>,
+  constraints: Constraint[],
   maxIterations: number = ALGORITHM_CONFIG.MAX_ITERATIONS,
   tolerance: number = ALGORITHM_CONFIG.CONVERGENCE_THRESHOLD
 ): BregmanProjectionResult {
@@ -57,7 +58,7 @@ export function bregmanProjection(
   const n = priceVector.length;
 
   // Initialize with uniform distribution
-  let mu = new Array(n).fill(1 / n);
+  let mu: number[] = new Array(n).fill(1 / n) as number[];
 
   // Ensure price vector is positive
   const theta = priceVector.map((p) => Math.max(p, 1e-10));
@@ -69,7 +70,7 @@ export function bregmanProjection(
   });
 
   for (let iter = 0; iter < maxIterations; iter++) {
-    const prevMu = [...mu];
+    const prevMu: number[] = [...mu] as number[];
 
     // Iterate through constraints
     for (const constraint of constraints) {
@@ -80,8 +81,12 @@ export function bregmanProjection(
 
         // Multiplicative update
         for (let i = 0; i < n; i++) {
-          if (constraint.coefficients[i]! > 0) {
-            mu[i] = mu[i]! * Math.pow(ratio, constraint.coefficients[i]!);
+          const coef = constraint.coefficients[i];
+          if (coef !== undefined && coef > 0) {
+            const currentMu = mu[i];
+            if (currentMu !== undefined) {
+              mu[i] = currentMu * Math.pow(ratio, coef);
+            }
           }
         }
       }
@@ -90,7 +95,7 @@ export function bregmanProjection(
     // Normalize to ensure valid probability distribution
     const sum = vectorSum(mu);
     if (sum > 0) {
-      mu = mu.map((m) => m / sum);
+      mu = mu.map((m): number => m / sum);
     }
 
     // Check convergence
@@ -135,7 +140,10 @@ export function klGradient(mu: number[], theta: number[]): number[] {
   const safeMu = mu.map((m) => Math.max(m, epsilon));
   const safeTheta = theta.map((t) => Math.max(t, epsilon));
 
-  return safeMu.map((m, i) => Math.log(m / safeTheta[i]!) + 1);
+  return safeMu.map((m, i) => {
+    const theta = safeTheta[i];
+    return theta !== undefined ? Math.log(m / theta) + 1 : 1;
+  });
 }
 
 /**
@@ -152,7 +160,7 @@ export function bregmanDivergence(mu: number[], theta: number[]): number {
 export function dualFunctionValue(
   mu: number[],
   theta: number[],
-  constraints: Array<{ coefficients: number[]; rhs: number }>
+  constraints: Constraint[]
 ): number {
   const divergence = klDivergence(mu, theta);
 
@@ -202,7 +210,10 @@ export function computeTradeDirection(
   prices: number[]
 ): number[] {
   // Trade direction: buy when projection > price, sell when projection < price
-  return projection.map((p, i) => p - prices[i]!);
+  return projection.map((p, i) => {
+    const price = prices[i];
+    return price !== undefined ? p - price : p;
+  });
 }
 
 // Helper function

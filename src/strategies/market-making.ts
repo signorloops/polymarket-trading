@@ -85,7 +85,7 @@ export class MarketMakingStrategy extends BaseStrategy {
           ? market.orderBook.getBestBid()?.price ?? fairValue * 0.99
           : market.orderBook.getBestAsk()?.price ?? fairValue * 1.01,
         confidence: 0.8,
-        reason: `Inventory reduction: ${currentInventory} contracts`,
+        reason: `Inventory reduction: ${currentInventory.toString()} contracts`,
         metadata: {
           strategy: 'market-making-inventory',
           fairValue,

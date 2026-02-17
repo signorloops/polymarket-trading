@@ -36,6 +36,19 @@ describe('FrankWolfe', () => {
       // Minimum is at index 0 (value -3)
       expect(vertex).toEqual([1, 0, 0]);
     });
+
+    it('should satisfy independent equality constraints', () => {
+      const gradient = [5, 1, -2, 7];
+      const constraints = [
+        { coefficients: [1, 1, 0, 0], rhs: 1, type: 'equality' as const },
+        { coefficients: [0, 0, 1, 1], rhs: 1, type: 'equality' as const },
+      ];
+
+      const vertex = linearMinimizationOracle(gradient, constraints);
+
+      // For each equality group, choose the coordinate with minimum gradient.
+      expect(vertex).toEqual([0, 1, 1, 0]);
+    });
   });
 
   describe('frankWolfe', () => {

@@ -73,11 +73,11 @@ export class Counter extends Metric {
 
   toPrometheusFormat(): string {
     const lines = [`# HELP ${this.name} ${this.description}`, `# TYPE ${this.name} counter`];
-    for (const [key, point] of this.values) {
+    for (const [, point] of this.values) {
       const labelStr = Object.entries(point.labels)
         .map(([k, v]) => `${k}="${v}"`)
         .join(',');
-      lines.push(`${this.name}{${labelStr}} ${point.value}`);
+      lines.push(`${this.name}{${labelStr}} ${String(point.value)}`);
     }
     return lines.join('\n');
   }
@@ -119,11 +119,11 @@ export class Gauge extends Metric {
 
   toPrometheusFormat(): string {
     const lines = [`# HELP ${this.name} ${this.description}`, `# TYPE ${this.name} gauge`];
-    for (const [key, point] of this.values) {
+    for (const [, point] of this.values) {
       const labelStr = Object.entries(point.labels)
         .map(([k, v]) => `${k}="${v}"`)
         .join(',');
-      lines.push(`${this.name}{${labelStr}} ${point.value}`);
+      lines.push(`${this.name}{${labelStr}} ${String(point.value)}`);
     }
     return lines.join('\n');
   }
@@ -138,7 +138,7 @@ export class Histogram extends Metric {
   private sums: Map<string, number> = new Map();
   private counts_total: Map<string, number> = new Map();
 
-  constructor(name: string, description: string, buckets: number[] = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]) {
+  constructor(name: string, description: string, buckets: readonly number[] = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]) {
     super(name, description);
     this.buckets = [...buckets].sort((a, b) => a - b);
   }
@@ -148,15 +148,20 @@ export class Histogram extends Metric {
 
     // Initialize buckets if needed
     if (!this.counts.has(key)) {
-      this.counts.set(key, new Array(this.buckets.length).fill(0));
+      this.counts.set(key, new Array<number>(this.buckets.length).fill(0));
       this.sums.set(key, 0);
       this.counts_total.set(key, 0);
     }
 
-    const bucketCounts = this.counts.get(key)!;
+    const bucketCounts = this.counts.get(key);
+    if (!bucketCounts) return;
     for (let i = 0; i < this.buckets.length; i++) {
-      if (value <= this.buckets[i]!) {
-        bucketCounts[i]!++;
+      const bucketValue = this.buckets[i];
+      if (bucketValue !== undefined && value <= bucketValue) {
+        const currentCount = bucketCounts[i];
+        if (currentCount !== undefined) {
+          bucketCounts[i] = currentCount + 1;
+        }
       }
     }
 
@@ -168,30 +173,41 @@ export class Histogram extends Metric {
     const lines = [`# HELP ${this.name} ${this.description}`, `# TYPE ${this.name} histogram`];
 
     for (const [key, bucketCounts] of this.counts) {
-      const labelEntries = key
+      const labelEntries: [string, string][] = key
         .split(',')
         .filter((s) => s)
         .map((s) => {
           const [k, v] = s.split('=');
-          return [k, v?.replace(/"/g, '')];
+          return [k ?? '', v?.replace(/"/g, '') ?? ''];
         });
 
       // Output bucket counts
       for (let i = 0; i < this.buckets.length; i++) {
-        const labels = [...labelEntries, ['le', this.buckets[i]!.toString()]]
+        const bucketValue = this.buckets[i];
+        const bucketCount = bucketCounts[i];
+        if (bucketValue === undefined || bucketCount === undefined) continue;
+        const labels = [...labelEntries, ['le', bucketValue.toString()] as [string, string]]
           .map(([k, v]) => `${k}="${v}"`)
           .join(',');
-        lines.push(`${this.name}_bucket{${labels}} ${bucketCounts[i]}`);
+        lines.push(`${this.name}_bucket{${labels}} ${String(bucketCount)}`);
       }
 
       // +Inf bucket
-      const infLabels = [...labelEntries, ['le', '+Inf']].map(([k, v]) => `${k}="${v}"`).join(',');
-      lines.push(`${this.name}_bucket{${infLabels}} ${this.counts_total.get(key)}`);
+      const infLabels = [...labelEntries, ['le', '+Inf'] as [string, string]].map(([k, v]) => `${k}="${v}"`).join(',');
+      const totalCount = this.counts_total.get(key);
+      if (totalCount !== undefined) {
+        lines.push(`${this.name}_bucket{${infLabels}} ${String(totalCount)}`);
+      }
 
       // Sum and count
       const baseLabels = labelEntries.map(([k, v]) => `${k}="${v}"`).join(',');
-      lines.push(`${this.name}_sum{${baseLabels}} ${this.sums.get(key)}`);
-      lines.push(`${this.name}_count{${baseLabels}} ${this.counts_total.get(key)}`);
+      const sumValue = this.sums.get(key);
+      if (sumValue !== undefined) {
+        lines.push(`${this.name}_sum{${baseLabels}} ${String(sumValue)}`);
+      }
+      if (totalCount !== undefined) {
+        lines.push(`${this.name}_count{${baseLabels}} ${String(totalCount)}`);
+      }
     }
 
     return lines.join('\n');
@@ -243,7 +259,7 @@ export function resetRegistry(): void {
 }
 
 // Pre-defined trading metrics
-export let TradingMetrics = {
+export const TradingMetrics = {
   // Order execution metrics
   ordersSubmitted: new Counter('trading_orders_submitted_total', 'Total number of orders submitted'),
   ordersFilled: new Counter('trading_orders_filled_total', 'Total number of orders filled'),
@@ -273,7 +289,7 @@ export let TradingMetrics = {
 } as const;
 
 // Register all trading metrics
-Object.values(TradingMetrics).forEach((metric) => globalRegistry.register(metric));
+Object.values(TradingMetrics).forEach((metric) => { globalRegistry.register(metric); });
 
 /**
  * Record a trade execution

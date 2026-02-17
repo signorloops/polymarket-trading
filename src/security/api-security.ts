@@ -93,7 +93,9 @@ export class ApiKeyManager {
 
     const currentIndex = this.currentKeyId ? availableKeys.indexOf(this.currentKeyId) : -1;
     const nextIndex = (currentIndex + 1) % availableKeys.length;
-    return this.setCurrentKey(availableKeys[nextIndex]!);
+    const nextKey = availableKeys[nextIndex];
+    if (!nextKey) return false;
+    return this.setCurrentKey(nextKey);
   }
 
   /**
@@ -133,7 +135,7 @@ export class RequestSigner {
   sign(payload: Record<string, unknown>): SignedRequest {
     const timestamp = Date.now();
     const payloadStr = JSON.stringify(payload);
-    const dataToSign = `${timestamp}.${payloadStr}`;
+    const dataToSign = `${timestamp.toString()}.${payloadStr}`;
 
     const signature = createHmac('sha256', this.apiSecret)
       .update(dataToSign)
@@ -157,7 +159,7 @@ export class RequestSigner {
       return false;
     }
 
-    const dataToSign = `${timestamp}.${payload}`;
+    const dataToSign = `${timestamp.toString()}.${payload}`;
     const expectedSignature = createHmac('sha256', this.apiSecret)
       .update(dataToSign)
       .digest('hex');
@@ -261,20 +263,20 @@ export class AnomalyDetector {
 
       const zScore = Math.abs(order.size - mean) / (stdDev || 1);
       if (zScore > 3) {
-        reasons.push(`Size ${order.size} is ${zScore.toFixed(1)} std dev from mean`);
+        reasons.push(`Size ${order.size.toString()} is ${zScore.toFixed(1)} std dev from mean`);
         riskScore += 30;
       }
     }
 
     // Check for unusual price
     if (order.price < 0.01 || order.price > 0.99) {
-      reasons.push(`Extreme price: ${order.price}`);
+      reasons.push(`Extreme price: ${order.price.toString()}`);
       riskScore += 20;
     }
 
     // Check large orders
     if (order.size > 10000) {
-      reasons.push(`Large order size: ${order.size}`);
+      reasons.push(`Large order size: ${order.size.toString()}`);
       riskScore += 25;
     }
 

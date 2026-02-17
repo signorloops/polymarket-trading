@@ -3,7 +3,6 @@
  */
 
 import type { OrderBook } from '../market/order-book.js';
-import type { ArbitrageOpportunity } from '../market/arbitrage-detector.js';
 
 export interface StrategyMarketData {
   marketId: string;
@@ -31,7 +30,7 @@ export interface StrategyConfig {
 
 export abstract class BaseStrategy {
   protected config: StrategyConfig;
-  protected lastTradeTime: number = 0;
+  protected lastTradeTime = 0;
   protected name: string;
 
   constructor(name: string, config: Partial<StrategyConfig> = {}) {
