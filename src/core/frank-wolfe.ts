@@ -14,10 +14,11 @@
 import { vectorSubtract, vectorDot, vectorScale, vectorAdd, projectOntoSimplex } from '../utils/math.js';
 import { getLogger } from '../utils/logger.js';
 import { ALGORITHM_CONFIG } from '../utils/config.js';
-import type { FrankWolfeResult, FrankWolfeOptions, Constraint } from './frank-wolfe-types.js';
+import type { FrankWolfeResult, FrankWolfeOptions } from './frank-wolfe-types.js';
 import { lineSearchKL, adaptiveStepSize } from './line-search.js';
 
-export type { FrankWolfeResult, FrankWolfeOptions, Constraint };
+export type { FrankWolfeResult, FrankWolfeOptions };
+export type { Constraint } from './frank-wolfe-types.js';
 export { linearMinimizationOracle } from './lmo.js';
 export { lineSearchKL, adaptiveStepSize } from './line-search.js';
 export { isProfitableArbitrage, computeTradeRecommendation } from './arbitrage-utils.js';

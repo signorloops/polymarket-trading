@@ -288,7 +288,7 @@ export class PolymarketClient {
 let globalClient: PolymarketClient | null = null;
 
 export function getPolymarketClient(apiKey?: string): PolymarketClient {
-  globalClient ??= new PolymarketClient(apiKey);
+  globalClient ??= new PolymarketClient(apiKey ? { apiKey } : undefined);
   return globalClient;
 }
 

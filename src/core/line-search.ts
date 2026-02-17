@@ -51,12 +51,3 @@ export function adaptiveStepSize(iteration: number): number {
   return 2 / (iteration + 2);
 }
 
-/**
- * Fixed step size strategy
- *
- * @param initialStepSize Fixed step size value
- * @returns Constant step size
- */
-export function fixedStepSize(initialStepSize: number): number {
-  return initialStepSize;
-}

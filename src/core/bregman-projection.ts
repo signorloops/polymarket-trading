@@ -17,12 +17,7 @@ import {
 } from '../utils/math.js';
 import { getLogger } from '../utils/logger.js';
 import { ALGORITHM_CONFIG } from '../utils/config.js';
-
-export interface Constraint {
-  coefficients: number[];
-  rhs: number;
-  type: 'equality' | 'inequality';
-}
+import type { Constraint } from './frank-wolfe-types.js';
 
 export interface BregmanProjectionResult {
   /** Projected point (valid probability distribution) */

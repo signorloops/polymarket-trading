@@ -277,8 +277,8 @@ export class ExecutionEngine {
       const response = await this.apiClient.placeOrder({
         marketId: order.marketId,
         side: order.side,
-        size: order.size.toString(),
-        price: order.price.toString(),
+        size: order.size,
+        price: order.price,
         orderType: order.orderType,
         timeInForce: order.timeInForce ?? 'GTC',
       });
