@@ -226,6 +226,76 @@ export function clearWarmStartCache(): void {
   warmStartCache.clear();
 }
 
+// Barrier method constants
+const BARRIER_DEFAULT_ITERATIONS = 5;
+const BARRIER_GAMMA_NUMERATOR = 2;
+const BARRIER_RANDOM_PERTURBATION_SCALE = 0.5;
+
+/**
+ * Create initial barrier point with perturbation
+ * For barrier methods, start slightly away from boundary
+ */
+function createBarrierInitialPoint(dimension: number, epsilon: number): number[] {
+  const barrierUniform = vectorScale(ones(dimension), 1 / dimension);
+
+  // Add small perturbation to avoid exact boundary
+  for (let i = 0; i < dimension; i++) {
+    const randomOffset = epsilon * (Math.random() - BARRIER_RANDOM_PERTURBATION_SCALE);
+    barrierUniform[i] = (barrierUniform[i] ?? 0) + randomOffset;
+  }
+
+  // Renormalize
+  const sum = barrierUniform.reduce((s, x) => s + x, 0);
+  return barrierUniform.map((x) => x / sum);
+}
+
+/**
+ * Find the vertex that minimizes the gradient
+ */
+function findMinGradientVertex(
+  gradient: number[],
+  dimension: number
+): number[] {
+  let minIdx = 0;
+  let minValue = gradient[0] ?? 0;
+
+  for (let i = 1; i < dimension; i++) {
+    const currentValue = gradient[i] ?? 0;
+    if (currentValue < minValue) {
+      minValue = currentValue;
+      minIdx = i;
+    }
+  }
+
+  const s = zeros(dimension);
+  s[minIdx] = 1;
+  return s;
+}
+
+/**
+ * Run conditional gradient iterations with barrier
+ */
+function runBarrierConditionalGradient(
+  initialMu: number[],
+  dimension: number,
+  gradientFn: (mu: number[], epsilon: number) => number[],
+  iterations: number,
+  epsilon: number
+): number[] {
+  let mu = [...initialMu];
+
+  for (let iter = 0; iter < iterations; iter++) {
+    const gradient = gradientFn(mu, epsilon);
+    const s = findMinGradientVertex(gradient, dimension);
+
+    const gamma = BARRIER_GAMMA_NUMERATOR / (iter + 2);
+    mu = vectorAdd(vectorScale(mu, 1 - gamma), vectorScale(s, gamma));
+    mu = projectOntoSimplex(mu);
+  }
+
+  return mu;
+}
+
 /**
  * Initialize with barrier-aware strategy
  * For LMSR markets, use a point away from the boundary
@@ -239,44 +309,16 @@ export function initFWBarrier(
 ): InitFWResult {
   const logger = getLogger().child({ module: 'InitFWBarrier' });
 
-  // For barrier methods, start slightly away from boundary
-  const barrierUniform = vectorScale(ones(dimension), 1 / dimension);
+  const normalized = createBarrierInitialPoint(dimension, epsilon);
+  const iterations = options.initIterations ?? BARRIER_DEFAULT_ITERATIONS;
 
-  // Add small perturbation to avoid exact boundary
-  for (let i = 0; i < dimension; i++) {
-    barrierUniform[i] = (barrierUniform[i] ?? 0) + epsilon * (Math.random() - 0.5);
-  }
-
-  // Renormalize
-  const sum = barrierUniform.reduce((s, x) => s + x, 0);
-  const normalized = barrierUniform.map((x) => x / sum);
-
-  // Run conditional gradient with barrier
-  let mu = [...normalized];
-  const iterations = options.initIterations ?? 5;
-
-  for (let iter = 0; iter < iterations; iter++) {
-    const gradient = gradientFn(mu, epsilon);
-
-    // Find vertex
-    let minIdx = 0;
-    let minValue = gradient[0] ?? 0;
-
-    for (let i = 1; i < dimension; i++) {
-      const currentValue = gradient[i] ?? 0;
-      if (currentValue < minValue) {
-        minValue = currentValue;
-        minIdx = i;
-      }
-    }
-
-    const s = zeros(dimension);
-    s[minIdx] = 1;
-
-    const gamma = 2 / (iter + 2);
-    mu = vectorAdd(vectorScale(mu, 1 - gamma), vectorScale(s, gamma));
-    mu = projectOntoSimplex(mu);
-  }
+  const mu = runBarrierConditionalGradient(
+    normalized,
+    dimension,
+    gradientFn,
+    iterations,
+    epsilon
+  );
 
   const quality = objectiveFn(mu, epsilon);
 

@@ -310,7 +310,21 @@ describe('Utility functions', () => {
   });
 
   describe('hashSensitive', () => {
-    it('should hash data consistently', () => {
+    const originalEnv = process.env.HASH_SALT;
+
+    beforeEach(() => {
+      process.env.HASH_SALT = 'test-salt-for-consistent-hashing';
+    });
+
+    afterEach(() => {
+      if (originalEnv === undefined) {
+        delete process.env.HASH_SALT;
+      } else {
+        process.env.HASH_SALT = originalEnv;
+      }
+    });
+
+    it('should hash data consistently when HASH_SALT is set', () => {
       const hash1 = hashSensitive('secret');
       const hash2 = hashSensitive('secret');
 
@@ -323,6 +337,17 @@ describe('Utility functions', () => {
       const hash2 = hashSensitive('secret2');
 
       expect(hash1).not.toBe(hash2);
+    });
+
+    it('should use random salt when HASH_SALT is not set', () => {
+      delete process.env.HASH_SALT;
+      const hash1 = hashSensitive('secret');
+      const hash2 = hashSensitive('secret');
+
+      // With random salt, same input produces different hashes
+      expect(hash1).not.toBe(hash2);
+      expect(hash1.length).toBe(16);
+      expect(hash2.length).toBe(16);
     });
   });
 });

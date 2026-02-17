@@ -304,9 +304,11 @@ export function generateNonce(): string {
 
 /**
  * Hash sensitive data (for logging)
+ * Uses environment variable HASH_SALT or generates a random salt
  */
 export function hashSensitive(data: string): string {
-  return createHmac('sha256', 'salt')
+  const salt = process.env.HASH_SALT ?? randomBytes(32).toString('hex');
+  return createHmac('sha256', salt)
     .update(data)
     .digest('hex')
     .substring(0, 16);

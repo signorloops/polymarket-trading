@@ -8,6 +8,8 @@ import {
   bregmanDivergence,
   isProfitable,
   estimateProfit,
+  dualFunctionValue,
+  computeTradeDirection,
 } from '../../src/core/bregman-projection.js';
 import { klDivergence } from '../../src/utils/math.js';
 
@@ -153,6 +155,305 @@ describe('Bregman Projection', () => {
       const prices = [0.6, 0.4];
 
       expect(estimateProfit(trade, prices)).toBeCloseTo(0, 10);
+    });
+  });
+
+  describe('Non-convergence scenarios', () => {
+    it('should return converged=false when max iterations reached', () => {
+      const priceVector = [0.6, 0.4];
+      const constraints = [
+        { coefficients: [1, 1], rhs: 1, type: 'equality' as const },
+      ];
+
+      // Use maxIterations=0 to force non-convergence (loop never executes)
+      const result = bregmanProjection(priceVector, constraints, 0, 1e-10);
+
+      expect(result.iterations).toBe(0);
+      expect(result.converged).toBe(false);
+      expect(result.projection).toHaveLength(2);
+      expect(result.divergence).toBeGreaterThanOrEqual(0);
+    });
+
+    it('should handle empty constraints', () => {
+      const priceVector = [0.6, 0.4];
+      const constraints: Array<{ coefficients: number[]; rhs: number; type: 'equality' }> = [];
+
+      const result = bregmanProjection(priceVector, constraints);
+
+      // With no constraints, should still return valid distribution
+      expect(result.projection).toHaveLength(2);
+      expect(result.projection[0]! + result.projection[1]!).toBeCloseTo(1, 5);
+      expect(result.converged).toBe(true);
+    });
+
+    it('should handle constraints with all zero coefficients', () => {
+      const priceVector = [0.6, 0.4];
+      const constraints = [
+        { coefficients: [0, 0], rhs: 1, type: 'equality' as const },
+      ];
+
+      const result = bregmanProjection(priceVector, constraints);
+
+      // Zero coefficients should be filtered out, leaving no constraints
+      expect(result.projection).toHaveLength(2);
+      expect(result.projection[0]! + result.projection[1]!).toBeCloseTo(1, 5);
+    });
+
+    it('should handle inequality constraints (filtered out)', () => {
+      const priceVector = [0.6, 0.4];
+      const constraints = [
+        { coefficients: [1, 1], rhs: 1, type: 'inequality' as const },
+      ];
+
+      const result = bregmanProjection(priceVector, constraints);
+
+      // Inequality constraints should be filtered out
+      expect(result.projection).toHaveLength(2);
+      expect(result.projection[0]! + result.projection[1]!).toBeCloseTo(1, 5);
+    });
+  });
+
+  describe('dualFunctionValue', () => {
+    it('should compute dual value with no constraint violations', () => {
+      const mu = [0.5, 0.5];
+      const theta = [0.6, 0.4];
+      const constraints = [
+        { coefficients: [1, 1], rhs: 1, type: 'equality' as const },
+      ];
+
+      const dualValue = dualFunctionValue(mu, theta, constraints);
+      const expectedDivergence = klDivergence(mu, theta);
+
+      // No violation, so dualValue should equal divergence
+      expect(dualValue).toBeCloseTo(expectedDivergence, 5);
+    });
+
+    it('should subtract penalty for constraint violations', () => {
+      const mu = [0.6, 0.3]; // Sums to 0.9, violating constraint of 1
+      const theta = [0.6, 0.4];
+      const constraints = [
+        { coefficients: [1, 1], rhs: 1, type: 'equality' as const },
+      ];
+
+      const dualValue = dualFunctionValue(mu, theta, constraints);
+      const divergence = klDivergence(mu, theta);
+      const expectedViolation = Math.abs(0.6 + 0.3 - 1); // 0.1
+
+      // Penalty should be subtracted
+      expect(dualValue).toBeCloseTo(divergence - expectedViolation, 5);
+      expect(dualValue).toBeLessThan(divergence);
+    });
+
+    it('should accumulate penalties for multiple constraint violations', () => {
+      const mu = [0.6, 0.4];
+      const theta = [0.6, 0.4];
+      const constraints = [
+        { coefficients: [1, 0], rhs: 0.5, type: 'equality' as const }, // mu[0] should be 0.5
+        { coefficients: [0, 1], rhs: 0.5, type: 'equality' as const }, // mu[1] should be 0.5
+      ];
+
+      const dualValue = dualFunctionValue(mu, theta, constraints);
+      const divergence = klDivergence(mu, theta);
+      const violation1 = Math.abs(0.6 - 0.5); // 0.1
+      const violation2 = Math.abs(0.4 - 0.5); // 0.1
+      const totalPenalty = violation1 + violation2;
+
+      expect(dualValue).toBeCloseTo(divergence - totalPenalty, 5);
+    });
+
+    it('should handle empty constraints array', () => {
+      const mu = [0.5, 0.5];
+      const theta = [0.6, 0.4];
+      const constraints: Array<{ coefficients: number[]; rhs: number; type: 'equality' }> = [];
+
+      const dualValue = dualFunctionValue(mu, theta, constraints);
+      const divergence = klDivergence(mu, theta);
+
+      expect(dualValue).toBeCloseTo(divergence, 5);
+    });
+  });
+
+  describe('computeTradeDirection', () => {
+    it('should compute trade direction for basic case', () => {
+      const projection = [0.6, 0.4];
+      const prices = [0.5, 0.5];
+
+      const direction = computeTradeDirection(projection, prices);
+
+      // Buy when projection > price, sell when projection < price
+      expect(direction[0]).toBeCloseTo(0.1, 5); // 0.6 - 0.5
+      expect(direction[1]).toBeCloseTo(-0.1, 5); // 0.4 - 0.5
+    });
+
+    it('should handle undefined price values', () => {
+      const projection = [0.6, 0.4];
+      const prices = [undefined as unknown as number, 0.5];
+
+      const direction = computeTradeDirection(projection, prices);
+
+      // When price is undefined, use projection value as fallback
+      expect(direction[0]).toBeCloseTo(0.6, 5);
+      expect(direction[1]).toBeCloseTo(-0.1, 5);
+    });
+
+    it('should handle undefined projection values', () => {
+      const projection = [undefined as unknown as number, 0.4];
+      const prices = [0.5, 0.5];
+
+      const direction = computeTradeDirection(projection, prices);
+
+      // When projection is undefined, result should be 0 (fallback to 0)
+      expect(direction[0]).toBe(0);
+      expect(direction[1]).toBeCloseTo(-0.1, 5);
+    });
+
+    it('should handle both undefined values', () => {
+      const projection = [undefined as unknown as number, 0.4];
+      const prices = [undefined as unknown as number, 0.5];
+
+      const direction = computeTradeDirection(projection, prices);
+
+      // When both are undefined, result should be 0
+      expect(direction[0]).toBe(0);
+      expect(direction[1]).toBeCloseTo(-0.1, 5);
+    });
+
+    it('should return zero direction when projection equals prices', () => {
+      const projection = [0.5, 0.5];
+      const prices = [0.5, 0.5];
+
+      const direction = computeTradeDirection(projection, prices);
+
+      expect(direction[0]).toBe(0);
+      expect(direction[1]).toBe(0);
+    });
+  });
+
+  describe('isProfitable edge cases', () => {
+    it('should use minProfit parameter when provided', () => {
+      const divergence = 0.1;
+      const gap = 0.01;
+      const minProfit = 0.2; // Higher than default
+
+      // guaranteedProfit = 0.1 - 0.01 = 0.09, which is less than 0.2
+      expect(isProfitable(divergence, gap, minProfit)).toBe(false);
+    });
+
+    it('should handle zero divergence', () => {
+      expect(isProfitable(0, 0, 0)).toBe(true);
+      expect(isProfitable(0, 0.01, 0)).toBe(false);
+    });
+
+    it('should handle negative guaranteed profit', () => {
+      // When gap > divergence, guaranteed profit is negative
+      expect(isProfitable(0.05, 0.1, 0)).toBe(false);
+    });
+
+    it('should handle very small minProfit threshold', () => {
+      expect(isProfitable(0.001, 0.0001, 0.0005)).toBe(true);
+    });
+  });
+
+  describe('Edge cases with sparse arrays', () => {
+    it('should handle price vector with undefined elements', () => {
+      const priceVector = [undefined as unknown as number, 0.4];
+      const constraints = [
+        { coefficients: [1, 1], rhs: 1, type: 'equality' as const },
+      ];
+
+      const result = bregmanProjection(priceVector, constraints);
+
+      expect(result.projection).toHaveLength(2);
+      expect(result.projection[0]! + result.projection[1]!).toBeCloseTo(1, 5);
+    });
+
+    it('should handle constraint coefficients with sparse indices', () => {
+      const priceVector = [0.6, 0.4];
+      // Create constraint with explicit zeros to test sparse filtering
+      const constraints = [
+        { coefficients: [0, 1], rhs: 0.4, type: 'equality' as const },
+      ];
+
+      const result = bregmanProjection(priceVector, constraints);
+
+      expect(result.projection).toHaveLength(2);
+      expect(result.converged).toBe(true);
+    });
+
+    it('should handle constraint with coefficient exactly at boundary', () => {
+      const priceVector = [0.6, 0.4];
+      // Very small coefficient should still be included
+      const constraints = [
+        { coefficients: [1e-11, 1], rhs: 1, type: 'equality' as const },
+      ];
+
+      const result = bregmanProjection(priceVector, constraints);
+
+      expect(result.projection).toHaveLength(2);
+      expect(result.projection[0]! + result.projection[1]!).toBeCloseTo(1, 5);
+    });
+
+    it('should handle single element price vector', () => {
+      const priceVector = [1];
+      const constraints = [
+        { coefficients: [1], rhs: 1, type: 'equality' as const },
+      ];
+
+      const result = bregmanProjection(priceVector, constraints);
+
+      expect(result.projection).toHaveLength(1);
+      expect(result.projection[0]).toBeCloseTo(1, 5);
+      expect(result.converged).toBe(true);
+    });
+
+    it('should handle large dimension price vector', () => {
+      const n = 100;
+      const priceVector = new Array(n).fill(0).map((_, i) => (i + 1) / (n * (n + 1) / 2));
+      const constraints = [
+        { coefficients: new Array(n).fill(1), rhs: 1, type: 'equality' as const },
+      ];
+
+      const result = bregmanProjection(priceVector, constraints);
+
+      expect(result.projection).toHaveLength(n);
+      const sum = result.projection.reduce((a, b) => a + b, 0);
+      expect(sum).toBeCloseTo(1, 5);
+      expect(result.converged).toBe(true);
+    });
+  });
+
+  describe('klGradient edge cases', () => {
+    it('should handle mu with undefined elements', () => {
+      const mu = [undefined as unknown as number, 0.5];
+      const theta = [0.6, 0.4];
+
+      const gradient = klGradient(mu, theta);
+
+      // Should handle undefined gracefully with epsilon
+      expect(Number.isFinite(gradient[0])).toBe(true);
+      expect(Number.isFinite(gradient[1])).toBe(true);
+    });
+
+    it('should handle theta with undefined elements', () => {
+      const mu = [0.5, 0.5];
+      const theta = [undefined as unknown as number, 0.4];
+
+      const gradient = klGradient(mu, theta);
+
+      // Should handle undefined gracefully with epsilon
+      expect(Number.isFinite(gradient[0])).toBe(true);
+      expect(Number.isFinite(gradient[1])).toBe(true);
+    });
+
+    it('should handle both mu and theta with zero values', () => {
+      const mu = [0, 0];
+      const theta = [0, 0];
+
+      const gradient = klGradient(mu, theta);
+
+      // Should not return Infinity or NaN
+      expect(Number.isFinite(gradient[0])).toBe(true);
+      expect(Number.isFinite(gradient[1])).toBe(true);
     });
   });
 });

@@ -145,9 +145,9 @@ export class ArbitrageDetector {
     // Run Frank-Wolfe
     const fwResult = frankWolfe(
       initResult.initialPoint,
-      (mu) => klDivergence(mu, prices),
-      (mu) => this.computeGradient(mu, prices),
-      (grad) => this.linearMinimizationOracle(grad, constraints),
+      (mu) => klDivergence(Array.from(mu), prices),
+      (mu) => this.computeGradient(Array.from(mu), prices),
+      (grad: number[] | Float64Array) => this.linearMinimizationOracle([...Array.from(grad)], constraints),
       {
         maxIterations: ALGORITHM_CONFIG.MAX_ITERATIONS,
         tolerance: ALGORITHM_CONFIG.CONVERGENCE_THRESHOLD,

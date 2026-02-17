@@ -7,6 +7,7 @@
  */
 
 import { getLogger } from '../utils/logger.js';
+import { Constraint } from './frank-wolfe-types.js';
 
 export interface Market {
   id: string;
@@ -21,12 +22,6 @@ export interface Event {
   outcomes: string[]; // Possible outcomes for this event
 }
 
-export interface PolytopeConstraint {
-  type: 'equality' | 'inequality';
-  coefficients: number[];
-  rhs: number;
-  description: string;
-}
 
 /**
  * MarginalPolytope represents the feasible region for arbitrage trades
@@ -39,7 +34,7 @@ export interface PolytopeConstraint {
 export class MarginalPolytope {
   private events: Map<string, Event>;
   private markets: Map<string, Market>;
-  private constraints: PolytopeConstraint[];
+  private constraints: Constraint[];
   private logger = getLogger().child({ module: 'MarginalPolytope' });
 
   constructor() {
@@ -96,7 +91,7 @@ export class MarginalPolytope {
   /**
    * Get all constraints defining the polytope
    */
-  getConstraints(): PolytopeConstraint[] {
+  getConstraints(): Constraint[] {
     return [...this.constraints];
   }
 
@@ -115,7 +110,7 @@ export class MarginalPolytope {
 
     // Probability sum constraints for each event
     for (const event of this.events.values()) {
-      const coefficients: number[] = new Array(n).fill(0) as number[];
+      const coefficients = Array.from<number>({ length: n }).fill(0);
 
       for (const market of event.markets) {
         const idx = marketList.findIndex(m => m.id === market.id);
@@ -128,37 +123,30 @@ export class MarginalPolytope {
         type: 'equality',
         coefficients,
         rhs: 1,
-        description: `Event ${event.id}: probability sum = 1`,
       });
     }
 
     // Non-negativity constraints
     for (let i = 0; i < n; i++) {
-      const coefficients: number[] = new Array(n).fill(0) as number[];
+      const coefficients = Array.from<number>({ length: n }).fill(0);
       coefficients[i] = 1;
-      const market = marketList[i];
-      if (market === undefined) continue;
 
       this.constraints.push({
         type: 'inequality',
         coefficients,
         rhs: 0,
-        description: `Market ${market.id}: non-negative`,
       });
     }
 
     // Upper bound constraints (probabilities <= 1)
     for (let i = 0; i < n; i++) {
-      const coefficients: number[] = new Array(n).fill(0) as number[];
+      const coefficients = Array.from<number>({ length: n }).fill(0);
       coefficients[i] = -1;
-      const market = marketList[i];
-      if (market === undefined) continue;
 
       this.constraints.push({
         type: 'inequality',
         coefficients,
         rhs: -1,
-        description: `Market ${market.id}: upper bound`,
       });
     }
 
@@ -174,11 +162,7 @@ export class MarginalPolytope {
     }
 
     for (const constraint of this.constraints) {
-      const value = constraint.coefficients.reduce((sum, c, i) => {
-        const pointValue = point[i];
-        if (pointValue === undefined) return sum;
-        return sum + c * pointValue;
-      }, 0);
+      const value = constraint.coefficients.reduce((sum, c, i) => sum + c * (point[i] ?? 0), 0);
 
       if (constraint.type === 'equality') {
         if (Math.abs(value - constraint.rhs) > tolerance) {
@@ -212,19 +196,15 @@ export class MarginalPolytope {
       for (const market of event.markets) {
         const idx = marketList.findIndex(m => m.id === market.id);
         if (idx >= 0) {
-          const resultValue = result[idx];
-          if (resultValue !== undefined) {
-            sum += resultValue;
-          }
+          sum += result[idx] ?? 0;
           indices.push(idx);
         }
       }
 
       if (sum > 0) {
         for (const idx of indices) {
-          const currentValue = result[idx];
-          if (currentValue !== undefined) {
-            result[idx] = currentValue / sum;
+          if (result[idx] !== undefined) {
+            result[idx] /= sum;
           }
         }
       }
@@ -247,14 +227,14 @@ export class MarginalPolytope {
    */
   getBarycenter(): number[] {
     const n = this.getDimension();
-    return new Array(n).fill(1 / n) as number[];
+    return new Array<number>(n).fill(1 / n);
   }
 
   /**
    * Check for simple arbitrage opportunities
    * Returns true if YES + NO prices != 1 (within tolerance)
    */
-  detectSimpleArbitrage(tolerance = 0.01) {
+  detectSimpleArbitrage(tolerance = 0.01): { eventId: string; deviation: number }[] {
     const opportunities: { eventId: string; deviation: number }[] = [];
 
     for (const event of this.events.values()) {
