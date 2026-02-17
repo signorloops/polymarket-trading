@@ -6,7 +6,6 @@
  */
 
 import { BaseStrategy, type StrategyMarketData, type TradeSignal, type StrategyConfig } from './base.js';
-import type { ArbitrageOpportunity } from '../market/arbitrage-detector.js';
 
 export interface SimpleArbitrageConfig extends StrategyConfig {
   /** Minimum profit threshold ($) */
@@ -25,7 +24,7 @@ export interface SimpleArbitrageOpportunity {
   noPrice: number;
   impliedProbability: number;
   profit: number;
-  tradeDirection: 'buy_yes' | 'buy_no';
+  tradeDirection: 'buy_pair' | 'sell_pair';
 }
 
 export class SimpleArbitrageStrategy extends BaseStrategy {
@@ -56,17 +55,32 @@ export class SimpleArbitrageStrategy extends BaseStrategy {
 
     this.recordTrade();
 
-    const marketId = opportunity.tradeDirection === 'buy_yes'
-      ? opportunity.yesMarketId
-      : opportunity.noMarketId;
+    const size = this.calculatePositionSize(opportunity);
+    const isBuyPair = opportunity.tradeDirection === 'buy_pair';
+    const marketId = isBuyPair
+      ? (opportunity.yesPrice <= opportunity.noPrice ? opportunity.yesMarketId : opportunity.noMarketId)
+      : (opportunity.yesPrice >= opportunity.noPrice ? opportunity.yesMarketId : opportunity.noMarketId);
+
+    const pairedLegs = [
+      {
+        marketId: opportunity.yesMarketId,
+        side: isBuyPair ? 'buy' as const : 'sell' as const,
+        size,
+        price: opportunity.yesPrice,
+      },
+      {
+        marketId: opportunity.noMarketId,
+        side: isBuyPair ? 'buy' as const : 'sell' as const,
+        size,
+        price: opportunity.noPrice,
+      },
+    ];
 
     return {
-      type: 'buy',
+      type: isBuyPair ? 'buy' : 'sell',
       marketId,
-      size: this.calculatePositionSize(opportunity),
-      price: opportunity.tradeDirection === 'buy_yes'
-        ? opportunity.yesPrice
-        : opportunity.noPrice,
+      size,
+      price: marketId === opportunity.yesMarketId ? opportunity.yesPrice : opportunity.noPrice,
       confidence,
       reason: `Simple arbitrage: ${opportunity.tradeDirection}, profit=${opportunity.profit.toFixed(4)}`,
       metadata: {
@@ -75,6 +89,7 @@ export class SimpleArbitrageStrategy extends BaseStrategy {
         noPrice: opportunity.noPrice,
         impliedProbability: opportunity.impliedProbability,
         expectedProfit: opportunity.profit,
+        pairedLegs,
       },
     };
   }
@@ -86,7 +101,7 @@ export class SimpleArbitrageStrategy extends BaseStrategy {
     // Group markets by event (assuming YES/NO naming convention)
     const pairs = this.groupByEvent(data);
 
-    for (const [eventId, markets] of pairs) {
+    for (const [, markets] of pairs) {
       if (markets.yes && markets.no) {
         const yesPrice = this.getBestAsk(markets.yes);
         const noPrice = this.getBestAsk(markets.no);
@@ -104,7 +119,7 @@ export class SimpleArbitrageStrategy extends BaseStrategy {
             noPrice,
             impliedProbability: yesPrice / sum,
             profit: 1 - sum,
-            tradeDirection: 'buy_yes', // Buy the cheaper one
+            tradeDirection: 'buy_pair',
           };
         }
 
@@ -122,7 +137,7 @@ export class SimpleArbitrageStrategy extends BaseStrategy {
               noPrice: noBid,
               impliedProbability: yesBid / bidSum,
               profit: bidSum - 1,
-              tradeDirection: 'buy_no',
+              tradeDirection: 'sell_pair',
             };
           }
         }

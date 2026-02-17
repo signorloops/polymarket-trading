@@ -8,16 +8,15 @@
  * Uses the marginal polytope framework to detect and score arbitrage opportunities.
  */
 
-import { MarginalPolytope, Market, Event } from '../core/marginal-polytope.js';
+import { MarginalPolytope, Event } from '../core/marginal-polytope.js';
+import { BregmanProjectionResult } from '../core/bregman-projection.js';
 import {
-  bregmanProjection,
-  isProfitable,
-  computeTradeDirection,
-  BregmanProjectionResult,
-} from '../core/bregman-projection.js';
-import { frankWolfe, isProfitableArbitrage, computeTradeRecommendation } from '../core/frank-wolfe.js';
+  frankWolfe,
+  isProfitableArbitrage,
+  linearMinimizationOracle as fwLinearMinimizationOracle,
+} from '../core/frank-wolfe.js';
 import { initFW } from '../core/init-fw.js';
-import { vectorSubtract, vectorDot, klDivergence, vectorScale } from '../utils/math.js';
+import { vectorSubtract, klDivergence } from '../utils/math.js';
 import { getLogger } from '../utils/logger.js';
 import { ALGORITHM_CONFIG } from '../utils/config.js';
 import { OrderBook } from './order-book.js';
@@ -82,7 +81,7 @@ export class ArbitrageDetector {
    * Detect single-market arbitrage opportunities
    * Returns opportunities where YES + NO ≠ 1
    */
-  detectSingleMarketArbitrage(tolerance: number = 0.01): SingleMarketArbitrage[] {
+  detectSingleMarketArbitrage(tolerance = 0.01): SingleMarketArbitrage[] {
     const opportunities: SingleMarketArbitrage[] = [];
     const events = this.getEventsFromPolytope();
 
@@ -146,9 +145,9 @@ export class ArbitrageDetector {
     // Run Frank-Wolfe
     const fwResult = frankWolfe(
       initResult.initialPoint,
-      (mu) => klDivergence(mu, prices),
-      (mu) => this.computeGradient(mu, prices),
-      (grad) => this.linearMinimizationOracle(grad, constraints),
+      (mu) => klDivergence(Array.from(mu), prices),
+      (mu) => this.computeGradient(Array.from(mu), prices),
+      (grad: number[] | Float64Array) => this.linearMinimizationOracle([...Array.from(grad)], constraints),
       {
         maxIterations: ALGORITHM_CONFIG.MAX_ITERATIONS,
         tolerance: ALGORITHM_CONFIG.CONVERGENCE_THRESHOLD,
@@ -192,7 +191,7 @@ export class ArbitrageDetector {
     const singleMarket = this.detectSingleMarketArbitrage();
     for (const arb of singleMarket) {
       opportunities.push({
-        id: `single-${arb.eventId}-${timestamp}`,
+        id: `single-${arb.eventId}-${String(timestamp)}`,
         type: 'single-market',
         markets: [arb.yesMarketId, arb.noMarketId],
         expectedProfit: arb.profitPotential,
@@ -208,7 +207,7 @@ export class ArbitrageDetector {
     const crossMarket = this.detectCrossMarketArbitrage();
     if (crossMarket) {
       opportunities.push({
-        id: `cross-${crossMarket.markets.join('-')}-${timestamp}`,
+        id: `cross-${crossMarket.markets.join('-')}-${String(timestamp)}`,
         type: 'cross-market',
         markets: crossMarket.markets,
         expectedProfit: crossMarket.divergence,
@@ -266,31 +265,17 @@ export class ArbitrageDetector {
     const epsilon = 1e-10;
     return mu.map((m, i) => {
       const safeMu = Math.max(m, epsilon);
-      const safeTheta = Math.max(theta[i]!, epsilon);
+      const thetaValue = theta[i];
+      const safeTheta = thetaValue === undefined ? epsilon : Math.max(thetaValue, epsilon);
       return Math.log(safeMu / safeTheta) + 1;
     });
   }
 
   private linearMinimizationOracle(
     gradient: number[],
-    constraints: Array<{ coefficients: number[]; rhs: number; type: 'equality' | 'inequality' }>
+    constraints: { coefficients: number[]; rhs: number; type: 'equality' | 'inequality' }[]
   ): number[] {
-    const n = gradient.length;
-    const vertex = new Array(n).fill(0);
-
-    // Find minimum gradient component
-    let minIdx = 0;
-    let minValue = gradient[0]!;
-
-    for (let i = 1; i < n; i++) {
-      if (gradient[i]! < minValue) {
-        minValue = gradient[i]!;
-        minIdx = i;
-      }
-    }
-
-    vertex[minIdx] = 1;
-    return vertex;
+    return fwLinearMinimizationOracle(gradient, constraints);
   }
 
   private computeSingleMarketTrade(arb: SingleMarketArbitrage): number[] {
@@ -321,7 +306,10 @@ export class ArbitrageDetector {
         });
       }
 
-      eventMap.get(eventId)!.markets.push(market);
+      const event = eventMap.get(eventId);
+      if (event) {
+        event.markets.push(market);
+      }
     }
 
     return Array.from(eventMap.values());
@@ -334,9 +322,7 @@ export class ArbitrageDetector {
 let globalDetector: ArbitrageDetector | null = null;
 
 export function getArbitrageDetector(): ArbitrageDetector {
-  if (!globalDetector) {
-    globalDetector = new ArbitrageDetector();
-  }
+  globalDetector ??= new ArbitrageDetector();
   return globalDetector;
 }
 

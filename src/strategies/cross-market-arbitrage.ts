@@ -7,7 +7,6 @@
 
 import { BaseStrategy, type StrategyMarketData, type TradeSignal, type StrategyConfig } from './base.js';
 import { MarketDependencyGraph } from '../market/dependency-graph.js';
-import { bregmanProjection } from '../core/bregman-projection.js';
 import { frankWolfe, type FrankWolfeResult } from '../core/frank-wolfe.js';
 import { klDivergence } from '../utils/math.js';
 
@@ -66,8 +65,11 @@ export class CrossMarketArbitrageStrategy extends BaseStrategy {
     const primaryMarket = data[maxIdx];
     if (!primaryMarket) return null;
 
-    const direction = opportunity.tradeVector[maxIdx]! > 0 ? 'buy' : 'sell';
-    const size = Math.abs(opportunity.tradeVector[maxIdx]!);
+    const tradeValue = opportunity.tradeVector[maxIdx];
+    if (tradeValue === undefined) return null;
+
+    const direction = tradeValue > 0 ? 'buy' : 'sell';
+    const size = Math.abs(tradeValue);
 
     return {
       type: direction,
@@ -75,7 +77,7 @@ export class CrossMarketArbitrageStrategy extends BaseStrategy {
       size: Math.min(size, this.config.maxPositionSize ?? 1000),
       price: primaryMarket.lastPrice,
       confidence: opportunity.confidence,
-      reason: `Cross-market arbitrage: profit=${opportunity.expectedProfit.toFixed(4)}, markets=${opportunity.markets.length}`,
+      reason: `Cross-market arbitrage: profit=${opportunity.expectedProfit.toFixed(4)}, markets=${opportunity.markets.length.toString()}`,
       metadata: {
         arbitrageType: 'cross-market',
         tradeVector: opportunity.tradeVector,
@@ -104,36 +106,40 @@ export class CrossMarketArbitrageStrategy extends BaseStrategy {
     }
 
     // Build constraints from dependency graph
-    const constraintMatrix = this.dependencyGraph.buildConstraintMatrix();
-    const constraints = constraintMatrix.types.map((type, i) => ({
-      coefficients: constraintMatrix.coefficients[i]!,
-      rhs: constraintMatrix.rhs[i]!,
-      type,
-    }));
+    this.dependencyGraph.buildConstraintMatrix();
 
     // Get current prices as theta
     const theta = data.map((m) => m.lastPrice);
 
     // Objective function: KL divergence
-    const objectiveFn = (mu: number[]): number => klDivergence(mu, theta);
+    const objectiveFn = (mu: number[] | Float64Array): number => klDivergence(Array.from(mu), theta);
 
     // Gradient function
-    const gradientFn = (mu: number[]): number[] => {
+    const gradientFn = (mu: number[] | Float64Array): number[] => {
       const epsilon = 1e-10;
-      return mu.map((m, i) => Math.log(Math.max(m, epsilon) / Math.max(theta[i]!, epsilon)) + 1);
+      return Array.from(mu).map((m, i) => {
+        const thetaVal = theta[i];
+        if (thetaVal === undefined) return 1;
+        return Math.log(Math.max(m, epsilon) / Math.max(thetaVal, epsilon)) + 1;
+      });
     };
 
     // Linear minimization oracle with constraints
-    const lmoFn = (grad: number[]): number[] => {
-      const n = grad.length;
-      const vertex = new Array(n).fill(0);
+    const lmoFn = (grad: number[] | Float64Array): number[] => {
+      const gradArray = Array.from(grad);
+      const n = gradArray.length;
+      const vertex: number[] = new Array<number>(n).fill(0);
 
       // Simplex constraint: sum = 1
       let minIdx = 0;
-      let minValue = grad[0]!;
+      const firstGrad = gradArray[0];
+      if (firstGrad === undefined) return vertex;
+      let minValue = firstGrad;
       for (let i = 1; i < n; i++) {
-        if (grad[i]! < minValue) {
-          minValue = grad[i]!;
+        const gradVal = gradArray[i];
+        if (gradVal === undefined) continue;
+        if (gradVal < minValue) {
+          minValue = gradVal;
           minIdx = i;
         }
       }
@@ -142,7 +148,7 @@ export class CrossMarketArbitrageStrategy extends BaseStrategy {
     };
 
     // Initial point
-    const initialMu = new Array(theta.length).fill(1 / theta.length);
+    const initialMu: number[] = new Array<number>(theta.length).fill(1 / theta.length);
 
     // Run Frank-Wolfe optimization
     const result = frankWolfe(initialMu, objectiveFn, gradientFn, lmoFn, {
@@ -160,7 +166,11 @@ export class CrossMarketArbitrageStrategy extends BaseStrategy {
     }
 
     // Calculate trade vector (difference from current prices)
-    const tradeVector = result.mu.map((m, i) => (m - theta[i]!) * 100);
+    const tradeVector = result.mu.map((m, i) => {
+      const thetaVal = theta[i];
+      if (thetaVal === undefined) return 0;
+      return (m - thetaVal) * 100;
+    });
 
     // Confidence based on convergence and profit
     const confidence = Math.min(

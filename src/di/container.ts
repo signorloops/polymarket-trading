@@ -9,7 +9,6 @@ import { getLogger, Logger } from '../utils/logger.js';
 import type { AppConfig } from '../utils/config-schema.js';
 import { createDefaultConfig } from '../utils/config-schema.js';
 
-type Constructor<T> = new (...args: unknown[]) => T;
 type Factory<T> = (container: Container) => T;
 
 interface Registration<T> {
@@ -48,7 +47,7 @@ export class Container {
   /**
    * Register an instance directly
    */
-  registerInstance<T>(token: string, instance: T): this {
+  registerInstance(token: string, instance: unknown): this {
     this.instances.set(token, instance);
     this.logger.debug(`Registered instance: ${token}`);
     return this;
@@ -57,11 +56,11 @@ export class Container {
   /**
    * Resolve a service by token
    */
-  resolve<T>(token: string): T {
+  resolve(token: string): unknown {
     // Return existing instance
     const existing = this.instances.get(token);
     if (existing) {
-      return existing as T;
+      return existing;
     }
 
     // Create from factory
@@ -76,7 +75,7 @@ export class Container {
       this.instances.set(token, instance);
     }
 
-    return instance as T;
+    return instance;
   }
 
   /**
@@ -139,8 +138,7 @@ export function createContainer(config?: AppConfig): Container {
   container.registerInstance(Tokens.Config, appConfig);
 
   // Register logger
-  container.registerSingleton(Tokens.Logger, (c) => {
-    const cfg = c.resolve<AppConfig>(Tokens.Config);
+  container.registerSingleton(Tokens.Logger, () => {
     return getLogger().child({ module: 'App' });
   });
 
@@ -148,9 +146,7 @@ export function createContainer(config?: AppConfig): Container {
 }
 
 export function getContainer(): Container {
-  if (!globalContainer) {
-    globalContainer = createContainer();
-  }
+  globalContainer ??= createContainer();
   return globalContainer;
 }
 

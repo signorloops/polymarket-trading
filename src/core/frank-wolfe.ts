@@ -11,97 +11,99 @@
  * - LMO: Find vertex v that minimizes ⟨∇f(μ), v⟩
  */
 
-import {
-  vectorSubtract,
-  vectorDot,
-  vectorScale,
-  vectorAdd,
-  klDivergence,
-  vectorLog,
-  vectorExp,
-  clip,
-  projectOntoSimplex,
-} from '../utils/math.js';
+import { projectOntoSimplex } from '../utils/math.js';
 import { getLogger } from '../utils/logger.js';
 import { ALGORITHM_CONFIG } from '../utils/config.js';
+import type { FrankWolfeResult, FrankWolfeOptions } from './frank-wolfe-types.js';
+import { lineSearchKL, adaptiveStepSize } from './line-search.js';
 
-export interface FrankWolfeResult {
-  /** Optimal point */
-  mu: number[];
-  /** Objective value (KL divergence) */
-  objective: number;
-  /** Frank-Wolfe gap (optimality measure) */
-  gap: number;
-  /** Number of iterations */
-  iterations: number;
-  /** Whether converged */
-  converged: boolean;
-  /** History of objective values */
-  history: number[];
-}
-
-export interface FrankWolfeOptions {
-  maxIterations?: number;
-  tolerance?: number;
-  stepSize?: 'line-search' | 'fixed' | 'adaptive';
-  initialStepSize?: number;
-  verbose?: boolean;
-}
+export type { FrankWolfeResult, FrankWolfeOptions };
+export type { Constraint } from './frank-wolfe-types.js';
+export { linearMinimizationOracle } from './lmo.js';
+export { lineSearchKL, adaptiveStepSize } from './line-search.js';
+export { isProfitableArbitrage, computeTradeRecommendation } from './arbitrage-utils.js';
 
 /**
- * Linear Minimization Oracle (LMO)
- * Finds the vertex of the polytope that minimizes the inner product with gradient
- *
- * For the marginal polytope, vertices correspond to deterministic outcomes
- *
- * @param gradient Current gradient
- * @param constraints Polytope constraints
- * @returns Vertex minimizing ⟨gradient, v⟩
+ * Object pool for reusing Float64Array buffers
+ * Reduces GC pressure in tight loops
  */
-export function linearMinimizationOracle(
-  gradient: number[],
-  constraints: Array<{ coefficients: number[]; rhs: number; type: 'equality' | 'inequality' }>
-): number[] {
-  const n = gradient.length;
+export class Float64ArrayPool {
+  private pool: Float64Array[] = [];
+  private size: number;
+  private maxPoolSize: number;
 
-  // For a simplex constraint (sum = 1, all >= 0), the LMO picks the
-  // coordinate with minimum gradient component
-  if (n === 0) {
-    throw new Error('Empty gradient array');
+  constructor(size: number, maxPoolSize = 10) {
+    this.size = size;
+    this.maxPoolSize = maxPoolSize;
   }
 
-  const vertex = new Array(n).fill(0);
-  let minIdx = 0;
-  let minValue = gradient[0]!;
+  acquire(): Float64Array {
+    const arr = this.pool.pop();
+    if (arr !== undefined) {
+      arr.fill(0);
+      return arr;
+    }
+    return new Float64Array(this.size);
+  }
 
-  for (let i = 1; i < n; i++) {
-    if (gradient[i]! < minValue) {
-      minValue = gradient[i]!;
-      minIdx = i;
+  release(arr: Float64Array): void {
+    if (this.pool.length < this.maxPoolSize) {
+      this.pool.push(arr);
     }
   }
 
-  vertex[minIdx] = 1;
-  return vertex;
+  releaseMultiple(arrays: Float64Array[]): void {
+    for (const arr of arrays) {
+      this.release(arr);
+    }
+  }
 }
 
 /**
- * Standard Frank-Wolfe algorithm
+ * In-place vector operations to reduce memory allocation
+ */
+export function copyTo(target: Float64Array, source: number[] | Float64Array): void {
+  for (let i = 0; i < source.length; i++) {
+    target[i] = source[i] ?? 0;
+  }
+}
+
+export function addScaledInPlace(
+  result: Float64Array,
+  a: Float64Array,
+  b: Float64Array,
+  scaleA: number,
+  scaleB: number
+): void {
+  for (let i = 0; i < result.length; i++) {
+    result[i] = (a[i] ?? 0) * scaleA + (b[i] ?? 0) * scaleB;
+  }
+}
+
+export function subtractInPlace(result: Float64Array, a: Float64Array, b: Float64Array): void {
+  for (let i = 0; i < result.length; i++) {
+    result[i] = (a[i] ?? 0) - (b[i] ?? 0);
+  }
+}
+
+export function dot(a: Float64Array, b: Float64Array): number {
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) {
+    sum += (a[i] ?? 0) * (b[i] ?? 0);
+  }
+  return sum;
+}
+
+/**
+ * Standard Frank-Wolfe algorithm with memory optimization
  *
- * Solves: min_{μ ∈ M} f(μ) where f is convex and M is the marginal polytope
- *
- * @param initialMu Initial point
- * @param objectiveFn Objective function
- * @param gradientFn Gradient function
- * @param lmoFn Linear minimization oracle
- * @param options Algorithm options
- * @returns Optimization result
+ * Uses Float64Array and object pooling to reduce GC pressure
  */
 export function frankWolfe(
   initialMu: number[],
-  objectiveFn: (mu: number[]) => number,
-  gradientFn: (mu: number[]) => number[],
-  lmoFn: (grad: number[]) => number[],
+  objectiveFn: (mu: number[] | Float64Array) => number,
+  gradientFn: (mu: number[] | Float64Array) => number[],
+  lmoFn: (grad: number[] | Float64Array) => number[],
   options: FrankWolfeOptions = {}
 ): FrankWolfeResult {
   const logger = getLogger().child({ module: 'FrankWolfe' });
@@ -113,103 +115,115 @@ export function frankWolfe(
     verbose = false,
   } = options;
 
-  let mu = [...initialMu];
+  const n = initialMu.length;
+  const pool = new Float64ArrayPool(n, 5);
+
+  // Allocate working arrays
+  let mu: Float64Array = new Float64Array(initialMu);
   const history: number[] = [];
+
+  // Reusable buffers
+  const s = pool.acquire();
+  const gradient = pool.acquire();
+  const tempDiff = pool.acquire();
+  let tempMu = pool.acquire();
 
   logger.debug('Starting Frank-Wolfe', { maxIterations, tolerance, stepSize });
 
-  for (let iter = 0; iter < maxIterations; iter++) {
-    // Compute objective and gradient
-    const objective = objectiveFn(mu);
-    const gradient = gradientFn(mu);
-    history.push(objective);
+  try {
+    for (let iter = 0; iter < maxIterations; iter++) {
+      // Compute objective and gradient
+      const objective = objectiveFn(mu);
+      const gradArray = gradientFn(mu);
+      copyTo(gradient, gradArray);
+      history.push(objective);
 
-    // Linear Minimization Oracle
-    const s = lmoFn(gradient);
+      // Linear Minimization Oracle
+      const sArray = lmoFn(gradient);
+      copyTo(s, sArray);
 
-    // Compute Frank-Wolfe gap
-    const gap = vectorDot(gradient, vectorSubtract(mu, s));
+      // Compute Frank-Wolfe gap
+      subtractInPlace(tempDiff, mu, s);
+      const gap = dot(gradient, tempDiff);
 
-    if (verbose && iter % 10 === 0) {
-      logger.debug(`Iteration ${iter}`, { objective, gap });
+      if (verbose && iter % 10 === 0) {
+        logger.debug('Iteration ' + String(iter), { objective, gap });
+      }
+
+      // Check convergence
+      if (gap <= tolerance * (1 - ALGORITHM_CONFIG.ALPHA) * objective) {
+        logger.debug('Frank-Wolfe converged', {
+          iterations: iter + 1,
+          objective,
+          gap,
+        });
+
+        return {
+          mu: Array.from(mu),
+          objective,
+          gap,
+          iterations: iter + 1,
+          converged: true,
+          history,
+        };
+      }
+
+      // Compute step size
+      let gamma: number;
+      if (stepSize === 'line-search') {
+        gamma = lineSearchKL(Array.from(mu), Array.from(s), gradArray);
+      } else if (stepSize === 'adaptive') {
+        gamma = adaptiveStepSize(iter);
+      } else {
+        gamma = options.initialStepSize ?? 0.1;
+      }
+
+      // Update
+      addScaledInPlace(tempMu, mu, s, 1 - gamma, gamma);
+      [mu, tempMu] = [tempMu, mu];
+
+      // Ensure feasibility
+      const projected = projectOntoSimplex(Array.from(mu));
+      copyTo(mu, projected);
     }
 
-    // Check convergence (α-extraction criterion)
-    if (gap <= tolerance * (1 - ALGORITHM_CONFIG.ALPHA) * objective) {
-      logger.debug('Frank-Wolfe converged', {
-        iterations: iter + 1,
-        objective,
-        gap,
-      });
+    // Max iterations reached
+    const finalObjective = objectiveFn(mu);
+    const finalGradient = gradientFn(mu);
+    const finalS = lmoFn(finalGradient);
 
-      return {
-        mu,
-        objective,
-        gap,
-        iterations: iter + 1,
-        converged: true,
-        history,
-      };
-    }
+    copyTo(gradient, finalGradient);
+    copyTo(s, finalS);
+    subtractInPlace(tempDiff, mu, s);
+    const finalGap = dot(gradient, tempDiff);
 
-    // Compute step size
-    let gamma: number;
-    if (stepSize === 'line-search') {
-      // Exact line search for KL divergence
-      gamma = lineSearchKL(mu, s, gradient);
-    } else if (stepSize === 'adaptive') {
-      gamma = 2 / (iter + 2);
-    } else {
-      gamma = options.initialStepSize ?? 0.1;
-    }
+    logger.warn('Frank-Wolfe reached max iterations', {
+      iterations: maxIterations,
+      objective: finalObjective,
+      gap: finalGap,
+    });
 
-    // Update: μ_{t+1} = (1 - γ) * μ_t + γ * s
-    mu = vectorAdd(vectorScale(mu, 1 - gamma), vectorScale(s, gamma));
-
-    // Ensure feasibility (project onto simplex if needed)
-    mu = projectOntoSimplex(mu);
+    return {
+      mu: Array.from(mu),
+      objective: finalObjective,
+      gap: finalGap,
+      iterations: maxIterations,
+      converged: false,
+      history,
+    };
+  } finally {
+    pool.releaseMultiple([s, gradient, tempDiff, tempMu]);
   }
-
-  // Max iterations reached
-  const finalObjective = objectiveFn(mu);
-  const finalGradient = gradientFn(mu);
-  const finalS = lmoFn(finalGradient);
-  const finalGap = vectorDot(finalGradient, vectorSubtract(mu, finalS));
-
-  logger.warn('Frank-Wolfe reached max iterations', {
-    iterations: maxIterations,
-    objective: finalObjective,
-    gap: finalGap,
-  });
-
-  return {
-    mu,
-    objective: finalObjective,
-    gap: finalGap,
-    iterations: maxIterations,
-    converged: false,
-    history,
-  };
 }
 
 /**
- * Barrier Frank-Wolfe with adaptive shrinkage
- *
- * Handles LMSR (Logarithmic Market Scoring Rule) gradient explosion
- * by using a barrier function that shrinks adaptively.
- *
- * @param initialMu Initial point
- * @param objectiveFn Objective function
- * @param gradientFn Gradient function with barrier
- * @param lmoFn Linear minimization oracle
- * @param options Algorithm options
- * @returns Optimization result
+ * Barrier Frank-Wolfe with adaptive shrinkage and memory optimization
  */
 export function barrierFrankWolfe(
   initialMu: number[],
-  objectiveFn: (mu: number[], epsilon: number) => number,
-  gradientFn: (mu: number[], epsilon: number) => number[],
-  lmoFn: (grad: number[]) => number[],
+  objectiveFn: (mu: number[] | Float64Array, epsilon: number) => number,
+  gradientFn: (mu: number[] | Float64Array, epsilon: number) => number[],
+  lmoFn: (grad: number[] | Float64Array) => number[],
   options: FrankWolfeOptions & { initialEpsilon?: number } = {}
 ): FrankWolfeResult {
   const logger = getLogger().child({ module: 'BarrierFrankWolfe' });
@@ -221,9 +235,18 @@ export function barrierFrankWolfe(
     verbose = false,
   } = options;
 
-  let mu = [...initialMu];
+  const n = initialMu.length;
+  const pool = new Float64ArrayPool(n, 5);
+
+  let mu: Float64Array = new Float64Array(initialMu);
   let epsilon = initialEpsilon;
   const history: number[] = [];
+
+  const s = pool.acquire();
+  const gradient = pool.acquire();
+  const gradientNoBarrier = pool.acquire();
+  const tempDiff = pool.acquire();
+  let tempMu = pool.acquire();
 
   logger.debug('Starting Barrier Frank-Wolfe', {
     maxIterations,
@@ -231,134 +254,83 @@ export function barrierFrankWolfe(
     initialEpsilon,
   });
 
-  for (let iter = 0; iter < maxIterations; iter++) {
-    // Compute objective and gradient with current epsilon
-    const objective = objectiveFn(mu, epsilon);
-    const gradient = gradientFn(mu, epsilon);
-    history.push(objective);
+  try {
+    for (let iter = 0; iter < maxIterations; iter++) {
+      const objective = objectiveFn(mu, epsilon);
+      const gradArray = gradientFn(mu, epsilon);
+      copyTo(gradient, gradArray);
+      history.push(objective);
 
-    // Linear Minimization Oracle
-    const s = lmoFn(gradient);
+      const sArray = lmoFn(gradient);
+      copyTo(s, sArray);
 
-    // Compute gaps
-    const gap = vectorDot(gradient, vectorSubtract(mu, s));
-    const gapU = vectorDot(gradientFn(mu, 0), vectorSubtract(mu, s));
+      subtractInPlace(tempDiff, mu, s);
+      const gap = dot(gradient, tempDiff);
 
-    // Adaptive epsilon shrinkage
-    if (gapU < 0 && gap / (-4 * gapU) < epsilon) {
-      epsilon = Math.min(gap / (-4 * gapU), epsilon / 2);
-      logger.debug(`Shrinking epsilon to ${epsilon}`, { iteration: iter });
+      const gradNoBarrierArray = gradientFn(mu, 0);
+      copyTo(gradientNoBarrier, gradNoBarrierArray);
+      const gapU = dot(gradientNoBarrier, tempDiff);
+
+      if (gapU < 0 && gap / (-4 * gapU) < epsilon) {
+        epsilon = Math.min(gap / (-4 * gapU), epsilon / 2);
+        logger.debug('Shrinking epsilon to ' + String(epsilon), { iteration: iter });
+      }
+
+      if (verbose && iter % 10 === 0) {
+        logger.debug('Iteration ' + String(iter), { objective, gap, epsilon });
+      }
+
+      if (gap <= (1 - ALGORITHM_CONFIG.ALPHA) * objective) {
+        logger.debug('Barrier Frank-Wolfe converged', {
+          iterations: iter + 1,
+          objective,
+          gap,
+          epsilon,
+        });
+
+        return {
+          mu: Array.from(mu),
+          objective,
+          gap,
+          iterations: iter + 1,
+          converged: true,
+          history,
+        };
+      }
+
+      const gamma = adaptiveStepSize(iter);
+      addScaledInPlace(tempMu, mu, s, 1 - gamma, gamma);
+      [mu, tempMu] = [tempMu, mu];
+
+      const projected = projectOntoSimplex(Array.from(mu));
+      copyTo(mu, projected);
     }
 
-    if (verbose && iter % 10 === 0) {
-      logger.debug(`Iteration ${iter}`, { objective, gap, epsilon });
-    }
+    const finalObjective = objectiveFn(mu, epsilon);
+    const finalGradient = gradientFn(mu, epsilon);
+    const finalS = lmoFn(finalGradient);
 
-    // Check convergence (α-extraction)
-    if (gap <= (1 - ALGORITHM_CONFIG.ALPHA) * objective) {
-      logger.debug('Barrier Frank-Wolfe converged', {
-        iterations: iter + 1,
-        objective,
-        gap,
-        epsilon,
-      });
+    copyTo(gradient, finalGradient);
+    copyTo(s, finalS);
+    subtractInPlace(tempDiff, mu, s);
+    const finalGap = dot(gradient, tempDiff);
 
-      return {
-        mu,
-        objective,
-        gap,
-        iterations: iter + 1,
-        converged: true,
-        history,
-      };
-    }
+    logger.warn('Barrier Frank-Wolfe reached max iterations', {
+      iterations: maxIterations,
+      objective: finalObjective,
+      gap: finalGap,
+      epsilon,
+    });
 
-    // Step size (adaptive)
-    const gamma = 2 / (iter + 2);
-
-    // Update
-    mu = vectorAdd(vectorScale(mu, 1 - gamma), vectorScale(s, gamma));
-    mu = projectOntoSimplex(mu);
+    return {
+      mu: Array.from(mu),
+      objective: finalObjective,
+      gap: finalGap,
+      iterations: maxIterations,
+      converged: false,
+      history,
+    };
+  } finally {
+    pool.releaseMultiple([s, gradient, gradientNoBarrier, tempDiff, tempMu]);
   }
-
-  const finalObjective = objectiveFn(mu, epsilon);
-  const finalGradient = gradientFn(mu, epsilon);
-  const finalS = lmoFn(finalGradient);
-  const finalGap = vectorDot(finalGradient, vectorSubtract(mu, finalS));
-
-  logger.warn('Barrier Frank-Wolfe reached max iterations', {
-    iterations: maxIterations,
-    objective: finalObjective,
-    gap: finalGap,
-    epsilon,
-  });
-
-  return {
-    mu,
-    objective: finalObjective,
-    gap: finalGap,
-    iterations: maxIterations,
-    converged: false,
-    history,
-  };
-}
-
-/**
- * Line search for KL divergence minimization
- * Finds optimal step size γ that minimizes D((1-γ)μ + γs || θ)
- */
-function lineSearchKL(mu: number[], s: number[], gradient: number[]): number {
-  // For KL divergence, the optimal step size can be computed analytically
-  // or approximated using bisection
-  const d = vectorSubtract(s, mu);
-
-  // Try different step sizes and pick the best
-  let bestGamma = 0;
-  let bestValue = Infinity;
-
-  for (let i = 1; i <= 20; i++) {
-    const gamma = i / 20;
-    const newMu = vectorAdd(mu, vectorScale(d, gamma));
-
-    // Compute objective (approximate)
-    const value = vectorDot(gradient, vectorSubtract(newMu, mu));
-
-    if (value < bestValue) {
-      bestValue = value;
-      bestGamma = gamma;
-    }
-  }
-
-  return bestGamma;
-}
-
-/**
- * Check if the Frank-Wolfe result indicates profitable arbitrage
- *
- * @param result Frank-Wolfe result
- * @param minProfit Minimum profit threshold
- * @returns Whether arbitrage is profitable
- */
-export function isProfitableArbitrage(
-  result: FrankWolfeResult,
-  minProfit: number = ALGORITHM_CONFIG.MIN_PROFIT_THRESHOLD
-): boolean {
-  // Guaranteed profit = divergence - gap
-  const guaranteedProfit = result.objective - result.gap;
-  return guaranteedProfit >= minProfit;
-}
-
-/**
- * Compute the trade recommendation from Frank-Wolfe result
- *
- * @param result Frank-Wolfe result
- * @param prices Current market prices
- * @returns Recommended trade vector
- */
-export function computeTradeRecommendation(
-  result: FrankWolfeResult,
-  prices: number[]
-): number[] {
-  // Trade = projection - prices (positive = buy, negative = sell)
-  return result.mu.map((mu_i, i) => mu_i - prices[i]!);
 }

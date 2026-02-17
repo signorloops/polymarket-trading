@@ -215,13 +215,17 @@ export class TrendFollowingStrategy extends BaseStrategy {
    */
   private calculateEMA(prices: number[], period: number): number {
     if (prices.length === 0) return 0;
-    if (prices.length === 1) return prices[0]!;
+    const firstPrice = prices[0];
+    if (firstPrice === undefined) return 0;
+    if (prices.length === 1) return firstPrice;
 
     const multiplier = 2 / (period + 1);
-    let ema = prices[0]!;
+    let ema = firstPrice;
 
     for (let i = 1; i < prices.length; i++) {
-      ema = (prices[i]! - ema) * multiplier + ema;
+      const price = prices[i];
+      if (price === undefined) continue;
+      ema = (price - ema) * multiplier + ema;
     }
 
     return ema;
@@ -238,7 +242,10 @@ export class TrendFollowingStrategy extends BaseStrategy {
 
     // Calculate initial averages
     for (let i = 1; i <= period; i++) {
-      const change = prices[prices.length - period + i - 1]! - prices[prices.length - period + i - 2]!;
+      const currentPrice = prices[prices.length - period + i - 1];
+      const prevPrice = prices[prices.length - period + i - 2];
+      if (currentPrice === undefined || prevPrice === undefined) continue;
+      const change = currentPrice - prevPrice;
       if (change > 0) {
         gains += change;
       } else {
