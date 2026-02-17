@@ -312,14 +312,16 @@ async function main(): Promise<void> {
   const system = new PolymarketTradingSystem(config);
 
   // Handle shutdown gracefully
+  const logger = getLogger();
+
   process.on('SIGINT', async () => {
-    console.log('\nReceived SIGINT, shutting down...');
+    logger.info('Received SIGINT, shutting down...');
     await system.stop();
     process.exit(0);
   });
 
   process.on('SIGTERM', async () => {
-    console.log('\nReceived SIGTERM, shutting down...');
+    logger.info('Received SIGTERM, shutting down...');
     await system.stop();
     process.exit(0);
   });
@@ -332,7 +334,8 @@ async function main(): Promise<void> {
 // Run if this file is executed directly
 if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch((error) => {
-    console.error('Fatal error:', error);
+    const logger = getLogger();
+    logger.error('Fatal error:', error);
     process.exit(1);
   });
 }

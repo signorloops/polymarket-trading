@@ -38,25 +38,3 @@ export function computeTradeRecommendation(
   return result.mu.map((mu_i, i) => mu_i - (prices[i] ?? 0));
 }
 
-/**
- * Estimate potential profit from arbitrage
- *
- * @param result Frank-Wolfe result
- * @returns Estimated profit in USD
- */
-export function estimateProfit(result: FrankWolfeResult): number {
-  return Math.max(0, result.objective - result.gap);
-}
-
-/**
- * Compute confidence score for the arbitrage opportunity
- *
- * @param result Frank-Wolfe result
- * @returns Confidence score between 0 and 1
- */
-export function computeConfidence(result: FrankWolfeResult): number {
-  // Higher gap relative to objective means lower confidence
-  if (result.objective <= 0) return 0;
-  const relativeGap = result.gap / result.objective;
-  return Math.max(0, 1 - relativeGap);
-}

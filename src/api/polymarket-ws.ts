@@ -125,11 +125,11 @@ export class PolymarketWebSocketClient {
 
     this.ws.on('message', (data: WebSocket.Data) => {
       try {
-        const dataStr = typeof data === 'string' ? data : Buffer.from(data).toString();
+        const dataStr = this.webSocketDataToString(data);
         const message: unknown = JSON.parse(dataStr);
         this.handleMessage(message);
       } catch (error) {
-        const dataStr = typeof data === 'string' ? data : Buffer.from(data).toString();
+        const dataStr = this.webSocketDataToString(data);
         this.logger.error('Failed to parse message', { error: error instanceof Error ? error.message : String(error), data: dataStr });
       }
     });
@@ -192,6 +192,23 @@ export class PolymarketWebSocketClient {
         this.logger.error('Error in message handler', { error });
       }
     }
+  }
+
+  /**
+   * Convert WebSocket data to string
+   */
+  private webSocketDataToString(data: WebSocket.Data): string {
+    if (typeof data === 'string') {
+      return data;
+    }
+    if (Buffer.isBuffer(data)) {
+      return data.toString();
+    }
+    if (Array.isArray(data)) {
+      return Buffer.concat(data).toString();
+    }
+    // Handle ArrayBuffer
+    return Buffer.from(data).toString();
   }
 
   private send(data: unknown): void {
