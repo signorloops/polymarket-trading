@@ -12,27 +12,77 @@ This document describes how to set up and use the monitoring system for the Poly
 
 ## Metrics Exposed
 
-### Arbitrage Metrics
-- `arbitrage_opportunities_found_total`: Total number of arbitrage opportunities detected
-- `arbitrage_executed_total`: Total number of executed arbitrages
-- `arbitrage_profit_usd_total`: Total profit in USD
+### Business Metrics
 
-### Algorithm Metrics
-- `frank_wolfe_iterations`: Number of iterations for convergence
-- `frank_wolfe_gap`: Optimality gap
-- `frank_wolfe_converged`: Whether the algorithm converged
+| Metric | Type | Description |
+|--------|------|-------------|
+| `arbitrage_opportunities_found_total` | Counter | Total number of arbitrage opportunities detected |
+| `arbitrage_opportunities_executed_total` | Counter | Total number of executed arbitrages |
+| `arbitrage_profit_usd_total` | Gauge | Total profit in USD |
+| `arbitrage_opportunity_duration_seconds` | Histogram | Time from detection to execution |
+| `position_size_usd` | Gauge | Current position size |
+| `daily_pnl_usd` | Gauge | Daily profit/loss |
 
-### Order Metrics
-- `orders_submitted_total`: Total orders submitted
-- `orders_filled_total`: Total orders filled
-- `orders_cancelled_total`: Total orders cancelled
-- `order_latency_seconds`: Order execution latency histogram
+### Algorithm Performance Metrics
 
-### System Metrics
-- `websocket_connected`: WebSocket connection status (0/1)
-- `circuit_breaker_open`: Circuit breaker status (0/1)
-- `daily_loss_usd`: Current daily loss
-- `current_exposure_usd`: Current market exposure
+| Metric | Type | Description |
+|--------|------|-------------|
+| `frank_wolfe_iterations` | Histogram | Number of iterations for convergence |
+| `frank_wolfe_gap` | Gauge | Optimality gap |
+| `frank_wolfe_converged` | Counter | Convergence count |
+| `frank_wolfe_duration_ms` | Histogram | Algorithm execution time |
+| `bregman_projection_iterations` | Histogram | Bregman projection iterations |
+| `bregman_projection_duration_ms` | Histogram | Projection execution time |
+| `order_book_operations_total` | Counter | Order book operations (insert/update/delete) |
+| `order_book_operation_duration_ms` | Histogram | Order book operation latency |
+
+### Order Execution Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `orders_submitted_total` | Counter | Total orders submitted |
+| `orders_filled_total` | Counter | Total orders filled |
+| `orders_partial_filled_total` | Counter | Partial fills |
+| `orders_cancelled_total` | Counter | Cancelled orders |
+| `orders_failed_total` | Counter | Failed orders |
+| `order_latency_ms` | Histogram | Order execution latency |
+| `order_fill_ratio` | Gauge | Fill ratio (filled/total) |
+
+### Risk Management Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `risk_checks_total` | Counter | Total risk checks |
+| `risk_checks_blocked_total` | Counter | Blocked by risk manager |
+| `daily_loss_usd` | Gauge | Current daily loss |
+| `current_exposure_usd` | Gauge | Current market exposure |
+| `circuit_breaker_open` | Gauge | Circuit breaker status (0/1) |
+| `emergency_stop_triggered` | Counter | Emergency stop count |
+| `position_limit_hit_total` | Counter | Position limit violations |
+
+### System Health Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `websocket_connected` | Gauge | WebSocket connection status (0/1) |
+| `websocket_reconnects_total` | Counter | WebSocket reconnections |
+| `websocket_messages_received_total` | Counter | Messages received |
+| `api_requests_total` | Counter | API requests |
+| `api_errors_total` | Counter | API errors |
+| `api_latency_ms` | Histogram | API latency |
+| `memory_usage_bytes` | Gauge | Memory usage |
+| `gc_pause_ms` | Histogram | GC pause duration |
+| `event_loop_lag_ms` | Gauge | Event loop lag |
+
+### Data Pipeline Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `market_data_updates_total` | Counter | Market data updates |
+| `order_book_updates_total` | Counter | Order book updates |
+| `trade_events_total` | Counter | Trade events received |
+| `price_changes_total` | Counter | Price change events |
+| `data_processing_lag_ms` | Histogram | Processing lag |
 
 ## Starting Monitoring
 

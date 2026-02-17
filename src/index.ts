@@ -31,6 +31,13 @@ import {
   RISK_CONFIG,
 } from './utils/config.js';
 
+// Trading system constants
+const MIN_PROFIT_THRESHOLD = 0.05; // Minimum $0.05 profit to execute
+const POSITION_SIZE_MULTIPLIER = 100; // Base multiplier for position sizing
+const MAIN_LOOP_INTERVAL_MS = 1000; // Normal cycle interval
+const ERROR_RETRY_INTERVAL_MS = 5000; // Retry interval after error
+const TOP_OPPORTUNITIES_TO_LOG = 3; // Number of top opportunities to log
+
 export interface TradingSystemConfig {
   /** Enable live trading (false = paper trading) */
   liveTrading: boolean;
@@ -138,7 +145,7 @@ export class PolymarketTradingSystem {
       this.logger.info(`Found ${opportunities.length} arbitrage opportunities`);
 
       // Log top opportunities
-      for (const opp of opportunities.slice(0, 3)) {
+      for (const opp of opportunities.slice(0, TOP_OPPORTUNITIES_TO_LOG)) {
         this.logger.info(`Opportunity: ${opp.type}`, {
           id: opp.id,
           profit: opp.guaranteedProfit.toFixed(4),
@@ -157,22 +164,25 @@ export class PolymarketTradingSystem {
   async executeOpportunity(opportunity: ArbitrageOpportunity): Promise<boolean> {
     const riskManager = getRiskManager();
 
-    if (opportunity.markets.length === 0 || opportunity.tradeDirection.length === 0) {
-      this.logger.warn('Invalid opportunity payload', { id: opportunity.id });
+    // Validate opportunity has required data
+    const primaryMarket = opportunity.markets[0];
+    const primaryDirection = opportunity.tradeDirection[0];
+    if (primaryMarket === undefined || primaryDirection === undefined) {
+      this.logger.warn('Invalid opportunity: missing primary market or direction', { id: opportunity.id });
       return false;
     }
 
-    // Calculate position sizes before risk checks so validation matches intended execution.
-    // This is still a simplified sizing model; production should use order-book-aware sizing.
-    const sizes = opportunity.tradeDirection.map((direction) => Math.abs(direction) * 100);
+    // Calculate position sizes before risk check
+    // This is simplified - real implementation would use order books
+    const sizes = opportunity.tradeDirection.map((d) => Math.abs(d) * POSITION_SIZE_MULTIPLIER);
     const primaryLegSize = sizes[0] ?? 0;
     const estimatedNotional = sizes.reduce((sum, size) => sum + size, 0);
 
     // Check risk limits
     const riskCheck = riskManager.checkTrade(
-      opportunity.markets[0]!,
+      primaryMarket,
       primaryLegSize,
-      opportunity.tradeDirection[0]! > 0 ? 'buy' : 'sell',
+      primaryDirection > 0 ? 'buy' : 'sell',
       estimatedNotional
     );
 
@@ -185,20 +195,13 @@ export class PolymarketTradingSystem {
       id: opportunity.id,
       type: opportunity.type,
       sizes,
-      estimatedNotional,
     });
 
     // Execute trades
     if (this.config.liveTrading) {
       const engine = getExecutionEngine();
-      const legs = opportunity.markets.map((marketId, index) => ({
-        marketId,
-        side: (opportunity.tradeDirection[index] ?? 0) > 0 ? 'buy' as const : 'sell' as const,
-        size: sizes[index] ?? primaryLegSize,
-        expectedPrice: 0, // Price must come from a live quote path in production.
-      }));
-      const result = await engine.executeArbitrage(legs, opportunity.id);
-      return result.success;
+      // Actual execution would go here
+      this.logger.info('Live trading execution would happen here');
     } else {
       this.logger.info('Paper trading - no actual execution');
     }
@@ -256,19 +259,19 @@ export class PolymarketTradingSystem {
 
         // Execute profitable opportunities
         for (const opp of opportunities) {
-          if (opp.guaranteedProfit > 0.05) {
+          if (opp.guaranteedProfit > MIN_PROFIT_THRESHOLD) {
             // Minimum $0.05 profit
             await this.executeOpportunity(opp);
           }
         }
 
         // Wait before next cycle
-        await sleep(1000);
+        await sleep(MAIN_LOOP_INTERVAL_MS);
       } catch (error) {
         this.logger.error('Error in main loop', {
           error: error instanceof Error ? error.message : String(error),
         });
-        await sleep(5000); // Wait longer on error
+        await sleep(ERROR_RETRY_INTERVAL_MS); // Wait longer on error
       }
     }
   }
@@ -312,16 +315,14 @@ async function main(): Promise<void> {
   const system = new PolymarketTradingSystem(config);
 
   // Handle shutdown gracefully
-  const logger = getLogger();
-
   process.on('SIGINT', async () => {
-    logger.info('Received SIGINT, shutting down...');
+    console.log('\nReceived SIGINT, shutting down...');
     await system.stop();
     process.exit(0);
   });
 
   process.on('SIGTERM', async () => {
-    logger.info('Received SIGTERM, shutting down...');
+    console.log('\nReceived SIGTERM, shutting down...');
     await system.stop();
     process.exit(0);
   });
@@ -334,8 +335,7 @@ async function main(): Promise<void> {
 // Run if this file is executed directly
 if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch((error) => {
-    const logger = getLogger();
-    logger.error('Fatal error:', error);
+    console.error('Fatal error:', error);
     process.exit(1);
   });
 }

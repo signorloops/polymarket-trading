@@ -112,12 +112,12 @@ export class CrossMarketArbitrageStrategy extends BaseStrategy {
     const theta = data.map((m) => m.lastPrice);
 
     // Objective function: KL divergence
-    const objectiveFn = (mu: number[]): number => klDivergence(mu, theta);
+    const objectiveFn = (mu: number[] | Float64Array): number => klDivergence(Array.from(mu), theta);
 
     // Gradient function
-    const gradientFn = (mu: number[]): number[] => {
+    const gradientFn = (mu: number[] | Float64Array): number[] => {
       const epsilon = 1e-10;
-      return mu.map((m, i) => {
+      return Array.from(mu).map((m, i) => {
         const thetaVal = theta[i];
         if (thetaVal === undefined) return 1;
         return Math.log(Math.max(m, epsilon) / Math.max(thetaVal, epsilon)) + 1;
@@ -125,17 +125,18 @@ export class CrossMarketArbitrageStrategy extends BaseStrategy {
     };
 
     // Linear minimization oracle with constraints
-    const lmoFn = (grad: number[]): number[] => {
-      const n = grad.length;
+    const lmoFn = (grad: number[] | Float64Array): number[] => {
+      const gradArray = Array.from(grad);
+      const n = gradArray.length;
       const vertex: number[] = new Array<number>(n).fill(0);
 
       // Simplex constraint: sum = 1
       let minIdx = 0;
-      const firstGrad = grad[0];
+      const firstGrad = gradArray[0];
       if (firstGrad === undefined) return vertex;
       let minValue = firstGrad;
       for (let i = 1; i < n; i++) {
-        const gradVal = grad[i];
+        const gradVal = gradArray[i];
         if (gradVal === undefined) continue;
         if (gradVal < minValue) {
           minValue = gradVal;
