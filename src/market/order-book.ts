@@ -47,8 +47,8 @@ export class OrderBook {
   private marketId: string;
   private bids: Map<number, number> = new Map();
   private asks: Map<number, number> = new Map();
-  private lastUpdate: number = 0;
-  private sequence: number = 0;
+  private lastUpdate = 0;
+  private sequence = 0;
   private logger = getLogger().child({ module: 'OrderBook' });
 
   constructor(marketId: string) {
@@ -59,8 +59,8 @@ export class OrderBook {
    * Update the order book with new data
    */
   update(
-    bids: Array<{ price: number; size: number }>,
-    asks: Array<{ price: number; size: number }>,
+    bids: { price: number; size: number }[],
+    asks: { price: number; size: number }[],
     timestamp?: number
   ): void {
     // Update bids
@@ -361,8 +361,8 @@ export class OrderBookManager {
    */
   updateBook(
     marketId: string,
-    bids: Array<{ price: number; size: number }>,
-    asks: Array<{ price: number; size: number }>,
+    bids: { price: number; size: number }[],
+    asks: { price: number; size: number }[],
     timestamp?: number
   ): void {
     const book = this.getBook(marketId);
@@ -399,9 +399,7 @@ export class OrderBookManager {
 let globalManager: OrderBookManager | null = null;
 
 export function getOrderBookManager(): OrderBookManager {
-  if (!globalManager) {
-    globalManager = new OrderBookManager();
-  }
+  globalManager ??= new OrderBookManager();
   return globalManager;
 }
 

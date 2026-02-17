@@ -65,7 +65,7 @@ export class OrderManager {
   /**
    * Clear completed orders older than specified time
    */
-  clearOldOrders(maxAgeMs: number = 3600000): void {
+  clearOldOrders(maxAgeMs = 3600000) {
     const cutoff = Date.now() - maxAgeMs;
     let cleared = 0;
 
@@ -77,7 +77,7 @@ export class OrderManager {
     }
 
     if (cleared > 0) {
-      this.logger.debug(`Cleared ${cleared} old orders`);
+      this.logger.debug(`Cleared ${String(cleared)} old orders`);
     }
   }
 

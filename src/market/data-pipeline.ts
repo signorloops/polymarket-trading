@@ -24,8 +24,8 @@ export interface MarketData {
 
 export interface OrderBookUpdate {
   marketId: string;
-  bids: Array<{ price: number; size: number }>;
-  asks: Array<{ price: number; size: number }>;
+  bids: { price: number; size: number }[];
+  asks: { price: number; size: number }[];
   timestamp: number;
 }
 
@@ -118,14 +118,15 @@ export class DataPipeline {
       this.subscribeToMarkets();
     });
 
-    this.ws.on('message', (data: WebSocket.Data) => {
+    this.ws.on('message', (wsData: WebSocket.Data) => {
       try {
-        const message = JSON.parse(data.toString());
+        const dataStr = typeof wsData === 'string' ? wsData : Buffer.from(wsData as Buffer).toString();
+        const message: unknown = JSON.parse(dataStr);
         this.handleMessage(message);
       } catch (error) {
         this.logger.error('Failed to parse message', {
           error: error instanceof Error ? error.message : String(error),
-          data: data.toString().slice(0, 200),
+          data: typeof wsData === 'string' ? wsData : Buffer.from(wsData as Buffer).toString().slice(0, 200),
         });
       }
     });
@@ -183,13 +184,17 @@ export class DataPipeline {
   }
 
   private handleTradeMessage(msg: Record<string, unknown>): void {
+    const rawMarketId = msg.market_id;
+    const rawEventId = msg.event_id;
+    const marketId = typeof rawMarketId === 'string' || typeof rawMarketId === 'number' ? String(rawMarketId) : '';
+    const eventId = typeof rawEventId === 'string' || typeof rawEventId === 'number' ? String(rawEventId) : '';
     const data: MarketData = {
-      marketId: String(msg['market_id'] ?? ''),
-      eventId: String(msg['event_id'] ?? ''),
-      price: Number(msg['price'] ?? 0),
-      size: Number(msg['size'] ?? 0),
-      side: msg['side'] === 'buy' ? 'buy' : 'sell',
-      timestamp: Number(msg['timestamp'] ?? Date.now()),
+      marketId,
+      eventId,
+      price: Number(msg.price ?? 0),
+      size: Number(msg.size ?? 0),
+      side: msg.side === 'buy' ? 'buy' : 'sell',
+      timestamp: Number(msg.timestamp ?? Date.now()),
     };
 
     if (data.marketId) {
@@ -198,25 +203,27 @@ export class DataPipeline {
   }
 
   private handleOrderBookMessage(msg: Record<string, unknown>): void {
-    const bids = Array.isArray(msg['bids'])
-      ? msg['bids'].map((b: unknown) => ({
-          price: Number((b as Record<string, unknown>)['price'] ?? 0),
-          size: Number((b as Record<string, unknown>)['size'] ?? 0),
+    const bids = Array.isArray(msg.bids)
+      ? msg.bids.map((b: unknown) => ({
+          price: Number((b as Record<string, unknown>).price ?? 0),
+          size: Number((b as Record<string, unknown>).size ?? 0),
         }))
       : [];
 
-    const asks = Array.isArray(msg['asks'])
-      ? msg['asks'].map((a: unknown) => ({
-          price: Number((a as Record<string, unknown>)['price'] ?? 0),
-          size: Number((a as Record<string, unknown>)['size'] ?? 0),
+    const asks = Array.isArray(msg.asks)
+      ? msg.asks.map((a: unknown) => ({
+          price: Number((a as Record<string, unknown>).price ?? 0),
+          size: Number((a as Record<string, unknown>).size ?? 0),
         }))
       : [];
 
+    const rawMarketId = msg.market_id;
+    const marketId = typeof rawMarketId === 'string' || typeof rawMarketId === 'number' ? String(rawMarketId) : '';
     const data: OrderBookUpdate = {
-      marketId: String(msg['market_id'] ?? ''),
+      marketId,
       bids,
       asks,
-      timestamp: Number(msg['timestamp'] ?? Date.now()),
+      timestamp: Number(msg.timestamp ?? Date.now()),
     };
 
     if (data.marketId) {
@@ -226,13 +233,17 @@ export class DataPipeline {
 
   private handlePriceChangeMessage(msg: Record<string, unknown>): void {
     // Convert price change to trade-like event for processing
+    const rawMarketId = msg.market_id;
+    const rawEventId = msg.event_id;
+    const marketId = typeof rawMarketId === 'string' || typeof rawMarketId === 'number' ? String(rawMarketId) : '';
+    const eventId = typeof rawEventId === 'string' || typeof rawEventId === 'number' ? String(rawEventId) : '';
     const data: MarketData = {
-      marketId: String(msg['market_id'] ?? ''),
-      eventId: String(msg['event_id'] ?? ''),
-      price: Number(msg['price'] ?? 0),
+      marketId,
+      eventId,
+      price: Number(msg.price ?? 0),
       size: 0,
       side: 'buy',
-      timestamp: Number(msg['timestamp'] ?? Date.now()),
+      timestamp: Number(msg.timestamp ?? Date.now()),
     };
 
     if (data.marketId) {
@@ -283,7 +294,7 @@ export class DataPipeline {
       60000 // Max 60 seconds
     );
 
-    this.logger.info(`Scheduling reconnect in ${delay}ms`, {
+    this.logger.info(`Scheduling reconnect in ${String(delay)}ms`, {
       attempt: this.reconnectAttempts,
     });
 
@@ -319,9 +330,7 @@ export class DataPipeline {
 let globalPipeline: DataPipeline | null = null;
 
 export function getDataPipeline(url?: string): DataPipeline {
-  if (!globalPipeline) {
-    globalPipeline = new DataPipeline(url);
-  }
+  globalPipeline ??= new DataPipeline(url);
   return globalPipeline;
 }
 

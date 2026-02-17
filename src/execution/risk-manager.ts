@@ -9,7 +9,7 @@
  */
 
 import { getLogger } from '../utils/logger.js';
-import { RISK_CONFIG, TRADING_CONFIG } from '../utils/config.js';
+import { RISK_CONFIG } from '../utils/config.js';
 import { OrderStatus } from './execution-engine.js';
 
 export interface Position {
@@ -43,10 +43,10 @@ export interface RiskManagerConfig {
 
 export class RiskManager {
   private positions: Map<string, Position> = new Map();
-  private dailyPnL: number = 0;
-  private maxDailyPnL: number = 0;
-  private minDailyPnL: number = 0;
-  private circuitBreakerTriggered: boolean = false;
+  private dailyPnL = 0;
+  private maxDailyPnL = 0;
+  private minDailyPnL = 0;
+  private circuitBreakerTriggered = false;
   private lastReset: number = Date.now();
   private logger = getLogger().child({ module: 'RiskManager' });
   private config: Required<RiskManagerConfig>;
@@ -94,7 +94,7 @@ export class RiskManager {
       this.triggerCircuitBreaker('Daily loss limit exceeded');
       return {
         allowed: false,
-        reason: `Daily loss limit exceeded: ${this.dailyPnL}`,
+        reason: `Daily loss limit exceeded: ${String(this.dailyPnL)}`,
         riskLevel: 'critical',
       };
     }
@@ -108,14 +108,14 @@ export class RiskManager {
     if (newExposure > this.config.maxExposure) {
       return {
         allowed: false,
-        reason: `Max exposure would be exceeded: ${newExposure} > ${RISK_CONFIG.MAX_EXPOSURE}`,
+        reason: `Max exposure would be exceeded: ${String(newExposure)} > ${String(this.config.maxExposure)}`,
         riskLevel: 'high',
       };
     }
 
     // Check position concentration
     const currentPosition = this.positions.get(marketId);
-    const newPositionSize = (currentPosition?.size || 0) + (side === 'buy' ? size : -size);
+    const newPositionSize = (currentPosition?.size ?? 0) + (side === 'buy' ? size : -size);
     const concentration = Math.abs(newPositionSize * estimatedValue) / (newExposure || 1);
 
     if (concentration > 0.5) {
@@ -213,7 +213,7 @@ export class RiskManager {
     if (exposure > this.config.maxExposure * 0.1) {
       return {
         action: 'unwind',
-        reason: `Partial fill exposure ${exposure} exceeds 10% of max exposure`,
+        reason: `Partial fill exposure ${String(exposure)} exceeds 10% of max exposure`,
       };
     }
 
@@ -258,7 +258,7 @@ export class RiskManager {
     if (metrics.unrealizedPnL < -this.config.emergencyStopThreshold) {
       this.logger.error('Emergency stop triggered', {
         unrealizedPnL: metrics.unrealizedPnL,
-        threshold: RISK_CONFIG.EMERGENCY_STOP_THRESHOLD,
+        threshold: this.config.emergencyStopThreshold,
       });
       this.triggerCircuitBreaker('Emergency stop: unrealized loss threshold');
       return true;
@@ -359,9 +359,7 @@ export class RiskManager {
 let globalRiskManager: RiskManager | null = null;
 
 export function getRiskManager(): RiskManager {
-  if (!globalRiskManager) {
-    globalRiskManager = new RiskManager();
-  }
+  globalRiskManager ??= new RiskManager();
   return globalRiskManager;
 }
 

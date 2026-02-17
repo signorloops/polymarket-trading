@@ -34,7 +34,8 @@ export function priorityAggregation(
 
   // Sort by confidence descending
   const sorted = [...signals].sort((a, b) => b.signal.confidence - a.signal.confidence);
-  const best = sorted[0]!;
+  const best = sorted[0];
+  if (!best) return null;
 
   return {
     signal: best.signal,
@@ -72,7 +73,8 @@ export function weightedAggregation(
 
   if (!bestMarket) return null;
 
-  const marketSignals = byMarket.get(bestMarket)!;
+  const marketSignals = byMarket.get(bestMarket);
+  if (!marketSignals) return null;
 
   // Average signal properties
   const avgPrice =
@@ -148,7 +150,8 @@ export function consensusAggregation(
 
   if (!bestKey) return null;
 
-  const bestSignals = grouped.get(bestKey)!;
+  const bestSignals = grouped.get(bestKey);
+  if (!bestSignals) return null;
 
   // Use weighted average of best group
   const totalConfidence = bestSignals.reduce((sum, s) => sum + s.signal.confidence, 0);
@@ -159,9 +162,12 @@ export function consensusAggregation(
     bestSignals.reduce((sum, s) => sum + s.signal.size * s.signal.confidence, 0) /
     totalConfidence;
 
+  const firstSignal = bestSignals[0];
+  if (!firstSignal) return null;
+
   const aggregatedSignal: TradeSignal = {
-    type: bestSignals[0]!.signal.type,
-    marketId: bestSignals[0]!.signal.marketId,
+    type: firstSignal.signal.type,
+    marketId: firstSignal.signal.marketId,
     size: avgSize,
     price: avgPrice,
     confidence: totalConfidence / bestSignals.length,

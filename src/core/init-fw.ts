@@ -10,9 +10,8 @@
  * needed for convergence.
  */
 
-import { vectorScale, vectorAdd, vectorDot, zeros, ones, projectOntoSimplex } from '../utils/math.js';
+import { vectorScale, vectorAdd, zeros, ones, projectOntoSimplex } from '../utils/math.js';
 import { getLogger } from '../utils/logger.js';
-import { ALGORITHM_CONFIG } from '../utils/config.js';
 
 export interface InitFWOptions {
   /** Use warm-start if available */
@@ -123,11 +122,12 @@ function vertexInitialization(
 
   // Find the coordinate with minimum gradient
   let minIdx = 0;
-  let minGrad = gradient[0]!;
+  let minGrad = gradient[0] ?? 0;
 
   for (let i = 1; i < dimension; i++) {
-    if (gradient[i]! < minGrad) {
-      minGrad = gradient[i]!;
+    const currentGrad = gradient[i] ?? 0;
+    if (currentGrad < minGrad) {
+      minGrad = currentGrad;
       minIdx = i;
     }
   }
@@ -155,11 +155,12 @@ function conditionalGradientInit(
 
     // Find vertex minimizing <gradient, v>
     let minIdx = 0;
-    let minValue = gradient[0]!;
+    let minValue = gradient[0] ?? 0;
 
     for (let i = 1; i < dimension; i++) {
-      if (gradient[i]! < minValue) {
-        minValue = gradient[i]!;
+      const currentValue = gradient[i] ?? 0;
+      if (currentValue < minValue) {
+        minValue = currentValue;
         minIdx = i;
       }
     }
@@ -243,7 +244,7 @@ export function initFWBarrier(
 
   // Add small perturbation to avoid exact boundary
   for (let i = 0; i < dimension; i++) {
-    barrierUniform[i]! += epsilon * (Math.random() - 0.5);
+    barrierUniform[i] = (barrierUniform[i] ?? 0) + epsilon * (Math.random() - 0.5);
   }
 
   // Renormalize
@@ -259,11 +260,12 @@ export function initFWBarrier(
 
     // Find vertex
     let minIdx = 0;
-    let minValue = gradient[0]!;
+    let minValue = gradient[0] ?? 0;
 
     for (let i = 1; i < dimension; i++) {
-      if (gradient[i]! < minValue) {
-        minValue = gradient[i]!;
+      const currentValue = gradient[i] ?? 0;
+      if (currentValue < minValue) {
+        minValue = currentValue;
         minIdx = i;
       }
     }

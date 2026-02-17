@@ -157,12 +157,23 @@ export class PolymarketTradingSystem {
   async executeOpportunity(opportunity: ArbitrageOpportunity): Promise<boolean> {
     const riskManager = getRiskManager();
 
+    if (opportunity.markets.length === 0 || opportunity.tradeDirection.length === 0) {
+      this.logger.warn('Invalid opportunity payload', { id: opportunity.id });
+      return false;
+    }
+
+    // Calculate position sizes before risk checks so validation matches intended execution.
+    // This is still a simplified sizing model; production should use order-book-aware sizing.
+    const sizes = opportunity.tradeDirection.map((direction) => Math.abs(direction) * 100);
+    const primaryLegSize = sizes[0] ?? 0;
+    const estimatedNotional = sizes.reduce((sum, size) => sum + size, 0);
+
     // Check risk limits
     const riskCheck = riskManager.checkTrade(
       opportunity.markets[0]!,
-      0, // Size will be calculated
+      primaryLegSize,
       opportunity.tradeDirection[0]! > 0 ? 'buy' : 'sell',
-      opportunity.guaranteedProfit
+      estimatedNotional
     );
 
     if (!riskCheck.allowed) {
@@ -170,21 +181,24 @@ export class PolymarketTradingSystem {
       return false;
     }
 
-    // Calculate position sizes
-    // This is simplified - real implementation would use order books
-    const sizes = opportunity.tradeDirection.map((d) => Math.abs(d) * 100);
-
     this.logger.info('Executing arbitrage', {
       id: opportunity.id,
       type: opportunity.type,
       sizes,
+      estimatedNotional,
     });
 
     // Execute trades
     if (this.config.liveTrading) {
       const engine = getExecutionEngine();
-      // Actual execution would go here
-      this.logger.info('Live trading execution would happen here');
+      const legs = opportunity.markets.map((marketId, index) => ({
+        marketId,
+        side: (opportunity.tradeDirection[index] ?? 0) > 0 ? 'buy' as const : 'sell' as const,
+        size: sizes[index] ?? primaryLegSize,
+        expectedPrice: 0, // Price must come from a live quote path in production.
+      }));
+      const result = await engine.executeArbitrage(legs, opportunity.id);
+      return result.success;
     } else {
       this.logger.info('Paper trading - no actual execution');
     }

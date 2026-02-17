@@ -70,6 +70,12 @@ export const NetworkConfigSchema = z.object({
   /** API key for Polymarket */
   POLYMARKET_API_KEY: z.string().optional(),
 
+  /** API secret for Polymarket (used for request signing) */
+  POLYMARKET_SECRET: z.string().optional(),
+
+  /** API passphrase for Polymarket (used for request signing) */
+  POLYMARKET_PASSPHRASE: z.string().optional(),
+
   /** Connection timeout in milliseconds */
   CONNECTION_TIMEOUT: z.number().int().positive().default(30000),
 
@@ -172,47 +178,49 @@ export type AppConfig = z.infer<typeof AppConfigSchema>;
 export function parseConfigFromEnv(): AppConfig {
   return {
     algorithm: AlgorithmConfigSchema.parse({
-      ALPHA: parseFloat(process.env['ALPHA'] ?? '0.9'),
-      INITIAL_EPSILON: parseFloat(process.env['INITIAL_EPSILON'] ?? '0.1'),
-      CONVERGENCE_THRESHOLD: parseFloat(process.env['CONVERGENCE_THRESHOLD'] ?? '1e-6'),
-      MAX_ITERATIONS: parseInt(process.env['MAX_ITERATIONS'] ?? '150', 10),
-      MIN_PROFIT_THRESHOLD: parseFloat(process.env['MIN_PROFIT_THRESHOLD'] ?? '0.05'),
-      BARRIER_PARAMETER: parseFloat(process.env['BARRIER_PARAMETER'] ?? '1.0'),
+      ALPHA: parseFloat(process.env.ALPHA ?? '0.9'),
+      INITIAL_EPSILON: parseFloat(process.env.INITIAL_EPSILON ?? '0.1'),
+      CONVERGENCE_THRESHOLD: parseFloat(process.env.CONVERGENCE_THRESHOLD ?? '1e-6'),
+      MAX_ITERATIONS: parseInt(process.env.MAX_ITERATIONS ?? '150', 10),
+      MIN_PROFIT_THRESHOLD: parseFloat(process.env.MIN_PROFIT_THRESHOLD ?? '0.05'),
+      BARRIER_PARAMETER: parseFloat(process.env.BARRIER_PARAMETER ?? '1.0'),
     }),
     trading: TradingConfigSchema.parse({
-      MAX_POSITION_PCT: parseFloat(process.env['MAX_POSITION_PCT'] ?? '0.5'),
-      TIME_WINDOW_BLOCKS: parseInt(process.env['TIME_WINDOW_BLOCKS'] ?? '950', 10),
-      SLIPPAGE_TOLERANCE: parseFloat(process.env['SLIPPAGE_TOLERANCE'] ?? '0.02'),
-      MAX_CONCURRENT_TRADES: parseInt(process.env['MAX_CONCURRENT_TRADES'] ?? '5', 10),
-      MIN_ORDER_BOOK_DEPTH: parseFloat(process.env['MIN_ORDER_BOOK_DEPTH'] ?? '100'),
+      MAX_POSITION_PCT: parseFloat(process.env.MAX_POSITION_PCT ?? '0.5'),
+      TIME_WINDOW_BLOCKS: parseInt(process.env.TIME_WINDOW_BLOCKS ?? '950', 10),
+      SLIPPAGE_TOLERANCE: parseFloat(process.env.SLIPPAGE_TOLERANCE ?? '0.02'),
+      MAX_CONCURRENT_TRADES: parseInt(process.env.MAX_CONCURRENT_TRADES ?? '5', 10),
+      MIN_ORDER_BOOK_DEPTH: parseFloat(process.env.MIN_ORDER_BOOK_DEPTH ?? '100'),
     }),
     network: NetworkConfigSchema.parse({
-      RPC_URL: process.env['RPC_URL'],
-      WS_URL: process.env['WS_URL'],
-      POLYMARKET_API_KEY: process.env['POLYMARKET_API_KEY'],
-      CONNECTION_TIMEOUT: parseInt(process.env['CONNECTION_TIMEOUT'] ?? '30000', 10),
-      RECONNECT_INTERVAL: parseInt(process.env['RECONNECT_INTERVAL'] ?? '5000', 10),
-      MAX_RECONNECT_ATTEMPTS: parseInt(process.env['MAX_RECONNECT_ATTEMPTS'] ?? '10', 10),
+      RPC_URL: process.env.RPC_URL,
+      WS_URL: process.env.WS_URL,
+      POLYMARKET_API_KEY: process.env.POLYMARKET_API_KEY,
+      POLYMARKET_SECRET: process.env.POLYMARKET_SECRET,
+      POLYMARKET_PASSPHRASE: process.env.POLYMARKET_PASSPHRASE,
+      CONNECTION_TIMEOUT: parseInt(process.env.CONNECTION_TIMEOUT ?? '30000', 10),
+      RECONNECT_INTERVAL: parseInt(process.env.RECONNECT_INTERVAL ?? '5000', 10),
+      MAX_RECONNECT_ATTEMPTS: parseInt(process.env.MAX_RECONNECT_ATTEMPTS ?? '10', 10),
     }),
     wallet: WalletConfigSchema.parse({
-      PRIVATE_KEY: process.env['PRIVATE_KEY'],
-      WALLET_ADDRESS: process.env['WALLET_ADDRESS'],
+      PRIVATE_KEY: process.env.PRIVATE_KEY,
+      WALLET_ADDRESS: process.env.WALLET_ADDRESS,
     }),
     logging: LogConfigSchema.parse({
-      LOG_LEVEL: (process.env['LOG_LEVEL'] as 'debug' | 'info' | 'warn' | 'error') ?? 'info',
-      SILENT: process.env['SILENT'] === 'true',
-      STRUCTURED_LOGGING: process.env['STRUCTURED_LOGGING'] === 'true',
+      LOG_LEVEL: (process.env.LOG_LEVEL as 'debug' | 'info' | 'warn' | 'error' | undefined) ?? 'info',
+      SILENT: process.env.SILENT === 'true',
+      STRUCTURED_LOGGING: process.env.STRUCTURED_LOGGING === 'true',
     }),
     kelly: KellyConfigSchema.parse({
-      KELLY_FRACTION: parseFloat(process.env['KELLY_FRACTION'] ?? '0.25'),
-      MIN_PROBABILITY: parseFloat(process.env['MIN_PROBABILITY'] ?? '0.51'),
-      MAX_BET_FRACTION: parseFloat(process.env['MAX_BET_FRACTION'] ?? '0.1'),
+      KELLY_FRACTION: parseFloat(process.env.KELLY_FRACTION ?? '0.25'),
+      MIN_PROBABILITY: parseFloat(process.env.MIN_PROBABILITY ?? '0.51'),
+      MAX_BET_FRACTION: parseFloat(process.env.MAX_BET_FRACTION ?? '0.1'),
     }),
     risk: RiskConfigSchema.parse({
-      MAX_DAILY_LOSS: parseFloat(process.env['MAX_DAILY_LOSS'] ?? '1000'),
-      MAX_EXPOSURE: parseFloat(process.env['MAX_EXPOSURE'] ?? '10000'),
-      EMERGENCY_STOP_THRESHOLD: parseFloat(process.env['EMERGENCY_STOP_THRESHOLD'] ?? '500'),
-      CIRCUIT_BREAKER_ENABLED: process.env['CIRCUIT_BREAKER_ENABLED'] !== 'false',
+      MAX_DAILY_LOSS: parseFloat(process.env.MAX_DAILY_LOSS ?? '1000'),
+      MAX_EXPOSURE: parseFloat(process.env.MAX_EXPOSURE ?? '10000'),
+      EMERGENCY_STOP_THRESHOLD: parseFloat(process.env.EMERGENCY_STOP_THRESHOLD ?? '500'),
+      CIRCUIT_BREAKER_ENABLED: process.env.CIRCUIT_BREAKER_ENABLED !== 'false',
     }),
   };
 }

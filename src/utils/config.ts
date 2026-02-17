@@ -24,7 +24,7 @@ try {
   const logger = getLogger();
   logger.error('Configuration validation failed', { error });
   // Fall back to defaults in development
-  if (process.env['NODE_ENV'] !== 'production') {
+  if (process.env.NODE_ENV !== 'production') {
     logger.warn('Using default configuration');
     config = createDefaultConfig();
   } else {

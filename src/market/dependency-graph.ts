@@ -70,7 +70,7 @@ export class MarketDependencyGraph {
    */
   addEvent(event: EventNode): void {
     this.events.set(event.id, event);
-    this.logger.debug(`Added event ${event.id} with ${event.outcomes.length} outcomes`);
+    this.logger.debug(`Added event ${event.id} with ${String(event.outcomes.length)} outcomes`);
   }
 
   /**
@@ -83,7 +83,10 @@ export class MarketDependencyGraph {
     if (!this.adjacencyList.has(edge.from)) {
       this.adjacencyList.set(edge.from, new Set());
     }
-    this.adjacencyList.get(edge.from)!.add(edge.to);
+    const adjSet = this.adjacencyList.get(edge.from);
+    if (adjSet) {
+      adjSet.add(edge.to);
+    }
 
     this.logger.debug(`Added ${edge.type} edge: ${edge.from} -> ${edge.to}`);
   }
@@ -147,7 +150,7 @@ export class MarketDependencyGraph {
       visited.add(nodeId);
       recursionStack.add(nodeId);
 
-      const neighbors = this.adjacencyList.get(nodeId) || new Set();
+      const neighbors = this.adjacencyList.get(nodeId) ?? new Set();
 
       for (const neighbor of neighbors) {
         if (!visited.has(neighbor)) {
@@ -191,7 +194,7 @@ export class MarketDependencyGraph {
 
     // 1. Probability sum constraints for each event
     for (const event of this.events.values()) {
-      const constraint = new Array(n).fill(0);
+      const constraint: number[] = new Array(n).fill(0) as number[];
 
       for (const marketId of event.markets) {
         const idx = marketList.indexOf(marketId);
@@ -213,7 +216,7 @@ export class MarketDependencyGraph {
         const event2 = this.events.get(edge.to);
 
         if (event1 && event2) {
-          const constraint = new Array(n).fill(0);
+          const constraint: number[] = new Array(n).fill(0) as number[];
 
           for (const marketId of event1.markets) {
             const idx = marketList.indexOf(marketId);
@@ -239,7 +242,7 @@ export class MarketDependencyGraph {
         const parent = this.events.get(event.parentEvent);
         if (parent) {
           // P(child) <= P(parent)
-          const constraint = new Array(n).fill(0);
+          const constraint: number[] = new Array(n).fill(0) as number[];
 
           for (const marketId of event.markets) {
             const idx = marketList.indexOf(marketId);
@@ -261,13 +264,14 @@ export class MarketDependencyGraph {
 
     // 4. Non-negativity constraints
     for (let i = 0; i < n; i++) {
-      const constraint = new Array(n).fill(0);
+      const constraint: number[] = new Array(n).fill(0) as number[];
       constraint[i] = 1;
 
       coefficients.push(constraint);
       rhs.push(0);
       types.push('inequality');
-      descriptions.push(`Market ${marketList[i]}: non-negative`);
+      const marketId = marketList[i];
+      descriptions.push(`Market ${marketId ?? 'unknown'}: non-negative`);
     }
 
     return { coefficients, rhs, types, descriptions };
@@ -284,7 +288,7 @@ export class MarketDependencyGraph {
       visited.add(startId);
       component.push(startId);
 
-      const neighbors = this.adjacencyList.get(startId) || new Set();
+      const neighbors = this.adjacencyList.get(startId) ?? new Set();
       for (const neighbor of neighbors) {
         if (!visited.has(neighbor)) {
           dfs(neighbor, component);
@@ -327,7 +331,7 @@ export class MarketDependencyGraph {
         result.push(market);
       }
 
-      const neighbors = this.adjacencyList.get(id) || new Set();
+      const neighbors = this.adjacencyList.get(id) ?? new Set();
       for (const neighbor of neighbors) {
         if (!visited.has(neighbor)) {
           dfs(neighbor);
@@ -358,8 +362,9 @@ export class MarketDependencyGraph {
     // Calculate expected return based on price inconsistencies
     let expectedReturn = 0;
     for (let i = 0; i < markets.length; i++) {
-      const current = markets[i]!;
-      const next = markets[(i + 1) % markets.length]!;
+      const current = markets[i];
+      const next = markets[(i + 1) % markets.length];
+      if (!current || !next) continue;
       expectedReturn += Math.abs(current.price - next.price);
     }
 
@@ -377,9 +382,7 @@ export class MarketDependencyGraph {
 let globalGraph: MarketDependencyGraph | null = null;
 
 export function getDependencyGraph(): MarketDependencyGraph {
-  if (!globalGraph) {
-    globalGraph = new MarketDependencyGraph();
-  }
+  globalGraph ??= new MarketDependencyGraph();
   return globalGraph;
 }
 

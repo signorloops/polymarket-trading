@@ -88,13 +88,19 @@ export function solveLP(
       const gradient = [...problem.objective];
 
       // Gradient step
-      const newX = x.map((xi, i) => xi - learningRate * gradient[i]!);
+      const newX = x.map((xi, i) => {
+        const grad = gradient[i];
+        return grad !== undefined ? xi - learningRate * grad : xi;
+      });
 
       // Project onto feasible region (simplified)
       x = projectOntoFeasibleRegion(newX, problem);
 
       // Check convergence
-      const change = Math.sqrt(x.reduce((sum, xi, i) => sum + Math.pow(xi - newX[i]!, 2), 0));
+      const change = Math.sqrt(x.reduce((sum, xi, i) => {
+        const newXi = newX[i];
+        return newXi !== undefined ? sum + Math.pow(xi - newXi, 2) : sum;
+      }, 0));
       if (change < tolerance) {
         break;
       }
@@ -115,7 +121,7 @@ export function solveLP(
     });
 
     return {
-      solution: new Array(n).fill(0),
+      solution: new Array(n).fill(0) as number[],
       objectiveValue: Infinity,
       optimal: false,
       status: 'error',
@@ -132,11 +138,11 @@ export function solveLP(
  */
 export function solveLMO(
   gradient: number[],
-  constraints: Array<{
+  _constraints: {
     coefficients: number[];
     rhs: number;
     type: 'equality' | 'inequality';
-  }>
+  }[]
 ): number[] {
   const n = gradient.length;
 
@@ -145,16 +151,17 @@ export function solveLMO(
 
   // Simple case: just find minimum gradient component
   let minIdx = 0;
-  let minValue = gradient[0]!;
+  let minValue = gradient[0] ?? Infinity;
 
   for (let i = 1; i < n; i++) {
-    if (gradient[i]! < minValue) {
-      minValue = gradient[i]!;
+    const grad = gradient[i];
+    if (grad !== undefined && grad < minValue) {
+      minValue = grad;
       minIdx = i;
     }
   }
 
-  const vertex = new Array(n).fill(0);
+  const vertex: number[] = new Array(n).fill(0) as number[];
   vertex[minIdx] = 1;
 
   return vertex;
@@ -166,17 +173,19 @@ export function solveLMO(
 export function checkFeasibility(
   solution: number[],
   problem: LPProblem,
-  tolerance: number = 1e-6
+  tolerance = 1e-6
 ): { feasible: boolean; violations: string[] } {
   const violations: string[] = [];
 
   // Check inequality constraints
   if (problem.inequalityMatrix && problem.inequalityRhs) {
     for (let i = 0; i < problem.inequalityMatrix.length; i++) {
-      const row = problem.inequalityMatrix[i]!;
+      const row = problem.inequalityMatrix[i];
+      const rhs = problem.inequalityRhs[i];
+      if (!row || rhs === undefined) continue;
       const value = dotProduct(row, solution);
-      if (value > problem.inequalityRhs[i]! + tolerance) {
-        violations.push(`Inequality ${i}: ${value} > ${problem.inequalityRhs[i]}`);
+      if (value > rhs + tolerance) {
+        violations.push('Inequality ' + String(i) + ': ' + String(value) + ' > ' + String(rhs));
       }
     }
   }
@@ -184,10 +193,12 @@ export function checkFeasibility(
   // Check equality constraints
   if (problem.equalityMatrix && problem.equalityRhs) {
     for (let i = 0; i < problem.equalityMatrix.length; i++) {
-      const row = problem.equalityMatrix[i]!;
+      const row = problem.equalityMatrix[i];
+      const rhs = problem.equalityRhs[i];
+      if (!row || rhs === undefined) continue;
       const value = dotProduct(row, solution);
-      if (Math.abs(value - problem.equalityRhs[i]!) > tolerance) {
-        violations.push(`Equality ${i}: ${value} != ${problem.equalityRhs[i]}`);
+      if (Math.abs(value - rhs) > tolerance) {
+        violations.push('Equality ' + String(i) + ': ' + String(value) + ' != ' + String(rhs));
       }
     }
   }
@@ -195,16 +206,22 @@ export function checkFeasibility(
   // Check bounds
   if (problem.lowerBounds) {
     for (let i = 0; i < solution.length; i++) {
-      if (solution[i]! < problem.lowerBounds[i]! - tolerance) {
-        violations.push(`Lower bound ${i}: ${solution[i]} < ${problem.lowerBounds[i]}`);
+      const solVal = solution[i];
+      const lb = problem.lowerBounds[i];
+      if (solVal === undefined || lb === undefined) continue;
+      if (solVal < lb - tolerance) {
+        violations.push('Lower bound ' + String(i) + ': ' + String(solVal) + ' < ' + String(lb));
       }
     }
   }
 
   if (problem.upperBounds) {
     for (let i = 0; i < solution.length; i++) {
-      if (solution[i]! > problem.upperBounds[i]! + tolerance) {
-        violations.push(`Upper bound ${i}: ${solution[i]} > ${problem.upperBounds[i]}`);
+      const solVal = solution[i];
+      const ub = problem.upperBounds[i];
+      if (solVal === undefined || ub === undefined) continue;
+      if (solVal > ub + tolerance) {
+        violations.push('Upper bound ' + String(i) + ': ' + String(solVal) + ' > ' + String(ub));
       }
     }
   }
@@ -246,11 +263,14 @@ function initializeVariables(problem: LPProblem): number[] {
 
   if (problem.lowerBounds && problem.upperBounds) {
     // Initialize at midpoint of bounds
-    return problem.lowerBounds.map((lb, i) => (lb + problem.upperBounds![i]!) / 2);
+    return problem.lowerBounds.map((lb, i) => {
+      const ub = problem.upperBounds?.[i];
+      return ub !== undefined ? (lb + ub) / 2 : lb;
+    });
   }
 
   // Default to zeros or lower bounds
-  return problem.lowerBounds ? [...problem.lowerBounds] : new Array(n).fill(0);
+  return problem.lowerBounds ? [...problem.lowerBounds] : new Array(n).fill(0) as number[];
 }
 
 function projectOntoFeasibleRegion(x: number[], problem: LPProblem): number[] {
@@ -258,11 +278,17 @@ function projectOntoFeasibleRegion(x: number[], problem: LPProblem): number[] {
 
   // Apply bounds
   if (problem.lowerBounds) {
-    result = result.map((xi, i) => Math.max(xi, problem.lowerBounds![i]!));
+    result = result.map((xi, i) => {
+      const lb = problem.lowerBounds?.[i];
+      return lb !== undefined ? Math.max(xi, lb) : xi;
+    });
   }
 
   if (problem.upperBounds) {
-    result = result.map((xi, i) => Math.min(xi, problem.upperBounds![i]!));
+    result = result.map((xi, i) => {
+      const ub = problem.upperBounds?.[i];
+      return ub !== undefined ? Math.min(xi, ub) : xi;
+    });
   }
 
   // Simple projection for sum-to-one constraint (if present)
@@ -276,5 +302,8 @@ function projectOntoFeasibleRegion(x: number[], problem: LPProblem): number[] {
 }
 
 function dotProduct(a: number[], b: number[]): number {
-  return a.reduce((sum, ai, i) => sum + ai * b[i]!, 0);
+  return a.reduce((sum, ai, i) => {
+    const bi = b[i];
+    return bi !== undefined ? sum + ai * bi : sum;
+  }, 0);
 }

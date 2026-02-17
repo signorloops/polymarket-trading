@@ -16,10 +16,6 @@ import {
   vectorDot,
   vectorScale,
   vectorAdd,
-  klDivergence,
-  vectorLog,
-  vectorExp,
-  clip,
   projectOntoSimplex,
 } from '../utils/math.js';
 import { getLogger } from '../utils/logger.js';
@@ -60,29 +56,83 @@ export interface FrankWolfeOptions {
  */
 export function linearMinimizationOracle(
   gradient: number[],
-  constraints: Array<{ coefficients: number[]; rhs: number; type: 'equality' | 'inequality' }>
+  constraints: { coefficients: number[]; rhs: number; type: 'equality' | 'inequality' }[]
 ): number[] {
   const n = gradient.length;
-
-  // For a simplex constraint (sum = 1, all >= 0), the LMO picks the
-  // coordinate with minimum gradient component
   if (n === 0) {
     throw new Error('Empty gradient array');
   }
 
-  const vertex = new Array(n).fill(0);
-  let minIdx = 0;
-  let minValue = gradient[0]!;
+  const fallbackSimplexVertex = (): number[] => {
+    const vertex: number[] = Array.from<number>({ length: n }).fill(0);
+    let minIdx = 0;
+    let minValue = gradient[0] ?? Infinity;
 
-  for (let i = 1; i < n; i++) {
-    if (gradient[i]! < minValue) {
-      minValue = gradient[i]!;
-      minIdx = i;
+    for (let i = 1; i < n; i++) {
+      const gradientValue = gradient[i] ?? Infinity;
+      if (gradientValue < minValue) {
+        minValue = gradientValue;
+        minIdx = i;
+      }
     }
+
+    vertex[minIdx] = 1;
+    return vertex;
+  };
+
+  const equalityConstraints = constraints.filter(
+    (constraint) =>
+      constraint.type === 'equality' &&
+      constraint.coefficients.length === n &&
+      constraint.coefficients.some((c) => c > 0)
+  );
+
+  if (equalityConstraints.length === 0) {
+    return fallbackSimplexVertex();
   }
 
-  vertex[minIdx] = 1;
-  return vertex;
+  const vertex: number[] = Array.from<number>({ length: n }).fill(0);
+  let hasAssignedCoordinate = false;
+
+  // For product-of-simplex style constraints (common in this project),
+  // pick the best coordinate within each equality group independently.
+  for (const constraint of equalityConstraints) {
+    const support: number[] = [];
+    for (let i = 0; i < n; i++) {
+      const coeffValue = constraint.coefficients[i] ?? 0;
+      if (coeffValue > 0) {
+        support.push(i);
+      }
+    }
+
+    if (support.length === 0) {
+      continue;
+    }
+
+    const firstIdx = support[0] ?? 0;
+    let bestIdx = firstIdx;
+    const firstGradient = gradient[firstIdx] ?? 0;
+    const firstCoeff = constraint.coefficients[firstIdx] ?? 1;
+    let bestScore = firstGradient / firstCoeff;
+
+    for (let i = 1; i < support.length; i++) {
+      const idx = support[i] ?? 0;
+      const gradientValue = gradient[idx] ?? 0;
+      const coeffValue = constraint.coefficients[idx] ?? 1;
+      const score = gradientValue / coeffValue;
+      if (score < bestScore) {
+        bestScore = score;
+        bestIdx = idx;
+      }
+    }
+
+    const coeff = constraint.coefficients[bestIdx] ?? 1;
+    const assignedValue = coeff !== 0 ? constraint.rhs / coeff : 0;
+    vertex[bestIdx] = Math.max(0, assignedValue);
+    hasAssignedCoordinate = true;
+  }
+
+  return hasAssignedCoordinate ? vertex : fallbackSimplexVertex();
 }
 
 /**
@@ -131,7 +181,7 @@ export function frankWolfe(
     const gap = vectorDot(gradient, vectorSubtract(mu, s));
 
     if (verbose && iter % 10 === 0) {
-      logger.debug(`Iteration ${iter}`, { objective, gap });
+      logger.debug(`Iteration ${String(iter)}`, { objective, gap });
     }
 
     // Check convergence (α-extraction criterion)
@@ -247,11 +297,11 @@ export function barrierFrankWolfe(
     // Adaptive epsilon shrinkage
     if (gapU < 0 && gap / (-4 * gapU) < epsilon) {
       epsilon = Math.min(gap / (-4 * gapU), epsilon / 2);
-      logger.debug(`Shrinking epsilon to ${epsilon}`, { iteration: iter });
+      logger.debug(`Shrinking epsilon to ${String(epsilon)}`, { iteration: iter });
     }
 
     if (verbose && iter % 10 === 0) {
-      logger.debug(`Iteration ${iter}`, { objective, gap, epsilon });
+      logger.debug(`Iteration ${String(iter)}`, { objective, gap, epsilon });
     }
 
     // Check convergence (α-extraction)
@@ -360,5 +410,5 @@ export function computeTradeRecommendation(
   prices: number[]
 ): number[] {
   // Trade = projection - prices (positive = buy, negative = sell)
-  return result.mu.map((mu_i, i) => mu_i - prices[i]!);
+  return result.mu.map((mu_i, i) => mu_i - (prices[i] ?? 0));
 }

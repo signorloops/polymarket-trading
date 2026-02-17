@@ -148,9 +148,7 @@ export function initLogger(level: LogLevel = 'info', silent = false, structured 
  * Get the global logger instance
  */
 export function getLogger(): Logger {
-  if (!globalLogger) {
-    globalLogger = new Logger();
-  }
+  globalLogger ??= new Logger();
   return globalLogger;
 }
 
