@@ -26,12 +26,12 @@ console.log('=== Frank-Wolfe Benchmarks ===\n');
 const theta2D = [0.6, 0.4];
 const initial2D = [0.5, 0.5];
 
-const objectiveFn2D = (mu: number[]) => klDivergence(mu, theta2D);
-const gradientFn2D = (mu: number[]) => {
+const objectiveFn2D = (mu: number[] | Float64Array) => klDivergence(Array.from(mu), theta2D);
+const gradientFn2D = (mu: number[] | Float64Array) => {
   const epsilon = 1e-10;
-  return mu.map((m, i) => Math.log(Math.max(m, epsilon) / Math.max(theta2D[i]!, epsilon)) + 1);
+  return Array.from(mu).map((m, i) => Math.log(Math.max(m, epsilon) / Math.max(theta2D[i]!, epsilon)) + 1);
 };
-const lmoFn2D = (grad: number[]) => {
+const lmoFn2D = (grad: number[] | Float64Array): number[] => {
   const vertex = new Array(grad.length).fill(0);
   let minIdx = 0;
   let minValue = grad[0]!;
@@ -56,12 +56,12 @@ bench('Frank-Wolfe 2D (50 iterations)', () => {
 const theta5D = [0.3, 0.2, 0.2, 0.15, 0.15];
 const initial5D = [0.2, 0.2, 0.2, 0.2, 0.2];
 
-const objectiveFn5D = (mu: number[]) => klDivergence(mu, theta5D);
-const gradientFn5D = (mu: number[]) => {
+const objectiveFn5D = (mu: number[] | Float64Array) => klDivergence(Array.from(mu), theta5D);
+const gradientFn5D = (mu: number[] | Float64Array) => {
   const epsilon = 1e-10;
-  return mu.map((m, i) => Math.log(Math.max(m, epsilon) / Math.max(theta5D[i]!, epsilon)) + 1);
+  return Array.from(mu).map((m, i) => Math.log(Math.max(m, epsilon) / Math.max(theta5D[i]!, epsilon)) + 1);
 };
-const lmoFn5D = (grad: number[]) => {
+const lmoFn5D = (grad: number[] | Float64Array): number[] => {
   const vertex = new Array(grad.length).fill(0);
   let minIdx = 0;
   let minValue = grad[0]!;

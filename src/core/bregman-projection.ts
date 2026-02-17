@@ -10,18 +10,12 @@
  */
 
 import {
-  vectorSubtract,
   vectorDot,
   klDivergence,
-  vectorScale,
-  vectorAdd,
-  vectorLog,
-  vectorExp,
-  vectorSum,
-  zeros,
 } from '../utils/math.js';
 import { getLogger } from '../utils/logger.js';
 import { ALGORITHM_CONFIG } from '../utils/config.js';
+import type { Constraint } from './frank-wolfe-types.js';
 
 export interface BregmanProjectionResult {
   /** Projected point (valid probability distribution) */
@@ -35,20 +29,141 @@ export interface BregmanProjectionResult {
 }
 
 /**
+ * Preprocessed constraint for efficient iteration
+ * Stores only non-zero coefficients
+ */
+interface SparseConstraint {
+  indices: number[];
+  coefficients: number[];
+  rhs: number;
+}
+
+/**
+ * Preprocess constraints to extract sparse structure
+ * Only stores indices where coefficient > 0
+ */
+function preprocessConstraints(
+  constraints: Constraint[],
+  n: number
+): SparseConstraint[] {
+  const sparse: SparseConstraint[] = [];
+
+  for (const constraint of constraints) {
+    if (constraint.type !== 'equality') continue;
+
+    const indices: number[] = [];
+    const coeffs: number[] = [];
+
+    for (let i = 0; i < n; i++) {
+      const coef = constraint.coefficients[i];
+      if (coef !== undefined && coef > 0) {
+        indices.push(i);
+        coeffs.push(coef);
+      }
+    }
+
+    if (indices.length > 0) {
+      sparse.push({
+        indices,
+        coefficients: coeffs,
+        rhs: constraint.rhs,
+      });
+    }
+  }
+
+  return sparse;
+}
+
+/**
+ * Compute dot product only over sparse indices
+ */
+function sparseDot(
+  constraint: SparseConstraint,
+  mu: number[]
+): number {
+  let sum = 0;
+  for (let j = 0; j < constraint.indices.length; j++) {
+    const idx = constraint.indices[j];
+    const coef = constraint.coefficients[j];
+    if (idx !== undefined && coef !== undefined) {
+      const muVal = mu[idx];
+      if (muVal !== undefined) {
+        sum += coef * muVal;
+      }
+    }
+  }
+  return sum;
+}
+
+/**
+ * In-place multiplicative update for a constraint
+ */
+function applyConstraintUpdate(
+  mu: number[],
+  constraint: SparseConstraint,
+  ratio: number
+): void {
+  for (let j = 0; j < constraint.indices.length; j++) {
+    const idx = constraint.indices[j];
+    const coef = constraint.coefficients[j];
+    if (idx !== undefined && coef !== undefined) {
+      const currentMu = mu[idx];
+      if (currentMu !== undefined) {
+        mu[idx] = currentMu * Math.pow(ratio, coef);
+      }
+    }
+  }
+}
+
+/**
+ * In-place vector normalization
+ */
+function normalizeInPlace(mu: number[]): void {
+  let sum = 0;
+  for (const val of mu) {
+    sum += val;
+  }
+  if (sum > 0) {
+    const invSum = 1 / sum;
+    for (let i = 0; i < mu.length; i++) {
+      const val = mu[i];
+      if (val !== undefined) {
+        mu[i] = val * invSum;
+      }
+    }
+  }
+}
+
+/**
+ * Compute change between two vectors (L2 norm of difference)
+ */
+function computeChange(mu: number[], prevMu: number[]): number {
+  let sumSq = 0;
+  for (let i = 0; i < mu.length; i++) {
+    const muVal = mu[i];
+    const prevMuVal = prevMu[i];
+    if (muVal !== undefined && prevMuVal !== undefined) {
+      const diff = muVal - prevMuVal;
+      sumSq += diff * diff;
+    }
+  }
+  return Math.sqrt(sumSq);
+}
+
+/**
  * Compute Bregman projection using iterative proportional fitting
  *
  * This solves: min_{μ ∈ M} D_KL(μ || θ)
  * where M is the marginal polytope and θ is the price vector
  *
- * @param priceVector Current market prices (θ)
- * @param constraints Linear constraints defining the polytope
- * @param maxIterations Maximum number of iterations
- * @param tolerance Convergence tolerance
- * @returns Projection result
+ * Optimizations:
+ * - Preprocesses constraints to sparse structure (only non-zero coefficients)
+ * - Uses in-place operations to reduce memory allocation
+ * - Avoids creating new arrays in the inner loop
  */
 export function bregmanProjection(
   priceVector: number[],
-  constraints: Array<{ coefficients: number[]; rhs: number; type: 'equality' | 'inequality' }>,
+  constraints: Constraint[],
   maxIterations: number = ALGORITHM_CONFIG.MAX_ITERATIONS,
   tolerance: number = ALGORITHM_CONFIG.CONVERGENCE_THRESHOLD
 ): BregmanProjectionResult {
@@ -57,44 +172,51 @@ export function bregmanProjection(
   const n = priceVector.length;
 
   // Initialize with uniform distribution
-  let mu = new Array(n).fill(1 / n);
+  const mu: number[] = new Array<number>(n).fill(1 / n);
 
   // Ensure price vector is positive
-  const theta = priceVector.map((p) => Math.max(p, 1e-10));
+  const theta: number[] = new Array<number>(n);
+  for (let i = 0; i < n; i++) {
+    const price = priceVector[i];
+    theta[i] = Math.max(price ?? 0, 1e-10);
+  }
+
+  // Preprocess constraints to sparse structure
+  const sparseConstraints = preprocessConstraints(constraints, n);
+
+  // Reuse buffer for previous mu
+  const prevMu: number[] = new Array<number>(n);
 
   logger.debug('Starting Bregman projection', {
     dimension: n,
+    constraintCount: constraints.length,
+    sparseConstraintCount: sparseConstraints.length,
     maxIterations,
     tolerance,
   });
 
   for (let iter = 0; iter < maxIterations; iter++) {
-    const prevMu = [...mu];
-
-    // Iterate through constraints
-    for (const constraint of constraints) {
-      if (constraint.type === 'equality') {
-        // For equality constraints: sum(c_i * mu_i) = rhs
-        const current = vectorDot(constraint.coefficients, mu);
-        const ratio = constraint.rhs / Math.max(current, 1e-10);
-
-        // Multiplicative update
-        for (let i = 0; i < n; i++) {
-          if (constraint.coefficients[i]! > 0) {
-            mu[i] = mu[i]! * Math.pow(ratio, constraint.coefficients[i]!);
-          }
-        }
-      }
+    // Save current mu
+    for (let i = 0; i < n; i++) {
+      const muVal = mu[i];
+      prevMu[i] = muVal ?? 0;
     }
 
-    // Normalize to ensure valid probability distribution
-    const sum = vectorSum(mu);
-    if (sum > 0) {
-      mu = mu.map((m) => m / sum);
+    // Iterate through sparse constraints only
+    for (const constraint of sparseConstraints) {
+      // For equality constraints: sum(c_i * mu_i) = rhs
+      const current = sparseDot(constraint, mu);
+      const ratio = constraint.rhs / Math.max(current, 1e-10);
+
+      // Multiplicative update (in-place)
+      applyConstraintUpdate(mu, constraint, ratio);
     }
+
+    // Normalize to ensure valid probability distribution (in-place)
+    normalizeInPlace(mu);
 
     // Check convergence
-    const change = vectorNorm(vectorSubtract(mu, prevMu));
+    const change = computeChange(mu, prevMu);
     if (change < tolerance) {
       const divergence = klDivergence(mu, theta);
       logger.debug('Bregman projection converged', {
@@ -132,10 +254,17 @@ export function bregmanProjection(
  */
 export function klGradient(mu: number[], theta: number[]): number[] {
   const epsilon = 1e-10;
-  const safeMu = mu.map((m) => Math.max(m, epsilon));
-  const safeTheta = theta.map((t) => Math.max(t, epsilon));
+  const result: number[] = new Array<number>(mu.length);
 
-  return safeMu.map((m, i) => Math.log(m / safeTheta[i]!) + 1);
+  for (let i = 0; i < mu.length; i++) {
+    const muVal = mu[i];
+    const thetaVal = theta[i];
+    const m = Math.max(muVal ?? 0, epsilon);
+    const t = Math.max(thetaVal ?? 0, epsilon);
+    result[i] = Math.log(m / t) + 1;
+  }
+
+  return result;
 }
 
 /**
@@ -152,7 +281,7 @@ export function bregmanDivergence(mu: number[], theta: number[]): number {
 export function dualFunctionValue(
   mu: number[],
   theta: number[],
-  constraints: Array<{ coefficients: number[]; rhs: number }>
+  constraints: Constraint[]
 ): number {
   const divergence = klDivergence(mu, theta);
 
@@ -202,10 +331,11 @@ export function computeTradeDirection(
   prices: number[]
 ): number[] {
   // Trade direction: buy when projection > price, sell when projection < price
-  return projection.map((p, i) => p - prices[i]!);
-}
-
-// Helper function
-function vectorNorm(v: number[]): number {
-  return Math.sqrt(v.reduce((sum, x) => sum + x * x, 0));
+  const result: number[] = new Array<number>(projection.length);
+  for (let i = 0; i < projection.length; i++) {
+    const price = prices[i];
+    const projVal = projection[i];
+    result[i] = price !== undefined && projVal !== undefined ? projVal - price : (projVal ?? 0);
+  }
+  return result;
 }

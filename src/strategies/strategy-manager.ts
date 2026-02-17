@@ -99,7 +99,7 @@ export class StrategyManager {
    * Analyze market data with all strategies
    */
   analyze(data: StrategyMarketData[]): AggregatedSignal | null {
-    const signals: Array<{ strategy: string; signal: TradeSignal }> = [];
+    const signals: { strategy: string; signal: TradeSignal }[] = [];
 
     // Collect signals from all strategies
     for (const [name, strategy] of this.strategies) {

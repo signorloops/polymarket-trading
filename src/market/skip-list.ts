@@ -8,8 +8,8 @@
 interface SkipListNode {
   price: number;
   size: number;
-  next: Array<SkipListNode | null>;
-  prev: Array<SkipListNode | null>;
+  next: (SkipListNode | null)[];
+  prev: (SkipListNode | null)[];
 }
 
 export class SkipList {
@@ -27,8 +27,8 @@ export class SkipList {
     this.head = {
       price: -Infinity,
       size: 0,
-      next: new Array(maxLevel).fill(null),
-      prev: new Array(maxLevel).fill(null),
+      next: Array.from<(SkipListNode | null)>({ length: maxLevel }).fill(null),
+      prev: Array.from<(SkipListNode | null)>({ length: maxLevel }).fill(null),
     };
   }
 
@@ -41,7 +41,7 @@ export class SkipList {
   }
 
   insert(price: number, size: number): void {
-    const update: Array<SkipListNode | null> = new Array(this.maxLevel).fill(null);
+    const update: (SkipListNode | null)[] = Array.from<(SkipListNode | null)>({ length: this.maxLevel }).fill(null);
     let current: SkipListNode = this.head;
 
     for (let i = this.level; i >= 0; i--) {
@@ -54,7 +54,7 @@ export class SkipList {
     }
 
     const nextAtZero = current.next[0];
-    if (nextAtZero && nextAtZero.price === price) {
+    if (nextAtZero?.price === price) {
       nextAtZero.size = size;
     } else {
       const newLevel = this.randomLevel();
@@ -68,8 +68,8 @@ export class SkipList {
       const newNode: SkipListNode = {
         price,
         size,
-        next: new Array(newLevel + 1).fill(null),
-        prev: new Array(newLevel + 1).fill(null),
+        next: Array.from<(SkipListNode | null)>({ length: newLevel + 1 }).fill(null),
+        prev: Array.from<(SkipListNode | null)>({ length: newLevel + 1 }).fill(null),
       };
 
       for (let i = 0; i <= newLevel; i++) {
@@ -89,7 +89,7 @@ export class SkipList {
   }
 
   delete(price: number): boolean {
-    const update: Array<SkipListNode | null> = new Array(this.maxLevel).fill(null);
+    const update: (SkipListNode | null)[] = Array.from<(SkipListNode | null)>({ length: this.maxLevel }).fill(null);
     let current: SkipListNode = this.head;
 
     for (let i = this.level; i >= 0; i--) {
@@ -102,10 +102,10 @@ export class SkipList {
     }
 
     const target = current.next[0];
-    if (target && target.price === price) {
+    if (target?.price === price) {
       for (let i = 0; i <= this.level; i++) {
         const updateNode = update[i];
-        if (updateNode && updateNode.next[i] === target) {
+        if (updateNode?.next[i] === target) {
           const targetNext = target.next[i];
           updateNode.next[i] = targetNext ?? null;
           if (targetNext) {
@@ -137,7 +137,7 @@ export class SkipList {
     }
 
     const result = current.next[0];
-    if (result && result.price === price) {
+    if (result?.price === price) {
       return result;
     }
 
@@ -158,8 +158,8 @@ export class SkipList {
     return current === this.head ? null : current;
   }
 
-  toArray(): Array<{ price: number; size: number }> {
-    const result: Array<{ price: number; size: number }> = [];
+  toArray(): { price: number; size: number }[] {
+    const result: { price: number; size: number }[] = [];
     let current = this.head.next[0];
 
     while (current) {

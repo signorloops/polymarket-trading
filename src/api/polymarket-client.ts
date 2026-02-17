@@ -68,13 +68,23 @@ export interface Trade {
   timestamp: string;
 }
 
+export interface PolymarketCredentials {
+  apiKey: string;
+  secret: string;
+  passphrase: string;
+}
+
 export class PolymarketClient {
   private client: AxiosInstance;
   private logger = getLogger().child({ module: 'PolymarketClient' });
-  private apiKey: string;
+  private credentials: PolymarketCredentials;
 
-  constructor(apiKey?: string) {
-    this.apiKey = apiKey ?? NETWORK_CONFIG.POLYMARKET_API_KEY ?? '';
+  constructor(credentials?: Partial<PolymarketCredentials>) {
+    this.credentials = {
+      apiKey: credentials?.apiKey ?? NETWORK_CONFIG.POLYMARKET_API_KEY ?? '',
+      secret: credentials?.secret ?? NETWORK_CONFIG.POLYMARKET_SECRET ?? '',
+      passphrase: credentials?.passphrase ?? NETWORK_CONFIG.POLYMARKET_PASSPHRASE ?? '',
+    };
 
     this.client = axios.create({
       baseURL: 'https://api.polymarket.com',
@@ -82,7 +92,6 @@ export class PolymarketClient {
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`,
       },
     });
 
@@ -90,22 +99,35 @@ export class PolymarketClient {
   }
 
   private setupInterceptors(): void {
-    // Request interceptor
+    // Request interceptor - add authentication headers
     this.client.interceptors.request.use(
       (config) => {
-        this.logger.debug(`API Request: ${config.method?.toUpperCase()} ${config.url}`);
+        // Add authentication headers if credentials are configured
+        if (this.credentials.apiKey) {
+          config.headers.set('Authorization', `Bearer ${this.credentials.apiKey}`);
+
+          // Add additional security headers if secret and passphrase are provided
+          if (this.credentials.secret && this.credentials.passphrase) {
+            const timestamp = Date.now().toString();
+            config.headers.set('POLYMARKET-TIMESTAMP', timestamp);
+            config.headers.set('POLYMARKET-PASSPHRASE', this.credentials.passphrase);
+          }
+        }
+
+        this.logger.debug(`API Request: ${String(config.method?.toUpperCase())} ${String(config.url)}`);
         return config;
       },
-      (error) => {
-        this.logger.error('Request error', { error: error.message });
-        return Promise.reject(error);
+      (error: unknown) => {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        this.logger.error('Request error', { error: errorMessage });
+        return Promise.reject(new Error(errorMessage));
       }
     );
 
     // Response interceptor
     this.client.interceptors.response.use(
       (response) => {
-        this.logger.debug(`API Response: ${response.status} ${response.config.url}`);
+        this.logger.debug(`API Response: ${String(response.status)} ${String(response.config.url)}`);
         return response;
       },
       (error: AxiosError) => {
@@ -118,7 +140,7 @@ export class PolymarketClient {
   private handleApiError(error: AxiosError): void {
     if (error.response) {
       const { status, data } = error.response;
-      this.logger.error(`API Error ${status}`, { data, url: error.config?.url });
+      this.logger.error(`API Error ${String(status)}`, { data, url: error.config?.url });
 
       switch (status) {
         case 401:
@@ -132,7 +154,7 @@ export class PolymarketClient {
         case 503:
           throw new Error('Polymarket API is temporarily unavailable');
         default:
-          throw new Error(`API Error: ${status} - ${JSON.stringify(data)}`);
+          throw new Error(`API Error: ${String(status)} - ${JSON.stringify(data)}`);
       }
     } else if (error.request) {
       this.logger.error('Network error', { error: error.message });
@@ -152,7 +174,7 @@ export class PolymarketClient {
     limit?: number;
     offset?: number;
   }): Promise<PolymarketMarket[]> {
-    const response = await this.client.get('/markets', { params });
+    const response = await this.client.get<PolymarketMarket[]>('/markets', { params });
     return response.data;
   }
 
@@ -160,7 +182,7 @@ export class PolymarketClient {
    * Get specific market by ID
    */
   async getMarket(marketId: string): Promise<PolymarketMarket> {
-    const response = await this.client.get(`/markets/${marketId}`);
+    const response = await this.client.get<PolymarketMarket>(`/markets/${marketId}`);
     return response.data;
   }
 
@@ -168,11 +190,15 @@ export class PolymarketClient {
    * Get order book for a market
    */
   async getOrderBook(marketId: string): Promise<{
-    bids: Array<{ price: string; size: string }>;
-    asks: Array<{ price: string; size: string }>;
+    bids: { price: string; size: string }[];
+    asks: { price: string; size: string }[];
     timestamp: string;
   }> {
-    const response = await this.client.get(`/markets/${marketId}/orderbook`);
+    const response = await this.client.get<{
+      bids: { price: string; size: string }[];
+      asks: { price: string; size: string }[];
+      timestamp: string;
+    }>(`/markets/${marketId}/orderbook`);
     return response.data;
   }
 
@@ -180,7 +206,7 @@ export class PolymarketClient {
    * Place a new order
    */
   async placeOrder(order: OrderRequest): Promise<OrderResponse> {
-    const response = await this.client.post('/orders', order);
+    const response = await this.client.post<OrderResponse>('/orders', order);
     return response.data;
   }
 
@@ -195,7 +221,7 @@ export class PolymarketClient {
    * Get order details
    */
   async getOrder(orderId: string): Promise<OrderResponse> {
-    const response = await this.client.get(`/orders/${orderId}`);
+    const response = await this.client.get<OrderResponse>(`/orders/${orderId}`);
     return response.data;
   }
 
@@ -204,7 +230,7 @@ export class PolymarketClient {
    */
   async getOpenOrders(marketId?: string): Promise<OrderResponse[]> {
     const params = marketId ? { marketId } : {};
-    const response = await this.client.get('/orders', { params });
+    const response = await this.client.get<OrderResponse[]>('/orders', { params });
     return response.data;
   }
 
@@ -212,7 +238,7 @@ export class PolymarketClient {
    * Get account balances
    */
   async getBalances(): Promise<Balance[]> {
-    const response = await this.client.get('/balance');
+    const response = await this.client.get<Balance[]>('/balance');
     return response.data;
   }
 
@@ -226,7 +252,7 @@ export class PolymarketClient {
     startDate?: string;
     endDate?: string;
   }): Promise<Trade[]> {
-    const response = await this.client.get('/trades', { params });
+    const response = await this.client.get<Trade[]>('/trades', { params });
     return response.data;
   }
 
@@ -240,8 +266,8 @@ export class PolymarketClient {
       endDate?: string;
       interval?: '1m' | '5m' | '15m' | '1h' | '1d';
     }
-  ): Promise<Array<{ timestamp: string; price: string; volume: string }>> {
-    const response = await this.client.get(`/markets/${marketId}/prices`, { params });
+  ): Promise<{ timestamp: string; price: string; volume: string }[]> {
+    const response = await this.client.get<{ timestamp: string; price: string; volume: string }[]>(`/markets/${marketId}/prices`, { params });
     return response.data;
   }
 
@@ -262,9 +288,7 @@ export class PolymarketClient {
 let globalClient: PolymarketClient | null = null;
 
 export function getPolymarketClient(apiKey?: string): PolymarketClient {
-  if (!globalClient) {
-    globalClient = new PolymarketClient(apiKey);
-  }
+  globalClient ??= new PolymarketClient(apiKey ? { apiKey } : undefined);
   return globalClient;
 }
 

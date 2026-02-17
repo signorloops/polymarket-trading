@@ -54,7 +54,8 @@ export function solveIP(
   problem: IPProblem,
   options: IPSolverOptions = {}
 ): IPSolution {
-  const { maxIterations = 1000, mipGap = 0.01, nodeLimit = 1000 } = options;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { mipGap = 0.01, nodeLimit = 1000 } = options;
 
   try {
     // Solve LP relaxation first
@@ -87,7 +88,7 @@ export function solveIP(
     });
 
     return {
-      solution: new Array(problem.objective.length).fill(0),
+      solution: new Array(problem.objective.length).fill(0) as number[],
       objectiveValue: Infinity,
       optimal: false,
       status: 'error',
@@ -103,11 +104,11 @@ export function solveIP(
  */
 export function solveBinaryIP(
   objective: number[],
-  constraints: Array<{
+  constraints: {
     coefficients: number[];
     rhs: number;
     type: '<=' | '=' | '>=';
-  }>,
+  }[],
   options: IPSolverOptions = {}
 ): IPSolution {
   const n = objective.length;
@@ -116,8 +117,8 @@ export function solveBinaryIP(
     objective,
     integerIndices: Array.from({ length: n }, (_, i) => i),
     binaryIndices: Array.from({ length: n }, (_, i) => i),
-    lowerBounds: new Array(n).fill(0),
-    upperBounds: new Array(n).fill(1),
+    lowerBounds: new Array(n).fill(0) as number[],
+    upperBounds: new Array(n).fill(1) as number[],
   };
 
   // Convert constraints
@@ -133,7 +134,7 @@ export function solveBinaryIP(
     } else if (constraint.type === '<=') {
       inequalityMatrix.push(constraint.coefficients);
       inequalityRhs.push(constraint.rhs);
-    } else if (constraint.type === '>=') {
+    } else {
       // Convert >= to <= by multiplying by -1
       inequalityMatrix.push(constraint.coefficients.map((c) => -c));
       inequalityRhs.push(-constraint.rhs);
@@ -159,13 +160,13 @@ export function solveBinaryIP(
  * Finds the vertices of the polytope that are relevant for Frank-Wolfe.
  */
 export function enumerateVertices(
-  constraints: Array<{
+  constraints: {
     coefficients: number[];
     rhs: number;
     type: 'equality' | 'inequality';
-  }>,
+  }[],
   n: number,
-  maxVertices: number = 100
+  maxVertices = 100
 ): number[][] {
   const vertices: number[][] = [];
 
@@ -174,7 +175,7 @@ export function enumerateVertices(
 
   // Add unit vectors (simplex vertices)
   for (let i = 0; i < n; i++) {
-    const vertex = new Array(n).fill(0);
+    const vertex: number[] = new Array(n).fill(0) as number[];
     vertex[i] = 1;
     vertices.push(vertex);
   }
@@ -182,7 +183,7 @@ export function enumerateVertices(
   // Try to find additional vertices by solving systems of equations
   // This is a simplified version - proper implementation would use proper vertex enumeration
 
-  logger.debug(`Enumerated ${vertices.length} vertices`);
+  logger.debug(`Enumerated ${String(vertices.length)} vertices`);
 
   return vertices.slice(0, maxVertices);
 }
@@ -193,12 +194,13 @@ export function enumerateVertices(
 export function isIntegerFeasible(
   solution: number[],
   problem: IPProblem,
-  tolerance: number = 1e-5
+  tolerance = 1e-5
 ): boolean {
-  const indices = problem.integerIndices || problem.binaryIndices || [];
+  const indices = problem.integerIndices ?? problem.binaryIndices ?? [];
 
   for (const idx of indices) {
-    const value = solution[idx]!;
+    const value = solution[idx];
+    if (value === undefined) continue;
 
     if (problem.binaryIndices?.includes(idx)) {
       // Binary constraint: x ∈ {0, 1}
@@ -245,7 +247,8 @@ function branchAndBound(
   ];
 
   while (queue.length > 0 && nodeCount < nodeLimit) {
-    const node = queue.shift()!;
+    const node = queue.shift();
+    if (!node) continue;
     nodeCount++;
 
     // Check if solution is integer feasible
@@ -261,7 +264,8 @@ function branchAndBound(
     const branchIdx = findBranchingVariable(node.solution, problem);
     if (branchIdx === -1) continue;
 
-    const value = node.solution[branchIdx]!;
+    const value = node.solution[branchIdx];
+    if (value === undefined) continue;
     const floor = Math.floor(value);
     const ceil = Math.ceil(value);
 
@@ -315,13 +319,14 @@ function branchAndBound(
 }
 
 function findBranchingVariable(solution: number[], problem: IPProblem): number {
-  const indices = problem.integerIndices || problem.binaryIndices || [];
+  const indices = problem.integerIndices ?? problem.binaryIndices ?? [];
 
   let maxFractional = 0;
   let branchIdx = -1;
 
   for (const idx of indices) {
-    const value = solution[idx]!;
+    const value = solution[idx];
+    if (value === undefined) continue;
     const fractional = Math.abs(value - Math.round(value));
 
     if (fractional > maxFractional) {
@@ -337,11 +342,23 @@ function createSubproblem(
   problem: IPProblem,
   fixedIndices: Map<number, number>
 ): LPProblem {
-  const subproblem: LPProblem = { ...problem };
+  const subproblem: LPProblem = {
+    ...problem,
+    ...(problem.inequalityMatrix
+      ? { inequalityMatrix: problem.inequalityMatrix.map((row) => [...row]) }
+      : {}),
+    ...(problem.inequalityRhs ? { inequalityRhs: [...problem.inequalityRhs] } : {}),
+    ...(problem.equalityMatrix
+      ? { equalityMatrix: problem.equalityMatrix.map((row) => [...row]) }
+      : {}),
+    ...(problem.equalityRhs ? { equalityRhs: [...problem.equalityRhs] } : {}),
+    ...(problem.lowerBounds ? { lowerBounds: [...problem.lowerBounds] } : {}),
+    ...(problem.upperBounds ? { upperBounds: [...problem.upperBounds] } : {}),
+  };
 
   // Add fixed values as equality constraints
   for (const [idx, value] of fixedIndices) {
-    const constraint = new Array(problem.objective.length).fill(0);
+    const constraint: number[] = new Array(problem.objective.length).fill(0) as number[];
     constraint[idx] = 1;
 
     if (!subproblem.equalityMatrix) {
@@ -350,7 +367,9 @@ function createSubproblem(
     }
 
     subproblem.equalityMatrix.push(constraint);
-    subproblem.equalityRhs!.push(value);
+    if (subproblem.equalityRhs) {
+      subproblem.equalityRhs.push(value);
+    }
   }
 
   return subproblem;

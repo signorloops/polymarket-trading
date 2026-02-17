@@ -7,9 +7,13 @@
  */
 export function vectorAdd(a: number[], b: number[]): number[] {
   if (a.length !== b.length) {
-    throw new Error(`Vector length mismatch: ${a.length} vs ${b.length}`);
+    throw new Error(`Vector length mismatch: ${a.length.toString()} vs ${b.length.toString()}`);
   }
-  return a.map((val, i) => val + b[i]!);
+  return a.map((val, i) => {
+    const bVal = b[i];
+    if (bVal === undefined) return val;
+    return val + bVal;
+  });
 }
 
 /**
@@ -17,9 +21,13 @@ export function vectorAdd(a: number[], b: number[]): number[] {
  */
 export function vectorSubtract(a: number[], b: number[]): number[] {
   if (a.length !== b.length) {
-    throw new Error(`Vector length mismatch: ${a.length} vs ${b.length}`);
+    throw new Error(`Vector length mismatch: ${a.length.toString()} vs ${b.length.toString()}`);
   }
-  return a.map((val, i) => val - b[i]!);
+  return a.map((val, i) => {
+    const bVal = b[i];
+    if (bVal === undefined) return val;
+    return val - bVal;
+  });
 }
 
 /**
@@ -34,9 +42,13 @@ export function vectorScale(a: number[], scalar: number): number[] {
  */
 export function vectorDot(a: number[], b: number[]): number {
   if (a.length !== b.length) {
-    throw new Error(`Vector length mismatch: ${a.length} vs ${b.length}`);
+    throw new Error(`Vector length mismatch: ${a.length.toString()} vs ${b.length.toString()}`);
   }
-  return a.reduce((sum, val, i) => sum + val * b[i]!, 0);
+  return a.reduce((sum, val, i) => {
+    const bVal = b[i];
+    if (bVal === undefined) return sum;
+    return sum + val * bVal;
+  }, 0);
 }
 
 /**
@@ -51,9 +63,13 @@ export function vectorNorm(a: number[]): number {
  */
 export function vectorMultiply(a: number[], b: number[]): number[] {
   if (a.length !== b.length) {
-    throw new Error(`Vector length mismatch: ${a.length} vs ${b.length}`);
+    throw new Error(`Vector length mismatch: ${a.length.toString()} vs ${b.length.toString()}`);
   }
-  return a.map((val, i) => val * b[i]!);
+  return a.map((val, i) => {
+    const bVal = b[i];
+    if (bVal === undefined) return val;
+    return val * bVal;
+  });
 }
 
 /**
@@ -61,13 +77,15 @@ export function vectorMultiply(a: number[], b: number[]): number[] {
  */
 export function vectorDivide(a: number[], b: number[]): number[] {
   if (a.length !== b.length) {
-    throw new Error(`Vector length mismatch: ${a.length} vs ${b.length}`);
+    throw new Error(`Vector length mismatch: ${a.length.toString()} vs ${b.length.toString()}`);
   }
   return a.map((val, i) => {
-    if (b[i] === 0) {
+    const bVal = b[i];
+    if (bVal === 0) {
       throw new Error('Division by zero in vector division');
     }
-    return val / b[i]!;
+    if (bVal === undefined) return val;
+    return val / bVal;
   });
 }
 
@@ -81,7 +99,7 @@ export function vectorSum(a: number[]): number {
 /**
  * Compute element-wise log of a vector
  */
-export function vectorLog(a: number[], epsilon: number = 1e-10): number[] {
+export function vectorLog(a: number[], epsilon = 1e-10): number[] {
   return a.map((val) => Math.log(Math.max(val, epsilon)));
 }
 
@@ -97,15 +115,17 @@ export function vectorExp(a: number[]): number[] {
  * D_KL(p || q) = sum(p_i * log(p_i / q_i))
  * Returns infinity if p and q have different support
  */
-export function klDivergence(p: number[], q: number[], epsilon: number = 1e-10): number {
+export function klDivergence(p: number[], q: number[], epsilon = 1e-10): number {
   if (p.length !== q.length) {
-    throw new Error(`Distribution length mismatch: ${p.length} vs ${q.length}`);
+    throw new Error(`Distribution length mismatch: ${p.length.toString()} vs ${q.length.toString()}`);
   }
 
   let divergence = 0;
   for (let i = 0; i < p.length; i++) {
-    const pi = p[i]!;
-    const qi = q[i]!;
+    const pi = p[i];
+    const qi = q[i];
+
+    if (pi === undefined || qi === undefined) continue;
 
     if (pi < -epsilon) {
       throw new Error('Negative probability in KL divergence');
@@ -161,24 +181,28 @@ export function vectorClip(a: number[], min: number, max: number): number[] {
 /**
  * Check if two numbers are approximately equal
  */
-export function approxEqual(a: number, b: number, epsilon: number = 1e-10): boolean {
+export function approxEqual(a: number, b: number, epsilon = 1e-10): boolean {
   return Math.abs(a - b) < epsilon;
 }
 
 /**
  * Check if two vectors are approximately equal
  */
-export function vectorApproxEqual(a: number[], b: number[], epsilon: number = 1e-10): boolean {
+export function vectorApproxEqual(a: number[], b: number[], epsilon = 1e-10): boolean {
   if (a.length !== b.length) {
     return false;
   }
-  return a.every((val, i) => approxEqual(val, b[i]!, epsilon));
+  return a.every((val, i) => {
+    const bVal = b[i];
+    if (bVal === undefined) return false;
+    return approxEqual(val, bVal, epsilon);
+  });
 }
 
 /**
  * Normalize a vector to sum to 1 (for probability distributions)
  */
-export function normalizeToProbability(a: number[], epsilon: number = 1e-10): number[] {
+export function normalizeToProbability(a: number[], epsilon = 1e-10): number[] {
   const sum = vectorSum(a);
   if (sum < epsilon) {
     // Return uniform distribution if sum is too small
@@ -191,14 +215,14 @@ export function normalizeToProbability(a: number[], epsilon: number = 1e-10): nu
  * Generate an array of zeros
  */
 export function zeros(n: number): number[] {
-  return new Array(n).fill(0);
+  return new Array<number>(n).fill(0);
 }
 
 /**
  * Generate an array of ones
  */
 export function ones(n: number): number[] {
-  return new Array(n).fill(1);
+  return new Array<number>(n).fill(1);
 }
 
 /**
@@ -246,8 +270,10 @@ export function projectOntoSimplex(v: number[]): number[] {
   let rho = 0;
 
   for (let i = 0; i < n; i++) {
-    cumsum += sorted[i]!;
-    if (sorted[i]! > (cumsum - 1) / (i + 1)) {
+    const sortedVal = sorted[i];
+    if (sortedVal === undefined) continue;
+    cumsum += sortedVal;
+    if (sortedVal > (cumsum - 1) / (i + 1)) {
       rho = i;
     }
   }
