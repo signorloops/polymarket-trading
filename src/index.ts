@@ -287,11 +287,11 @@ function sleep(ms: number): Promise<void> {
 /**
  * Reset all global state (for testing)
  */
-export function resetTradingSystem(): void {
+export async function resetTradingSystem(): Promise<void> {
   resetOrderBookManager();
   resetArbitrageDetector();
-  resetExecutionEngine();
-  resetRiskManager();
+  await resetExecutionEngine();
+  await resetRiskManager();
 }
 
 /**

@@ -7,6 +7,7 @@
 import WebSocket from 'ws';
 import { getLogger } from '../utils/logger.js';
 import { NETWORK_CONFIG } from '../utils/config.js';
+import type { LifecycleComponent, ComponentStatus } from '../lifecycle/shutdown.js';
 
 export interface WsTrade {
   marketId: string;
@@ -30,7 +31,10 @@ export type WsMessage =
 
 type WsHandler = (message: WsMessage) => void;
 
-export class PolymarketWebSocketClient {
+export class PolymarketWebSocketClient implements LifecycleComponent {
+  id = 'polymarket-ws';
+  priority = 100;
+
   private ws: WebSocket | null = null;
   private url: string;
   private apiKey: string;
@@ -41,6 +45,7 @@ export class PolymarketWebSocketClient {
   private isManualClose = false;
   private subscribedMarkets: Set<string> = new Set();
   private logger = getLogger().child({ module: 'PolymarketWebSocket' });
+  private lastActivity = Date.now();
 
   constructor(url?: string, apiKey?: string) {
     this.url = url ?? NETWORK_CONFIG.WS_URL;
@@ -153,6 +158,8 @@ export class PolymarketWebSocketClient {
   }
 
   private handleMessage(message: unknown): void {
+    this.lastActivity = Date.now();
+
     if (!this.isValidMessage(message)) {
       this.logger.warn('Invalid message received', { message: JSON.stringify(message) });
       return;
@@ -236,6 +243,7 @@ export class PolymarketWebSocketClient {
     this.reconnectTimer = setTimeout(() => {
       this.connect();
     }, delay);
+    this.reconnectTimer.unref?.();
   }
 
   private startHeartbeat(): void {
@@ -244,6 +252,7 @@ export class PolymarketWebSocketClient {
         this.ws.ping();
       }
     }, 30000);
+    this.heartbeatTimer.unref?.();
   }
 
   private clearTimers(): void {
@@ -256,6 +265,29 @@ export class PolymarketWebSocketClient {
       this.heartbeatTimer = null;
     }
   }
+
+  /**
+   * Lifecycle: Destroy the WebSocket client
+   */
+  async destroy(): Promise<void> {
+    this.logger.info('Destroying PolymarketWebSocketClient...');
+    this.disconnect();
+    this.handlers.clear();
+    this.subscribedMarkets.clear();
+    this.logger.info('PolymarketWebSocketClient destroyed');
+  }
+
+  /**
+   * Lifecycle: Get component status
+   */
+  getStatus(): ComponentStatus {
+    return {
+      id: this.id,
+      healthy: this.isConnected(),
+      pendingOperations: this.subscribedMarkets.size,
+      lastActivity: this.lastActivity,
+    };
+  }
 }
 
 // Singleton instance
@@ -266,7 +298,9 @@ export function getPolymarketWebSocketClient(url?: string, apiKey?: string): Pol
   return globalWsClient;
 }
 
-export function resetPolymarketWebSocketClient(): void {
-  globalWsClient?.disconnect();
-  globalWsClient = null;
+export async function resetPolymarketWebSocketClient(): Promise<void> {
+  if (globalWsClient) {
+    await globalWsClient.destroy();
+    globalWsClient = null;
+  }
 }

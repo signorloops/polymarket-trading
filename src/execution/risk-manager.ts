@@ -10,7 +10,11 @@
 
 import { getLogger } from '../utils/logger.js';
 import { RISK_CONFIG } from '../utils/config.js';
-import { OrderStatus } from './execution-engine.js';
+import type { OrderStatus } from './types.js';
+import { getOrderBookManager } from '../market/order-book.js';
+import type { LifecycleComponent, ComponentStatus } from '../lifecycle/shutdown.js';
+import { writeFile, mkdir } from 'fs/promises';
+import { dirname } from 'path';
 
 export interface Position {
   marketId: string;
@@ -41,7 +45,10 @@ export interface RiskManagerConfig {
   emergencyStopThreshold?: number;
 }
 
-export class RiskManager {
+export class RiskManager implements LifecycleComponent {
+  id = 'risk-manager';
+  priority = 75;
+
   private positions: Map<string, Position> = new Map();
   private dailyPnL = 0;
   private maxDailyPnL = 0;
@@ -50,6 +57,7 @@ export class RiskManager {
   private lastReset: number = Date.now();
   private logger = getLogger().child({ module: 'RiskManager' });
   private config: Required<RiskManagerConfig>;
+  private lastActivity = Date.now();
 
   constructor(config: RiskManagerConfig = {}) {
     this.config = {
@@ -133,6 +141,8 @@ export class RiskManager {
    * Update position after trade execution
    */
   updatePosition(orderStatus: OrderStatus, marketId: string, side: 'buy' | 'sell'): void {
+    this.lastActivity = Date.now();
+
     if (orderStatus.filledSize <= 0) {
       return;
     }
@@ -339,8 +349,45 @@ export class RiskManager {
   }
 
   private calculateUnrealizedPnL(): number {
-    // Simplified - in real implementation, use current market prices
-    return 0;
+    try {
+      const orderBookManager = getOrderBookManager();
+      let totalUnrealizedPnL = 0;
+
+      for (const [marketId, position] of this.positions) {
+        const orderBook = orderBookManager.getBook(marketId);
+        const midPrice = orderBook.getMidPrice();
+
+        if (!midPrice || midPrice <= 0) {
+          this.logger.warn(`No valid mid price for ${marketId}, skipping unrealized PnL calculation`);
+          continue;
+        }
+
+        // Calculate unrealized PnL
+        // For long: (current_price - entry_price) * size
+        // For short: (entry_price - current_price) * size
+        const size = Math.abs(position.size);
+        const unrealizedPnL = position.side === 'long'
+          ? (midPrice - position.avgPrice) * size
+          : (position.avgPrice - midPrice) * size;
+
+        totalUnrealizedPnL += unrealizedPnL;
+
+        this.logger.debug(`Unrealized PnL for ${marketId}`, {
+          side: position.side,
+          size: position.size,
+          entryPrice: position.avgPrice,
+          currentPrice: midPrice,
+          unrealizedPnL,
+        });
+      }
+
+      return totalUnrealizedPnL;
+    } catch (error) {
+      this.logger.error('Failed to calculate unrealized PnL', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return 0;
+    }
   }
 
   private updatePnLTracking(): void {
@@ -350,6 +397,56 @@ export class RiskManager {
     if (this.dailyPnL < this.minDailyPnL) {
       this.minDailyPnL = this.dailyPnL;
     }
+  }
+
+  /**
+   * Save risk manager state to file
+   */
+  async saveState(filePath = './data/risk-manager-state.json'): Promise<void> {
+    try {
+      const dir = dirname(filePath);
+      await mkdir(dir, { recursive: true });
+
+      const state = {
+        positions: Array.from(this.positions.entries()),
+        dailyPnL: this.dailyPnL,
+        maxDailyPnL: this.maxDailyPnL,
+        minDailyPnL: this.minDailyPnL,
+        circuitBreakerTriggered: this.circuitBreakerTriggered,
+        lastReset: this.lastReset,
+        savedAt: Date.now(),
+        version: 1,
+      };
+
+      await writeFile(filePath, JSON.stringify(state, null, 2), 'utf-8');
+      this.logger.debug('Risk manager state saved');
+    } catch (error) {
+      this.logger.error('Failed to save risk manager state', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Lifecycle: Destroy the risk manager
+   */
+  async destroy(): Promise<void> {
+    this.logger.info('Destroying RiskManager...');
+    await this.saveState();
+    this.logger.info('RiskManager destroyed');
+  }
+
+  /**
+   * Lifecycle: Get component status
+   */
+  getStatus(): ComponentStatus {
+    return {
+      id: this.id,
+      healthy: !this.circuitBreakerTriggered,
+      pendingOperations: this.positions.size,
+      lastActivity: this.lastActivity,
+    };
   }
 }
 
@@ -366,6 +463,9 @@ export function getRiskManager(): RiskManager {
 /**
  * Reset the global risk manager (for testing)
  */
-export function resetRiskManager(): void {
+export async function resetRiskManager(): Promise<void> {
+  if (globalRiskManager) {
+    await globalRiskManager.destroy();
+  }
   globalRiskManager = null;
 }
