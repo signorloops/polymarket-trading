@@ -35,6 +35,7 @@ export class ExecutionEngine {
     this.cleanupInterval = setInterval(() => {
       this.orderManager.clearOldOrders(3600000); // Clean orders older than 1 hour
     }, 300000);
+    this.cleanupInterval.unref();
   }
 
   /**

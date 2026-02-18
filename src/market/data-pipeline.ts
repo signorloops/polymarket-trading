@@ -316,6 +316,7 @@ export class DataPipeline {
     this.reconnectTimer = setTimeout(() => {
       this.connect();
     }, delay);
+    this.reconnectTimer.unref?.();
   }
 
   private startHeartbeat(): void {
@@ -325,6 +326,7 @@ export class DataPipeline {
         this.ws.ping();
       }
     }, 30000);
+    this.heartbeatTimer.unref?.();
   }
 
   private clearTimers(): void {
