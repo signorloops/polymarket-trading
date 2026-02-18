@@ -39,7 +39,8 @@ describe('ExecutionEngine', () => {
 
       const result = await engine.executeOrder(order);
 
-      expect(result.status).toBe('filled');
+      // Simulation mode may return 'filled' or 'partial' based on random fill rate
+      expect(['filled', 'partial']).toContain(result.status);
       expect(result.filledSize).toBeGreaterThan(0);
       expect(result.avgPrice).toBeGreaterThan(0);
     });
