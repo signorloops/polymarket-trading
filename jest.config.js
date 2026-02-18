@@ -28,5 +28,4 @@ export default {
   verbose: true,
   workerIdleMemoryLimit: '512MB',
   maxWorkers: 2,
-  forceExit: true,
 };

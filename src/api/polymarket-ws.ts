@@ -236,6 +236,7 @@ export class PolymarketWebSocketClient {
     this.reconnectTimer = setTimeout(() => {
       this.connect();
     }, delay);
+    this.reconnectTimer.unref?.();
   }
 
   private startHeartbeat(): void {
@@ -244,6 +245,7 @@ export class PolymarketWebSocketClient {
         this.ws.ping();
       }
     }, 30000);
+    this.heartbeatTimer.unref?.();
   }
 
   private clearTimers(): void {

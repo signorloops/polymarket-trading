@@ -18,6 +18,7 @@ import {
 } from './market/arbitrage-detector.js';
 import { getExecutionEngine, resetExecutionEngine } from './execution/execution-engine.js';
 import { getRiskManager, resetRiskManager } from './execution/risk-manager.js';
+import { resetTransactionTracker } from './blockchain/transaction-tracker.js';
 import {
   calculateMultiLegPositionSize,
   calculateSingleMarketArbitrageSize,
@@ -292,6 +293,7 @@ export function resetTradingSystem(): void {
   resetArbitrageDetector();
   resetExecutionEngine();
   resetRiskManager();
+  resetTransactionTracker();
 }
 
 /**
