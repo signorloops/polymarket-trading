@@ -42,10 +42,10 @@ export interface Transaction {
 export interface TransactionUpdate {
   hash: string;
   status: TransactionStatus;
-  blockNumber?: number;
-  confirmations?: number;
-  gasUsed?: string;
-  error?: string;
+  blockNumber?: number | undefined;
+  confirmations?: number | undefined;
+  gasUsed?: string | undefined;
+  error?: string | undefined;
 }
 
 type TransactionHandler = (tx: Transaction) => void;
@@ -254,7 +254,7 @@ export class TransactionTracker {
 
     tx.retryCount++;
     tx.status = 'pending';
-    tx.lastError = undefined;
+    tx.lastError = undefined as unknown as string;
 
     // Calculate exponential backoff delay
     const delay = RETRY_BASE_DELAY_MS * Math.pow(2, tx.retryCount - 1);
@@ -494,13 +494,20 @@ export class TransactionTracker {
           const status = await this.rpcClient.getTransactionStatus(tx.hash);
 
           if (status.receipt && tx.status !== status.status) {
-            this.updateTransaction({
+            const update: TransactionUpdate = {
               hash: tx.hash,
               status: status.status,
-              blockNumber: status.blockNumber,
-              confirmations: status.confirmations,
-              gasUsed: status.receipt.gasUsed,
-            });
+            };
+            if (status.blockNumber !== undefined) {
+              update.blockNumber = status.blockNumber;
+            }
+            if (status.confirmations !== undefined) {
+              update.confirmations = status.confirmations;
+            }
+            if (status.receipt.gasUsed !== undefined) {
+              update.gasUsed = status.receipt.gasUsed;
+            }
+            this.updateTransaction(update);
           }
         } catch (error) {
           this.logger.error('Failed to query transaction status', {
