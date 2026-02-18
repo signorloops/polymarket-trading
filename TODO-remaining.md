@@ -19,6 +19,8 @@
 | Task 13 | 添加 WebSocket 消息序列号验证 | 2026-02-18 | 116 tests |
 | Task 14 | 实现区块链 RPC 集成 (Helius/Alchemy) | 2026-02-18 | rpc-client.ts, state-store.ts |
 | Task 15 | 实现优雅关闭机制 (SIGTERM/SIGINT) | 2026-02-18 | lifecycle/shutdown.ts |
+| Task 16 | 实现生产级告警系统 | 2026-02-18 | 20 tests |
+| Task 18 | 增强性能监控 (P50/P95/P99) | 2026-02-18 | 18 tests |
 
 ---
 
@@ -78,7 +80,7 @@
 ### P1 - 高优先级（影响运维）
 
 #### Task 16: 实现生产级告警系统
-**状态**: 待开始
+**状态**: ✅ 已完成
 **影响**: 操作员无法及时感知系统异常
 **文件**: `src/execution/execution-engine.ts`, `src/utils/metrics.ts`
 **工作量**: 中
@@ -107,7 +109,7 @@
 ---
 
 #### Task 18: 增强性能监控
-**状态**: 待开始
+**状态**: ✅ 已完成
 **影响**: 无法及时发现性能退化
 **文件**: `src/utils/metrics.ts`
 **工作量**: 中
