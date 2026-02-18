@@ -158,6 +158,49 @@ export const RiskConfigSchema = z.object({
 export type RiskConfig = z.infer<typeof RiskConfigSchema>;
 
 /**
+ * Blockchain configuration schema
+ */
+export const BlockchainConfigSchema = z.object({
+  /** RPC URL for blockchain connection */
+  RPC_URL: z.string().url().optional(),
+
+  /** RPC provider type */
+  RPC_PROVIDER: z.enum(['helius', 'alchemy', 'custom']).default('custom'),
+
+  /** RPC request timeout in milliseconds */
+  RPC_TIMEOUT_MS: z.number().int().positive().default(30000),
+
+  /** Maximum RPC retry attempts */
+  RPC_MAX_RETRIES: z.number().int().nonnegative().default(3),
+
+  /** Base delay between RPC retries in milliseconds */
+  RPC_RETRY_DELAY_MS: z.number().int().nonnegative().default(1000),
+
+  /** Number of blocks for transaction confirmation */
+  CONFIRMATION_BLOCKS: z.number().int().positive().default(12),
+
+  /** Number of blocks for transaction finalization */
+  FINALIZATION_BLOCKS: z.number().int().positive().default(128),
+
+  /** State store type */
+  STATE_STORE_TYPE: z.enum(['file', 'redis', 'memory']).default('file'),
+
+  /** Path for file-based state store */
+  STATE_STORE_PATH: z.string().default('./data/transactions.json'),
+
+  /** Enable blockchain reorg detection */
+  ENABLE_REORG_DETECTION: z.boolean().default(true),
+
+  /** Gas price threshold for alerts (in gwei, 0 = disabled) */
+  GAS_PRICE_THRESHOLD_GWEI: z.number().nonnegative().default(0),
+
+  /** Stuck transaction threshold in milliseconds */
+  STUCK_TRANSACTION_THRESHOLD_MS: z.number().int().positive().default(300000),
+});
+
+export type BlockchainConfig = z.infer<typeof BlockchainConfigSchema>;
+
+/**
  * Complete application configuration schema
  */
 export const AppConfigSchema = z.object({
@@ -168,6 +211,7 @@ export const AppConfigSchema = z.object({
   logging: LogConfigSchema,
   kelly: KellyConfigSchema,
   risk: RiskConfigSchema,
+  blockchain: BlockchainConfigSchema,
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;
@@ -222,6 +266,20 @@ export function parseConfigFromEnv(): AppConfig {
       EMERGENCY_STOP_THRESHOLD: parseFloat(process.env.EMERGENCY_STOP_THRESHOLD ?? '500'),
       CIRCUIT_BREAKER_ENABLED: process.env.CIRCUIT_BREAKER_ENABLED !== 'false',
     }),
+    blockchain: BlockchainConfigSchema.parse({
+      RPC_URL: process.env.RPC_URL || process.env.BLOCKCHAIN_RPC_URL,
+      RPC_PROVIDER: (process.env.RPC_PROVIDER as 'helius' | 'alchemy' | 'custom') ?? 'custom',
+      RPC_TIMEOUT_MS: parseInt(process.env.RPC_TIMEOUT_MS ?? '30000', 10),
+      RPC_MAX_RETRIES: parseInt(process.env.RPC_MAX_RETRIES ?? '3', 10),
+      RPC_RETRY_DELAY_MS: parseInt(process.env.RPC_RETRY_DELAY_MS ?? '1000', 10),
+      CONFIRMATION_BLOCKS: parseInt(process.env.CONFIRMATION_BLOCKS ?? '12', 10),
+      FINALIZATION_BLOCKS: parseInt(process.env.FINALIZATION_BLOCKS ?? '128', 10),
+      STATE_STORE_TYPE: (process.env.STATE_STORE_TYPE as 'file' | 'redis' | 'memory') ?? 'file',
+      STATE_STORE_PATH: process.env.STATE_STORE_PATH ?? './data/transactions.json',
+      ENABLE_REORG_DETECTION: process.env.ENABLE_REORG_DETECTION !== 'false',
+      GAS_PRICE_THRESHOLD_GWEI: parseFloat(process.env.GAS_PRICE_THRESHOLD_GWEI ?? '0'),
+      STUCK_TRANSACTION_THRESHOLD_MS: parseInt(process.env.STUCK_TRANSACTION_THRESHOLD_MS ?? '300000', 10),
+    }),
   };
 }
 
@@ -237,5 +295,6 @@ export function createDefaultConfig(): AppConfig {
     logging: LogConfigSchema.parse({}),
     kelly: KellyConfigSchema.parse({}),
     risk: RiskConfigSchema.parse({}),
+    blockchain: BlockchainConfigSchema.parse({}),
   };
 }

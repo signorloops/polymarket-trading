@@ -14,8 +14,8 @@ import { PolymarketClient } from '../../src/api/polymarket-client.js';
 import { OrderManager } from '../../src/execution/order-manager.js';
 
 describe('ExecutionEngine', () => {
-  beforeEach(() => {
-    resetExecutionEngine();
+  beforeEach(async () => {
+    await resetExecutionEngine();
   });
 
   afterEach(() => {
@@ -39,7 +39,8 @@ describe('ExecutionEngine', () => {
 
       const result = await engine.executeOrder(order);
 
-      expect(result.status).toBe('filled');
+      // Simulation mode can return 'filled' or 'partial' (95% vs 5%)
+      expect(['filled', 'partial']).toContain(result.status);
       expect(result.filledSize).toBeGreaterThan(0);
       expect(result.avgPrice).toBeGreaterThan(0);
     });
@@ -308,10 +309,10 @@ describe('ExecutionEngine', () => {
       expect(engine1).toBe(engine2);
     });
 
-    it('should reset instance when reset called', () => {
+    it('should reset instance when reset called', async () => {
       const clearIntervalSpy = jest.spyOn(global, 'clearInterval');
       const engine1 = getExecutionEngine();
-      resetExecutionEngine();
+      await resetExecutionEngine();
       const engine2 = getExecutionEngine();
 
       expect(clearIntervalSpy).toHaveBeenCalled();
