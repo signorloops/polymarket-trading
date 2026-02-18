@@ -13,6 +13,8 @@ import { TRADING_CONFIG } from '../utils/config.js';
 import type { TradeOrder, OrderStatus, ExecutionResult, TradeLeg } from './types.js';
 import { OrderManager } from './order-manager.js';
 import { PolymarketClient } from '../api/polymarket-client.js';
+import { TradingMetrics, recordTrade, recordArbitrage } from '../utils/metrics.js';
+import { sendAlert } from '../alerts/index.js';
 
 export type { TradeOrder, OrderStatus, ExecutionResult, TradeLeg };
 
@@ -56,6 +58,7 @@ export class ExecutionEngine {
    * Execute a single order
    */
   async executeOrder(order: TradeOrder): Promise<OrderStatus> {
+    const startTime = performance.now();
     this.logger.info(`Executing order ${order.id}`, {
       marketId: order.marketId,
       side: order.side,
@@ -64,15 +67,23 @@ export class ExecutionEngine {
     });
 
     this.orderManager.addPending(order);
+    TradingMetrics.ordersSubmitted.inc({ market_id: order.marketId, side: order.side });
 
     try {
       // Simulate order submission (replace with actual API call)
       const status = await this.submitOrder(order);
+      const executionTime = performance.now() - startTime;
+
       this.orderManager.updateStatus(status);
       this.orderManager.removePending(order.id);
 
+      // Record metrics
+      recordTrade(order.marketId, order.side, status.filledSize, status.avgPrice, executionTime, status.status !== 'error');
+      TradingMetrics.orderExecutionLatency.observe({ market_id: order.marketId }, executionTime);
+
       return status;
     } catch (error) {
+      const executionTime = performance.now() - startTime;
       const errorStatus: OrderStatus = {
         orderId: order.id,
         status: 'error',
@@ -85,6 +96,10 @@ export class ExecutionEngine {
 
       this.orderManager.updateStatus(errorStatus);
       this.orderManager.removePending(order.id);
+
+      // Record failure metrics
+      TradingMetrics.ordersFailed.inc({ market_id: order.marketId, side: order.side });
+      TradingMetrics.orderExecutionLatency.observe({ market_id: order.marketId }, executionTime);
 
       this.logger.error(`Order ${order.id} failed`, { error: errorStatus.error });
       return errorStatus;
@@ -165,6 +180,7 @@ export class ExecutionEngine {
     legs: TradeLeg[],
     arbitrageId: string
   ): Promise<ExecutionResult> {
+    const startTime = performance.now();
     this.logger.info(`Executing arbitrage ${arbitrageId} with ${String(legs.length)} legs`);
 
     // Convert legs to orders
@@ -181,10 +197,20 @@ export class ExecutionEngine {
     // Execute in parallel
     const result = await this.executeParallel(orders);
 
+    // Record arbitrage detection latency (from detection to execution start)
+    const detectionLatency = performance.now() - startTime;
+    TradingMetrics.arbitrageDetectionLatency.observe(
+      { arbitrage_id: arbitrageId },
+      detectionLatency
+    );
+
     // Check for partial fills
     const partialFills = result.orders.filter(
       (o) => o.status === 'partial' || (o.status === 'filled' && o.filledSize < (orders.find(oo => oo.id === o.orderId)?.size ?? 0))
     );
+
+    const totalProfit = result.success ? result.totalFilled * 0.01 : 0; // Simplified profit calc
+    recordArbitrage(arbitrageId, totalProfit, result.success, totalProfit);
 
     if (partialFills.length > 0) {
       this.logger.warn(`Arbitrage ${arbitrageId} has partial fills`, {
@@ -197,9 +223,51 @@ export class ExecutionEngine {
 
       // Handle partial fills - may need to unwind or adjust
       await this.handlePartialFills(arbitrageId, result.orders);
+
+      // Alert manual intervention needed
+      await this.alertManualIntervention({
+        arbitrageId,
+        partialFills: partialFills.map(o => ({
+          orderId: o.orderId,
+          filled: o.filledSize,
+          remaining: o.remainingSize,
+        })),
+        totalFilled: result.totalFilled,
+      });
     }
 
     return result;
+  }
+
+  /**
+   * Alert for manual intervention when partial fills occur
+   */
+  private async alertManualIntervention(context: {
+    arbitrageId: string;
+    partialFills: Array<{ orderId: string; filled: number; remaining: number }>;
+    totalFilled: number;
+  }): Promise<void> {
+    const { arbitrageId, partialFills, totalFilled } = context;
+
+    this.logger.warn(`Manual intervention required for arbitrage ${arbitrageId}`, {
+      partialFills,
+      totalFilled,
+    });
+
+    // Send alert through notification service
+    await sendAlert(
+      'critical',
+      'Arbitrage Partial Fill - Manual Intervention Required',
+      `Arbitrage ${arbitrageId} has partial fills that may require manual intervention. ` +
+      `Total filled: ${totalFilled}. Partial orders: ${partialFills.length}`,
+      {
+        arbitrageId,
+        partialFills,
+        totalFilled,
+        timestamp: Date.now(),
+        recommendation: 'Review positions and consider unwinding or hedging',
+      }
+    );
   }
 
   /**
@@ -229,6 +297,9 @@ export class ExecutionEngine {
 
       this.orderManager.updateStatus(status);
       this.orderManager.removePending(orderId);
+
+      // Record cancellation metric
+      TradingMetrics.ordersCancelled.inc({ order_id: orderId });
 
       return true;
     } catch (error) {

@@ -12,6 +12,7 @@
 import WebSocket from 'ws';
 import { getLogger } from '../utils/logger.js';
 import { NETWORK_CONFIG } from '../utils/config.js';
+import { TradingMetrics } from '../utils/metrics.js';
 
 export interface MarketData {
   marketId: string;
@@ -119,15 +120,21 @@ export class DataPipeline {
     });
 
     this.ws.on('message', (wsData: WebSocket.Data) => {
+      const startTime = performance.now();
       try {
         const dataStr = typeof wsData === 'string' ? wsData : Buffer.from(wsData as Buffer).toString();
         const message: unknown = JSON.parse(dataStr);
         this.handleMessage(message);
+
+        // Record message processing time
+        const processingTime = performance.now() - startTime;
+        TradingMetrics.wsMessageProcessingTime.observe({}, processingTime);
       } catch (error) {
         this.logger.error('Failed to parse message', {
           error: error instanceof Error ? error.message : String(error),
           data: typeof wsData === 'string' ? wsData : Buffer.from(wsData as Buffer).toString().slice(0, 200),
         });
+        TradingMetrics.websocketErrors.inc();
       }
     });
 
@@ -140,6 +147,7 @@ export class DataPipeline {
       this.emit({ type: 'disconnected' });
 
       if (!this.isManualClose) {
+        TradingMetrics.websocketReconnects.inc();
         this.scheduleReconnect();
       }
     });
@@ -203,6 +211,8 @@ export class DataPipeline {
   }
 
   private handleOrderBookMessage(msg: Record<string, unknown>): void {
+    const processStartTime = performance.now();
+
     const bids = Array.isArray(msg.bids)
       ? msg.bids.map((b: unknown) => ({
           price: Number((b as Record<string, unknown>).price ?? 0),
@@ -228,6 +238,11 @@ export class DataPipeline {
 
     if (data.marketId) {
       this.emit({ type: 'orderbook', data });
+
+      // Record order book update metrics
+      const processingTime = performance.now() - processStartTime;
+      TradingMetrics.orderBookUpdateLatency.observe({ market_id: marketId }, processingTime);
+      TradingMetrics.orderBookUpdates.inc({ market_id: marketId });
     }
   }
 

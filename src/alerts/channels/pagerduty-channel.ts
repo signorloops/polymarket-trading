@@ -1,0 +1,158 @@
+/**
+ * PagerDuty notification channel implementation
+ */
+
+import type {
+  AlertLevel,
+  AlertNotification,
+  NotificationChannel,
+  PagerDutyConfig,
+} from '../types.js';
+
+/**
+ * PagerDuty severity mapping
+ */
+type PagerDutySeverity = 'info' | 'warning' | 'error' | 'critical';
+
+/**
+ * PagerDuty event payload
+ */
+interface PagerDutyEventPayload {
+  routing_key: string;
+  event_action: 'trigger' | 'resolve';
+  dedup_key?: string;
+  payload: {
+    summary: string;
+    severity: PagerDutySeverity;
+    source: string;
+    timestamp: string;
+    custom_details?: Record<string, unknown>;
+  };
+}
+
+/**
+ * Default severity mapping
+ */
+const DEFAULT_SEVERITY_MAP: Record<AlertLevel, PagerDutySeverity> = {
+  info: 'info',
+  warning: 'warning',
+  critical: 'critical',
+};
+
+/**
+ * PagerDuty notification channel
+ */
+export class PagerDutyChannel implements NotificationChannel {
+  readonly name = 'pagerduty';
+  readonly enabled: boolean;
+
+  private integrationKey: string | null = null;
+  private severityMap: Record<AlertLevel, PagerDutySeverity>;
+
+  constructor(config?: PagerDutyConfig) {
+    if (config?.integrationKey) {
+      this.integrationKey = config.integrationKey;
+      this.severityMap = config.severityMap ?? DEFAULT_SEVERITY_MAP;
+      this.enabled = true;
+    } else {
+      this.enabled = false;
+      this.severityMap = DEFAULT_SEVERITY_MAP;
+    }
+  }
+
+  /**
+   * Send notification to PagerDuty
+   */
+  async send(notification: AlertNotification): Promise<boolean> {
+    if (!this.enabled || !this.integrationKey) {
+      return false;
+    }
+
+    // Skip info level for PagerDuty (only warning and critical)
+    if (notification.level === 'info') {
+      return false;
+    }
+
+    try {
+      const payload = this.buildPayload(notification);
+
+      const response = await fetch('https://events.pagerduty.com/v2/enqueue', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`PagerDuty API failed: ${response.status} ${errorText}`);
+      }
+
+      const result = await response.json();
+      return result.status === 'success';
+    } catch (error) {
+      console.error('[PagerDutyChannel] Failed to send notification:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Test PagerDuty connectivity
+   */
+  async test(): Promise<boolean> {
+    if (!this.enabled || !this.integrationKey) {
+      return false;
+    }
+
+    try {
+      const payload: PagerDutyEventPayload = {
+        routing_key: this.integrationKey,
+        event_action: 'trigger',
+        dedup_key: 'test-alert',
+        payload: {
+          summary: 'Test alert from Polymarket trading system',
+          severity: 'info',
+          source: 'polymarket-trader',
+          timestamp: new Date().toISOString(),
+        },
+      };
+
+      const response = await fetch('https://events.pagerduty.com/v2/enqueue', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      return response.ok;
+    } catch (error) {
+      console.error('[PagerDutyChannel] Test failed:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Build PagerDuty event payload
+   */
+  private buildPayload(notification: AlertNotification): PagerDutyEventPayload {
+    const dedupKey = notification.id ?? `${notification.title}-${notification.level}`;
+
+    return {
+      routing_key: this.integrationKey!,
+      event_action: 'trigger',
+      dedup_key: dedupKey,
+      payload: {
+        summary: notification.title,
+        severity: this.severityMap[notification.level],
+        source: notification.source ?? 'polymarket-trader',
+        timestamp: notification.timestamp.toISOString(),
+        custom_details: {
+          message: notification.message,
+          ...notification.metadata,
+        },
+      },
+    };
+  }
+}
