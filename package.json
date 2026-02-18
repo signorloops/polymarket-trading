@@ -17,7 +17,8 @@
     "benchmark": "npm run build && node dist/benchmarks/math.bench.js",
     "benchmark:math": "npm run build && node dist/benchmarks/math.bench.js",
     "benchmark:fw": "npm run build && node dist/benchmarks/frank-wolfe.bench.js",
-    "benchmark:orderbook": "npm run build && node dist/benchmarks/orderbook.bench.js"
+    "benchmark:orderbook": "npm run build && node dist/benchmarks/orderbook.bench.js",
+    "prepare": "husky install"
   },
   "keywords": [
     "polymarket",
@@ -35,7 +36,9 @@
     "@types/ws": "^8.18.1",
     "eslint": "^10.0.0",
     "eslint-config-prettier": "^10.1.8",
+    "husky": "^8.0.0",
     "jest": "^30.2.0",
+    "lint-staged": "^16.2.7",
     "prettier": "^3.8.1",
     "ts-jest": "^29.4.6",
     "typescript": "^5.9.3",
