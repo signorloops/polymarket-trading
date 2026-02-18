@@ -1,0 +1,1 @@
+High-frequency arbitrage trading system for Polymarket prediction markets. Features marginal polytope convex optimization, Frank-Wolfe algorithm, Bregman projection with KL divergence, and real-time WebSocket data processing. Built with TypeScript, 93%+ test coverage, production-ready with Docker & monitoring.
