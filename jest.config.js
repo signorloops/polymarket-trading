@@ -16,6 +16,7 @@ export default {
     ],
   },
   testMatch: ['**/tests/**/*.test.ts'],
+  testPathIgnorePatterns: ['/node_modules/', '/dist/', '/.worktrees/', '/.codex-snapshots/'],
   collectCoverageFrom: ['src/**/*.ts', '!src/**/*.d.ts'],
   coverageThreshold: {
     global: {

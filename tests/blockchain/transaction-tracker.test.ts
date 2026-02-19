@@ -4,6 +4,9 @@
 
 import { jest } from '@jest/globals';
 import type { TransactionTracker, Transaction } from '../../src/blockchain/transaction-tracker.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 // Mock logger
 const mockLogger = {
@@ -455,6 +458,45 @@ describe('TransactionTracker', () => {
       expect(tracker.getTransaction('0xtx1')).toBeDefined();
       expect(tracker.getTransaction('0xtx2')).toBeDefined();
       expect(tracker.getStats().total).toBe(2);
+    });
+  });
+
+  describe('persistence', () => {
+    it('should persist transactions to disk and recover on restart', () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tx-tracker-'));
+      const stateFile = path.join(tempDir, 'state.json');
+
+      const trackerA = new TransactionTrackerClass('https://test-rpc.com', stateFile);
+      trackerA.trackTransaction('0xpersist1', 'order-1', 'market-1');
+      trackerA.updateTransaction({
+        hash: '0xpersist1',
+        status: 'confirmed',
+        confirmations: 3,
+      });
+      trackerA.stop();
+
+      const trackerB = new TransactionTrackerClass('https://test-rpc.com', stateFile);
+      const restored = trackerB.getTransaction('0xpersist1');
+
+      expect(restored).toBeDefined();
+      expect(restored?.status).toBe('confirmed');
+      expect(restored?.confirmations).toBe(3);
+
+      trackerB.stop();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should ignore invalid persisted state payload', () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tx-tracker-'));
+      const stateFile = path.join(tempDir, 'state.json');
+      fs.writeFileSync(stateFile, '{"transactions":[{"bad":"payload"}]}', 'utf8');
+
+      const restoredTracker = new TransactionTrackerClass('https://test-rpc.com', stateFile);
+
+      expect(restoredTracker.getStats().total).toBe(0);
+
+      restoredTracker.stop();
+      fs.rmSync(tempDir, { recursive: true, force: true });
     });
   });
 

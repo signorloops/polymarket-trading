@@ -154,6 +154,24 @@ describe('AlertNotificationService', () => {
       const envService = AlertNotificationService.fromEnv();
       expect(envService.getEnabledChannels()).toEqual([]);
     });
+
+    it('should sanitize and fallback invalid env values', () => {
+      process.env.SLACK_WEBHOOK_URL = 'https://hooks.slack.com/test';
+      process.env.ALERTS_DEDUP_WINDOW_MINUTES = 'invalid';
+      process.env.ALERT_ROUTING_INFO = ' slack, , email ';
+      process.env.SMTP_HOST = 'smtp.example.com';
+      process.env.ALERT_EMAIL_FROM = 'bot@example.com';
+      process.env.ALERT_EMAIL_TO = 'a@example.com, , b@example.com ';
+      process.env.SMTP_PORT = 'bad-port';
+
+      const envService = AlertNotificationService.fromEnv();
+      const internalConfig = (envService as unknown as { config: AlertConfig }).config;
+
+      expect(internalConfig.dedupWindowMinutes).toBe(5);
+      expect(internalConfig.routing.info).toEqual(['slack', 'email']);
+      expect(internalConfig.channels.email?.smtp.port).toBe(587);
+      expect(internalConfig.channels.email?.to).toEqual(['a@example.com', 'b@example.com']);
+    });
   });
 });
 

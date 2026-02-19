@@ -11,6 +11,8 @@ import {
   recordTrade,
   recordArbitrage,
   getMetricsForScraping,
+  getLatencyPercentiles,
+  PerformanceAlertManager,
 } from '../../src/utils/metrics.js';
 
 describe('Counter', () => {
@@ -186,5 +188,43 @@ describe('recordArbitrage', () => {
 
     expect(TradingMetrics.arbitrageExecuted.get({ event_id: 'event-1' })).toBe(1);
     expect(TradingMetrics.arbitrageProfit.get({ event_id: 'event-1' })).toBeCloseTo(0.03, 5);
+  });
+});
+
+describe('PerformanceAlertManager', () => {
+  it('should read latency metrics by TradingMetrics key', () => {
+    TradingMetrics.orderExecutionLatency = new Histogram(
+      'trading_order_execution_latency_ms',
+      'Order execution latency from submission to confirmation in milliseconds',
+      [10, 20, 30]
+    );
+    for (let i = 0; i < 100; i++) {
+      TradingMetrics.orderExecutionLatency.observe({}, 5);
+    }
+
+    const manager = new PerformanceAlertManager();
+    const value = (
+      manager as unknown as { getMetricValue: (metricName: string) => number | null }
+    ).getMetricValue('orderExecutionLatency');
+
+    expect(value).not.toBeNull();
+    expect(value).toBeLessThanOrEqual(10);
+  });
+});
+
+describe('getLatencyPercentiles', () => {
+  it('should convert cumulative histogram buckets before percentile calculation', () => {
+    TradingMetrics.orderExecutionLatency = new Histogram(
+      'trading_order_execution_latency_ms',
+      'Order execution latency from submission to confirmation in milliseconds',
+      [10, 20, 30]
+    );
+
+    for (let i = 0; i < 100; i++) {
+      TradingMetrics.orderExecutionLatency.observe({}, 5);
+    }
+
+    const percentiles = getLatencyPercentiles('orderExecutionLatency');
+    expect(percentiles.p95).toBeLessThanOrEqual(10);
   });
 });

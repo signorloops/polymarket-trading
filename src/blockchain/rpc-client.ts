@@ -131,7 +131,7 @@ export class RpcClient {
     });
 
     if (!response.ok) {
-      throw new Error(`RPC request failed: ${response.status} ${response.statusText}`);
+      throw new Error(`RPC request failed: ${String(response.status)} ${response.statusText}`);
     }
 
     const data = await response.json() as {
@@ -142,7 +142,7 @@ export class RpcClient {
     };
 
     if (data.error) {
-      throw new Error(`RPC error: ${data.error.message} (code: ${data.error.code})`);
+      throw new Error(`RPC error: ${data.error.message} (code: ${String(data.error.code)})`);
     }
 
     return data.result as T;
@@ -185,7 +185,7 @@ export class RpcClient {
       this.getBlockNumber(),
     ]);
 
-    if (!receipt || !receipt.blockNumber) {
+    if (!receipt) {
       return false;
     }
 
@@ -268,7 +268,7 @@ export class RpcClient {
   async waitForConfirmation(
     hash: string,
     confirmations?: number,
-    timeoutMs: number = 300000
+    timeoutMs = 300000
   ): Promise<TransactionReceipt> {
     const startTime = Date.now();
     const requiredConfirmations = confirmations ?? this.confirmationBlocks;
@@ -295,9 +295,12 @@ export class RpcClient {
           }
 
           // Wait and check again
-          setTimeout(checkStatus, 2000).unref?.();
-        } catch (error) {
-          reject(error);
+          const timer = setTimeout(() => {
+            void checkStatus();
+          }, 2000);
+          timer.unref();
+        } catch (error: unknown) {
+          reject(error instanceof Error ? error : new Error(String(error)));
         }
       };
 

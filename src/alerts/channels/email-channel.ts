@@ -24,7 +24,7 @@ export class EmailChannel implements NotificationChannel {
   constructor(config?: EmailConfig) {
     if (config?.smtp?.host && config.from && config.to.length > 0) {
       this.config = config;
-      this.transporter = nodemailer.createTransporter({
+      this.transporter = nodemailer.createTransport({
         host: config.smtp.host,
         port: config.smtp.port,
         secure: config.smtp.secure,

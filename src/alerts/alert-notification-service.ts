@@ -14,6 +14,26 @@ import { DiscordChannel } from './channels/discord-channel.js';
 import { EmailChannel } from './channels/email-channel.js';
 import { PagerDutyChannel } from './channels/pagerduty-channel.js';
 
+function parseAlertLevel(value: string | undefined): AlertLevel {
+  if (value === 'info' || value === 'warning' || value === 'critical') {
+    return value;
+  }
+  return 'info';
+}
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parseCsvList(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
 /**
  * Alert notification service
  * Manages multiple notification channels with deduplication and history
@@ -36,54 +56,63 @@ export class AlertNotificationService {
    * Create service from environment variables
    */
   static fromEnv(): AlertNotificationService {
+    const channels: AlertConfig['channels'] = {};
+
+    if (process.env.SLACK_WEBHOOK_URL) {
+      channels.slack = {
+        webhookUrl: process.env.SLACK_WEBHOOK_URL,
+        ...(process.env.SLACK_CHANNEL ? { channel: process.env.SLACK_CHANNEL } : {}),
+        username: process.env.SLACK_USERNAME ?? 'Polymarket Alerts',
+        ...(process.env.SLACK_ICON_EMOJI ? { iconEmoji: process.env.SLACK_ICON_EMOJI } : {}),
+      };
+    }
+
+    if (process.env.DISCORD_WEBHOOK_URL) {
+      channels.discord = {
+        webhookUrl: process.env.DISCORD_WEBHOOK_URL,
+        username: process.env.DISCORD_USERNAME ?? 'Polymarket Alerts',
+      };
+    }
+
+    if (process.env.SMTP_HOST && process.env.ALERT_EMAIL_FROM && process.env.ALERT_EMAIL_TO) {
+      channels.email = {
+        smtp: {
+          host: process.env.SMTP_HOST,
+          port: parsePositiveInt(process.env.SMTP_PORT, 587),
+          secure: process.env.SMTP_SECURE === 'true',
+          ...(process.env.SMTP_USER && process.env.SMTP_PASS
+            ? {
+                auth: {
+                  user: process.env.SMTP_USER,
+                  pass: process.env.SMTP_PASS,
+                },
+              }
+            : {}),
+        },
+        from: process.env.ALERT_EMAIL_FROM,
+        to: parseCsvList(process.env.ALERT_EMAIL_TO),
+      };
+    }
+
+    if (process.env.PAGERDUTY_INTEGRATION_KEY) {
+      channels.pagerduty = {
+        integrationKey: process.env.PAGERDUTY_INTEGRATION_KEY,
+      };
+    }
+
     const config: AlertConfig = {
       enabled: process.env.ALERTS_ENABLED !== 'false',
-      minLevel: (process.env.ALERTS_MIN_LEVEL as AlertLevel) ?? 'info',
-      dedupWindowMinutes: parseInt(process.env.ALERTS_DEDUP_WINDOW_MINUTES ?? '5', 10),
-      channels: {
-        slack: process.env.SLACK_WEBHOOK_URL
-          ? {
-              webhookUrl: process.env.SLACK_WEBHOOK_URL,
-              channel: process.env.SLACK_CHANNEL,
-              username: process.env.SLACK_USERNAME ?? 'Polymarket Alerts',
-              iconEmoji: process.env.SLACK_ICON_EMOJI,
-            }
-          : undefined,
-        discord: process.env.DISCORD_WEBHOOK_URL
-          ? {
-              webhookUrl: process.env.DISCORD_WEBHOOK_URL,
-              username: process.env.DISCORD_USERNAME ?? 'Polymarket Alerts',
-            }
-          : undefined,
-        email:
-          process.env.SMTP_HOST && process.env.ALERT_EMAIL_FROM && process.env.ALERT_EMAIL_TO
-            ? {
-                smtp: {
-                  host: process.env.SMTP_HOST,
-                  port: parseInt(process.env.SMTP_PORT ?? '587', 10),
-                  secure: process.env.SMTP_SECURE === 'true',
-                  auth:
-                    process.env.SMTP_USER && process.env.SMTP_PASS
-                      ? {
-                          user: process.env.SMTP_USER,
-                          pass: process.env.SMTP_PASS,
-                        }
-                      : undefined,
-                },
-                from: process.env.ALERT_EMAIL_FROM,
-                to: process.env.ALERT_EMAIL_TO.split(',').map((e) => e.trim()),
-              }
-            : undefined,
-        pagerduty: process.env.PAGERDUTY_INTEGRATION_KEY
-          ? {
-              integrationKey: process.env.PAGERDUTY_INTEGRATION_KEY,
-            }
-          : undefined,
-      },
+      minLevel: parseAlertLevel(process.env.ALERTS_MIN_LEVEL),
+      dedupWindowMinutes: parsePositiveInt(process.env.ALERTS_DEDUP_WINDOW_MINUTES, 5),
+      channels,
       routing: {
-        info: process.env.ALERT_ROUTING_INFO?.split(',') ?? [],
-        warning: process.env.ALERT_ROUTING_WARNING?.split(',') ?? ['slack', 'email'],
-        critical: process.env.ALERT_ROUTING_CRITICAL?.split(',') ?? [
+        info: parseCsvList(process.env.ALERT_ROUTING_INFO),
+        warning: parseCsvList(process.env.ALERT_ROUTING_WARNING).length > 0
+          ? parseCsvList(process.env.ALERT_ROUTING_WARNING)
+          : ['slack', 'email'],
+        critical: parseCsvList(process.env.ALERT_ROUTING_CRITICAL).length > 0
+          ? parseCsvList(process.env.ALERT_ROUTING_CRITICAL)
+          : [
           'slack',
           'email',
           'pagerduty',
@@ -114,7 +143,7 @@ export class AlertNotificationService {
     }
 
     // Get routing for this level
-    const routing = this.config.routing[notification.level] ?? [];
+    const routing = this.config.routing[notification.level];
 
     const sentTo: string[] = [];
     const failedTo: string[] = [];
@@ -156,14 +185,15 @@ export class AlertNotificationService {
     message: string,
     metadata?: Record<string, unknown>
   ): Promise<AlertHistoryEntry> {
-    return this.send({
+    const notification: AlertNotification = {
       level,
       title,
       message,
-      metadata,
       timestamp: new Date(),
       source: 'polymarket-trader',
-    });
+      ...(metadata ? { metadata } : {}),
+    };
+    return this.send(notification);
   }
 
   /**
@@ -186,7 +216,7 @@ export class AlertNotificationService {
   /**
    * Get alert history
    */
-  getHistory(limit: number = 100): AlertHistoryEntry[] {
+  getHistory(limit = 100): AlertHistoryEntry[] {
     return this.alertHistory.slice(-limit);
   }
 

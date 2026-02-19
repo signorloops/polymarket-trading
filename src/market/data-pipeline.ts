@@ -57,7 +57,7 @@ export class DataPipeline {
    * Connect to the WebSocket
    */
   connect(): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
       this.logger.warn('Already connected');
       return;
     }
@@ -110,8 +110,12 @@ export class DataPipeline {
 
   private setupEventHandlers(): void {
     if (!this.ws) return;
+    const currentWs = this.ws;
 
-    this.ws.on('open', () => {
+    currentWs.on('open', () => {
+      if (this.ws && this.ws !== currentWs) {
+        return;
+      }
       this.logger.info('WebSocket connected');
       this.reconnectAttempts = 0;
       this.startHeartbeat();
@@ -119,10 +123,13 @@ export class DataPipeline {
       this.subscribeToMarkets();
     });
 
-    this.ws.on('message', (wsData: WebSocket.Data) => {
+    currentWs.on('message', (wsData: WebSocket.Data) => {
+      if (this.ws && this.ws !== currentWs) {
+        return;
+      }
       const startTime = performance.now();
       try {
-        const dataStr = typeof wsData === 'string' ? wsData : Buffer.from(wsData as Buffer).toString();
+        const dataStr = this.webSocketDataToString(wsData);
         const message: unknown = JSON.parse(dataStr);
         this.handleMessage(message);
 
@@ -130,15 +137,26 @@ export class DataPipeline {
         const processingTime = performance.now() - startTime;
         TradingMetrics.wsMessageProcessingTime.observe({}, processingTime);
       } catch (error) {
+        const dataPreview = (() => {
+          try {
+            return this.webSocketDataToString(wsData).slice(0, 200);
+          } catch {
+            return '[unreadable websocket payload]';
+          }
+        })();
         this.logger.error('Failed to parse message', {
           error: error instanceof Error ? error.message : String(error),
-          data: typeof wsData === 'string' ? wsData : Buffer.from(wsData as Buffer).toString().slice(0, 200),
+          data: dataPreview,
         });
         TradingMetrics.websocketErrors.inc();
       }
     });
 
-    this.ws.on('close', (code: number, reason: Buffer) => {
+    currentWs.on('close', (code: number, reason: Buffer) => {
+      if (this.ws && this.ws !== currentWs) {
+        return;
+      }
+      this.ws = null;
       this.logger.info('WebSocket closed', {
         code,
         reason: reason.toString(),
@@ -152,13 +170,18 @@ export class DataPipeline {
       }
     });
 
-    this.ws.on('error', (error: Error) => {
+    currentWs.on('error', (error: Error) => {
+      if (this.ws && this.ws !== currentWs) {
+        return;
+      }
       this.logger.error('WebSocket error', { error: error.message });
       this.emit({ type: 'error', error });
     });
 
-    this.ws.on('ping', (data: Buffer) => {
-      this.ws?.pong(data);
+    currentWs.on('ping', (data: Buffer) => {
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        this.ws.pong(data);
+      }
     });
   }
 
@@ -285,6 +308,19 @@ export class DataPipeline {
     }
   }
 
+  private webSocketDataToString(data: WebSocket.Data): string {
+    if (typeof data === 'string') {
+      return data;
+    }
+    if (Buffer.isBuffer(data)) {
+      return data.toString();
+    }
+    if (Array.isArray(data)) {
+      return Buffer.concat(data).toString();
+    }
+    return Buffer.from(data).toString();
+  }
+
   private emit(event: DataPipelineEvent): void {
     for (const handler of this.handlers) {
       try {
@@ -298,9 +334,18 @@ export class DataPipeline {
   }
 
   private scheduleReconnect(): void {
+    if (this.isManualClose) {
+      return;
+    }
+
     if (this.reconnectAttempts >= NETWORK_CONFIG.MAX_RECONNECT_ATTEMPTS) {
       this.logger.error('Max reconnection attempts reached');
       return;
+    }
+
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
 
     this.reconnectAttempts++;
@@ -314,19 +359,28 @@ export class DataPipeline {
     });
 
     this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.isManualClose) {
+        return;
+      }
       this.connect();
     }, delay);
-    this.reconnectTimer.unref?.();
+    this.reconnectTimer.unref();
   }
 
   private startHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+
     // Send ping every 30 seconds to keep connection alive
     this.heartbeatTimer = setInterval(() => {
       if (this.ws?.readyState === WebSocket.OPEN) {
         this.ws.ping();
       }
     }, 30000);
-    this.heartbeatTimer.unref?.();
+    this.heartbeatTimer.unref();
   }
 
   private clearTimers(): void {

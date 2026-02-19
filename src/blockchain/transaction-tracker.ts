@@ -11,7 +11,9 @@
 
 import { getLogger } from '../utils/logger.js';
 import { NETWORK_CONFIG } from '../utils/config.js';
-import { RpcClient, getRpcClient } from './rpc-client.js';
+import { RpcClient } from './rpc-client.js';
+import fs from 'node:fs';
+import path from 'node:path';
 
 export type TransactionStatus =
   | 'pending'
@@ -52,11 +54,17 @@ type TransactionHandler = (tx: Transaction) => void;
 
 // Configuration
 const DEFAULT_CONFIRMATION_BLOCKS = 12; // Polygon recommended
-const DEFAULT_FINALIZATION_BLOCKS = 128; // ~4 minutes on Polygon
 const MAX_RETRY_ATTEMPTS = 5;
 const RETRY_BASE_DELAY_MS = 1000;
 const POLL_INTERVAL_MS = 2000;
 const TRANSACTION_TIMEOUT_MS = 300000; // 5 minutes
+const DEFAULT_STATE_FILE_PATH = path.join(process.cwd(), '.state', 'transaction-tracker.json');
+const DISABLE_PERSISTENCE_IN_TEST = process.env.NODE_ENV === 'test';
+
+interface PersistedState {
+  transactions: Transaction[];
+  savedAt: number;
+}
 
 /**
  * TransactionTracker monitors on-chain transaction status
@@ -68,9 +76,10 @@ export class TransactionTracker {
   private logger = getLogger().child({ module: 'TransactionTracker' });
   private rpcUrl: string;
   private rpcClient: RpcClient | null = null;
-  private useRealBlockchain: boolean = false;
+  private useRealBlockchain = false;
+  private stateFilePath: string;
 
-  constructor(rpcUrl: string = NETWORK_CONFIG.RPC_URL ?? '') {
+  constructor(rpcUrl: string = NETWORK_CONFIG.RPC_URL ?? '', stateFilePath?: string) {
     this.rpcUrl = rpcUrl;
     this.rpcClient = rpcUrl ? new RpcClient({
       rpcUrl,
@@ -80,6 +89,11 @@ export class TransactionTracker {
       finalizationBlocks: 128,
     }) : null;
     this.useRealBlockchain = !!this.rpcClient;
+    this.stateFilePath = DISABLE_PERSISTENCE_IN_TEST && !stateFilePath
+      ? ''
+      : (stateFilePath ?? process.env.TX_TRACKER_STATE_PATH ?? DEFAULT_STATE_FILE_PATH);
+
+    this.loadStateFromDisk();
   }
 
   /**
@@ -254,7 +268,7 @@ export class TransactionTracker {
 
     tx.retryCount++;
     tx.status = 'pending';
-    tx.lastError = undefined as unknown as string;
+    delete tx.lastError;
 
     // Calculate exponential backoff delay
     const delay = RETRY_BASE_DELAY_MS * Math.pow(2, tx.retryCount - 1);
@@ -386,7 +400,7 @@ export class TransactionTracker {
   /**
    * Clear old completed transactions
    */
-  clearOldTransactions(maxAgeMs: number = 3600000): number {
+  clearOldTransactions(maxAgeMs = 3600000): number {
     const now = Date.now();
     let removed = 0;
 
@@ -408,7 +422,7 @@ export class TransactionTracker {
     }
 
     if (removed > 0) {
-      this.logger.info(`Cleared ${removed} old transactions`);
+      this.logger.info(`Cleared ${String(removed)} old transactions`);
       this.saveState();
     }
 
@@ -423,6 +437,7 @@ export class TransactionTracker {
       clearInterval(this.pollInterval);
       this.pollInterval = null;
     }
+    this.saveState();
     this.logger.info('Transaction tracker stopped');
   }
 
@@ -478,10 +493,10 @@ export class TransactionTracker {
     if (this.pollInterval) return;
 
     this.pollInterval = setInterval(() => {
-      this.pollTransactions();
+      void this.pollTransactions();
     }, POLL_INTERVAL_MS);
 
-    this.pollInterval.unref?.();
+    this.pollInterval.unref();
   }
 
   private async pollTransactions(): Promise<void> {
@@ -501,10 +516,8 @@ export class TransactionTracker {
             if (status.blockNumber !== undefined) {
               update.blockNumber = status.blockNumber;
             }
-            if (status.confirmations !== undefined) {
-              update.confirmations = status.confirmations;
-            }
-            if (status.receipt.gasUsed !== undefined) {
+            update.confirmations = status.confirmations;
+            if (status.receipt.gasUsed) {
               update.gasUsed = status.receipt.gasUsed;
             }
             this.updateTransaction(update);
@@ -560,16 +573,112 @@ export class TransactionTracker {
         this.removeTransaction(hash);
       },
       3600000
-    ).unref?.();
+    ).unref();
   }
 
   /**
    * Save state for crash recovery
-   * In production, this should persist to disk or database
    */
   private saveState(): void {
-    // TODO: Implement actual persistence (Redis, database, or file)
-    // For now, we keep state in memory only
+    if (!this.stateFilePath) {
+      return;
+    }
+
+    const state: PersistedState = {
+      transactions: this.getAllTransactions(),
+      savedAt: Date.now(),
+    };
+
+    try {
+      const stateDir = path.dirname(this.stateFilePath);
+      fs.mkdirSync(stateDir, { recursive: true });
+
+      const tempPath = `${this.stateFilePath}.tmp`;
+      fs.writeFileSync(tempPath, JSON.stringify(state, null, 2), 'utf8');
+      fs.renameSync(tempPath, this.stateFilePath);
+    } catch (error) {
+      this.logger.error('Failed to persist transaction tracker state', {
+        file: this.stateFilePath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private loadStateFromDisk(): void {
+    if (!this.stateFilePath) {
+      return;
+    }
+
+    try {
+      if (!fs.existsSync(this.stateFilePath)) {
+        return;
+      }
+
+      const raw = fs.readFileSync(this.stateFilePath, 'utf8');
+      if (!raw.trim()) {
+        return;
+      }
+
+      const parsed: unknown = JSON.parse(raw);
+      const transactions = this.extractTransactions(parsed);
+
+      if (transactions.length > 0) {
+        this.loadState(transactions);
+      }
+    } catch (error) {
+      this.logger.error('Failed to load transaction tracker state', {
+        file: this.stateFilePath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private extractTransactions(parsed: unknown): Transaction[] {
+    if (Array.isArray(parsed)) {
+      return parsed.filter((value): value is Transaction => this.isValidTransaction(value));
+    }
+
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      'transactions' in parsed &&
+      Array.isArray((parsed as PersistedState).transactions)
+    ) {
+      return (parsed as PersistedState).transactions.filter((value): value is Transaction =>
+        this.isValidTransaction(value)
+      );
+    }
+
+    return [];
+  }
+
+  private isValidTransaction(value: unknown): value is Transaction {
+    if (typeof value !== 'object' || value === null) {
+      return false;
+    }
+
+    const tx = value as Partial<Transaction>;
+    return (
+      typeof tx.hash === 'string' &&
+      typeof tx.orderId === 'string' &&
+      typeof tx.marketId === 'string' &&
+      typeof tx.createdAt === 'number' &&
+      typeof tx.confirmations === 'number' &&
+      typeof tx.retryCount === 'number' &&
+      typeof tx.status === 'string' &&
+      this.isTransactionStatus(tx.status)
+    );
+  }
+
+  private isTransactionStatus(status: string): status is TransactionStatus {
+    return (
+      status === 'pending' ||
+      status === 'submitted' ||
+      status === 'confirmed' ||
+      status === 'finalized' ||
+      status === 'failed' ||
+      status === 'expired'
+    );
   }
 
   /**
@@ -579,7 +688,7 @@ export class TransactionTracker {
     for (const tx of transactions) {
       this.transactions.set(tx.hash, tx);
     }
-    this.logger.info(`Loaded ${transactions.length} transactions from storage`);
+    this.logger.info(`Loaded ${String(transactions.length)} transactions from storage`);
     this.startPolling();
   }
 }

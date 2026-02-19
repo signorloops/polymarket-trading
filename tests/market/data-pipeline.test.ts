@@ -547,6 +547,63 @@ describe('DataPipeline', () => {
       );
     });
 
+    it('should handle message with ArrayBuffer data', () => {
+      const handler = jest.fn();
+      pipeline.subscribe(handler);
+
+      const tradeMessage = {
+        event_type: 'trade',
+        market_id: 'market-1',
+        event_id: 'event-1',
+        price: 0.75,
+        size: 100,
+        side: 'buy',
+        timestamp: 1234567890,
+      };
+
+      const encoded = new TextEncoder().encode(JSON.stringify(tradeMessage));
+      const arrayBuffer = encoded.buffer.slice(
+        encoded.byteOffset,
+        encoded.byteOffset + encoded.byteLength
+      );
+      mockState.wsInstance?.eventHandlers['message']?.(arrayBuffer);
+
+      expect(handler).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'trade',
+        })
+      );
+    });
+
+    it('should handle message with fragmented Buffer array data', () => {
+      const handler = jest.fn();
+      pipeline.subscribe(handler);
+
+      const tradeMessage = {
+        event_type: 'trade',
+        market_id: 'market-1',
+        event_id: 'event-1',
+        price: 0.75,
+        size: 100,
+        side: 'buy',
+        timestamp: 1234567890,
+      };
+
+      const serialized = JSON.stringify(tradeMessage);
+      const midpoint = Math.floor(serialized.length / 2);
+      const fragments = [
+        Buffer.from(serialized.slice(0, midpoint)),
+        Buffer.from(serialized.slice(midpoint)),
+      ];
+      mockState.wsInstance?.eventHandlers['message']?.(fragments);
+
+      expect(handler).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'trade',
+        })
+      );
+    });
+
     it('should handle invalid Buffer data', () => {
       const bufferData = Buffer.from('invalid json {[');
       mockState.wsInstance?.eventHandlers['message']?.(bufferData);
@@ -750,6 +807,18 @@ describe('DataPipeline', () => {
 
       // Should reconnect immediately with base delay
       expect(mockState.constructorCalls).toHaveLength(3);
+    });
+
+    it('should cancel stale reconnect timers after repeated close events', () => {
+      // Fire close twice before timer execution to simulate noisy close/error bursts.
+      mockState.wsInstance?.eventHandlers['close']?.(1006, Buffer.from('test'));
+      mockState.wsInstance?.eventHandlers['close']?.(1006, Buffer.from('test'));
+
+      // Manual disconnect should cancel all future reconnect attempts.
+      pipeline.disconnect();
+      jest.advanceTimersByTime(60000);
+
+      expect(mockState.constructorCalls).toHaveLength(1);
     });
   });
 
