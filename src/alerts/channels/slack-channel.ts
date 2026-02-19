@@ -3,6 +3,7 @@
  */
 
 import { IncomingWebhook } from '@slack/webhook';
+import type { IncomingWebhookSendArguments } from '@slack/webhook';
 import {
   type AlertNotification,
   type NotificationChannel,
@@ -49,21 +50,22 @@ export class SlackChannel implements NotificationChannel {
 
     try {
       const blocks = this.buildBlocks(notification);
-
-      await this.client.send({
+      const payload: IncomingWebhookSendArguments = {
         username: this.config?.username ?? 'Polymarket Alerts',
         icon_emoji: this.config?.iconEmoji ?? ':warning:',
-        channel: this.config?.channel,
         blocks,
         attachments: [
           {
             color: LEVEL_COLORS[notification.level],
             fields: this.buildFields(notification.metadata),
             footer: `Source: ${notification.source ?? 'unknown'}`,
-            ts: Math.floor(notification.timestamp.getTime() / 1000),
+            ts: String(Math.floor(notification.timestamp.getTime() / 1000)),
           },
         ],
-      });
+        ...(this.config?.channel ? { channel: this.config.channel } : {}),
+      };
+
+      await this.client.send(payload);
 
       return true;
     } catch (error) {
@@ -95,8 +97,10 @@ export class SlackChannel implements NotificationChannel {
   /**
    * Build Slack blocks from notification
    */
-  private buildBlocks(notification: AlertNotification): unknown[] {
-    const blocks: unknown[] = [
+  private buildBlocks(
+    notification: AlertNotification
+  ): NonNullable<IncomingWebhookSendArguments['blocks']> {
+    const blocks: NonNullable<IncomingWebhookSendArguments['blocks']> = [
       {
         type: 'header',
         text: {

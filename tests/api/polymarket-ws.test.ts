@@ -88,6 +88,7 @@ const {
   getPolymarketWebSocketClient,
   resetPolymarketWebSocketClient,
 } = await import('../../src/api/polymarket-ws.js');
+const { NETWORK_CONFIG } = await import('../../src/utils/config.js');
 
 describe('PolymarketWebSocketClient', () => {
   let client: InstanceType<typeof PolymarketWebSocketClient>;
@@ -674,18 +675,24 @@ describe('PolymarketWebSocketClient', () => {
     });
 
     it('should cap reconnect delay at 60 seconds', () => {
-      client.connect();
+      const mutableNetworkConfig = NETWORK_CONFIG as { MAX_RECONNECT_ATTEMPTS: number };
+      const originalMaxReconnectAttempts = mutableNetworkConfig.MAX_RECONNECT_ATTEMPTS;
+      const setTimeoutSpy = jest.spyOn(global, 'setTimeout');
+      try {
+        client.connect();
 
-      // Simulate multiple reconnect attempts
-      for (let i = 0; i < 10; i++) {
+        mutableNetworkConfig.MAX_RECONNECT_ATTEMPTS = 20;
+        client['reconnectAttempts'] = 7;
+
         const mockWs = getMockWs();
         mockWs!.readyState = MockWebSocket.CLOSED;
         mockWs?.emit('close', 1006, Buffer.from('Connection lost'));
-        jest.advanceTimersByTime(Math.min(1000 * Math.pow(2, i), 60000));
-      }
 
-      // Should still be trying to reconnect
-      expect(getMockWs()).toBeTruthy();
+        expect(setTimeoutSpy).toHaveBeenLastCalledWith(expect.any(Function), 60000);
+      } finally {
+        mutableNetworkConfig.MAX_RECONNECT_ATTEMPTS = originalMaxReconnectAttempts;
+        setTimeoutSpy.mockRestore();
+      }
     });
 
     it('should stop reconnecting after max attempts', () => {
@@ -701,14 +708,25 @@ describe('PolymarketWebSocketClient', () => {
         jest.advanceTimersByTime(60000);
       }
 
-      // Try one more time
-      const mockWs = getMockWs();
-      mockWs!.readyState = MockWebSocket.CLOSED;
-      mockWs?.emit('close', 1006, Buffer.from('Connection lost'));
       jest.advanceTimersByTime(60000);
 
       // Should not have created a new WebSocket
       expect(connectSpy).toHaveBeenCalledTimes(4); // Initial + 3 reconnects
+    });
+
+    it('should cancel stale reconnect timers after repeated close events', () => {
+      const connectSpy = jest.spyOn(client, 'connect');
+      client.connect();
+
+      const mockWs = getMockWs();
+      mockWs!.readyState = MockWebSocket.CLOSED;
+      mockWs?.emit('close', 1006, Buffer.from('Connection lost'));
+      mockWs?.emit('close', 1006, Buffer.from('Connection lost'));
+
+      client.disconnect();
+      jest.advanceTimersByTime(60000);
+
+      expect(connectSpy).toHaveBeenCalledTimes(1);
     });
   });
 

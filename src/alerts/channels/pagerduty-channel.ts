@@ -89,8 +89,16 @@ export class PagerDutyChannel implements NotificationChannel {
         throw new Error(`PagerDuty API failed: ${response.status} ${errorText}`);
       }
 
-      const result = await response.json();
-      return result.status === 'success';
+      const result: unknown = await response.json();
+      if (
+        typeof result === 'object' &&
+        result !== null &&
+        'status' in result &&
+        (result as { status: unknown }).status === 'success'
+      ) {
+        return true;
+      }
+      return false;
     } catch (error) {
       console.error('[PagerDutyChannel] Failed to send notification:', error);
       return false;

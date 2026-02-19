@@ -245,7 +245,7 @@ export class ExecutionEngine {
    */
   private async alertManualIntervention(context: {
     arbitrageId: string;
-    partialFills: Array<{ orderId: string; filled: number; remaining: number }>;
+    partialFills: { orderId: string; filled: number; remaining: number }[];
     totalFilled: number;
   }): Promise<void> {
     const { arbitrageId, partialFills, totalFilled } = context;
@@ -260,7 +260,7 @@ export class ExecutionEngine {
       'critical',
       'Arbitrage Partial Fill - Manual Intervention Required',
       `Arbitrage ${arbitrageId} has partial fills that may require manual intervention. ` +
-      `Total filled: ${totalFilled}. Partial orders: ${partialFills.length}`,
+      `Total filled: ${String(totalFilled)}. Partial orders: ${String(partialFills.length)}`,
       {
         arbitrageId,
         partialFills,

@@ -29,12 +29,14 @@ export function calculatePercentile(values: number[], percentile: number): numbe
 
   // If index is integer, return exact value
   if (lowerIndex === upperIndex) {
-    return sorted[lowerIndex];
+    return sorted[lowerIndex] ?? 0;
   }
 
   // Linear interpolation between two values
   const weight = index - lowerIndex;
-  return sorted[lowerIndex] * (1 - weight) + sorted[upperIndex] * weight;
+  const lowerValue = sorted[lowerIndex] ?? 0;
+  const upperValue = sorted[upperIndex] ?? lowerValue;
+  return lowerValue * (1 - weight) + upperValue * weight;
 }
 
 /**
@@ -51,7 +53,7 @@ export function calculatePercentiles(
   const result: Record<string, number> = {};
 
   for (const p of percentiles) {
-    result[`p${p}`] = calculatePercentile(values, p);
+    result[`p${String(p)}`] = calculatePercentile(values, p);
   }
 
   return result;
@@ -77,7 +79,7 @@ export function calculateHistogramPercentiles(
   percentiles: number[] = [50, 95, 99]
 ): Record<string, number> {
   if (buckets.length === 0) {
-    return percentiles.reduce((acc, p) => ({ ...acc, [`p${p}`]: 0 }), {});
+    return percentiles.reduce((acc, p) => ({ ...acc, [`p${String(p)}`]: 0 }), {});
   }
 
   // Sort buckets by value
@@ -87,17 +89,21 @@ export function calculateHistogramPercentiles(
   const totalCount = sortedBuckets.reduce((sum, b) => sum + b.count, 0);
 
   if (totalCount === 0) {
-    return percentiles.reduce((acc, p) => ({ ...acc, [`p${p}`]: 0 }), {});
+    return percentiles.reduce((acc, p) => ({ ...acc, [`p${String(p)}`]: 0 }), {});
   }
 
   const result: Record<string, number> = {};
 
   for (const percentile of percentiles) {
+    const resultKey = `p${String(percentile)}`;
     const targetCount = (percentile / 100) * totalCount;
     let cumulativeCount = 0;
 
     for (let i = 0; i < sortedBuckets.length; i++) {
       const bucket = sortedBuckets[i];
+      if (!bucket) {
+        continue;
+      }
       const prevCumulative = cumulativeCount;
       cumulativeCount += bucket.count;
 
@@ -108,15 +114,15 @@ export function calculateHistogramPercentiles(
             ? (targetCount - prevCumulative) / bucket.count
             : 0;
 
-        const prevValue = i > 0 ? sortedBuckets[i - 1].value : 0;
-        result[`p${percentile}`] = prevValue + (bucket.value - prevValue) * bucketProgress;
+        const prevValue = i > 0 ? (sortedBuckets[i - 1]?.value ?? 0) : 0;
+        result[resultKey] = prevValue + (bucket.value - prevValue) * bucketProgress;
         break;
       }
     }
 
     // Fallback to max value if not found
-    if (!(`p${percentile}` in result)) {
-      result[`p${percentile}`] = sortedBuckets[sortedBuckets.length - 1]?.value ?? 0;
+    if (!(resultKey in result)) {
+      result[resultKey] = sortedBuckets[sortedBuckets.length - 1]?.value ?? 0;
     }
   }
 
@@ -130,7 +136,7 @@ export class LatencyBuffer {
   private values: number[] = [];
   private readonly maxSize: number;
 
-  constructor(maxSize: number = 10000) {
+  constructor(maxSize = 10000) {
     this.maxSize = maxSize;
   }
 
@@ -178,8 +184,8 @@ export class LatencyBuffer {
 
     return {
       count: sorted.length,
-      min: sorted[0],
-      max: sorted[sorted.length - 1],
+      min: sorted[0] ?? 0,
+      max: sorted[sorted.length - 1] ?? 0,
       mean: sum / sorted.length,
       percentiles: calculatePercentiles(this.values, [50, 95, 99]),
     };

@@ -790,6 +790,7 @@ describe('Trading System Integration', () => {
 
       // Second start should not throw, just log warning
       await expect(system.start()).resolves.not.toThrow();
+      await system.stop();
     });
   });
 

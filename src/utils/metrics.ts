@@ -8,7 +8,6 @@
 import { getLogger } from './logger.js';
 import {
   AlertNotificationService,
-  type AlertLevel,
   type AlertNotification,
   type MetricAlert,
 } from '../alerts/index.js';
@@ -219,6 +218,22 @@ export class Histogram extends Metric {
 
     return lines.join('\n');
   }
+
+  getBuckets(): number[] {
+    return [...this.buckets];
+  }
+
+  getCountsSnapshot(): Map<string, number[]> {
+    const snapshot = new Map<string, number[]>();
+    for (const [key, bucketCounts] of this.counts.entries()) {
+      snapshot.set(key, [...bucketCounts]);
+    }
+    return snapshot;
+  }
+
+  getTotalsSnapshot(): Map<string, number> {
+    return new Map(this.counts_total);
+  }
 }
 
 /**
@@ -385,41 +400,43 @@ export function getLatencyPercentiles(
 ): { p50: number; p95: number; p99: number; count: number } {
   const metric = TradingMetrics[metricName];
 
-  // Access histogram internals for percentile calculation
-  // This is a simplified approach - in production you'd want a cleaner API
   const histogramData: HistogramPoint[] = [];
-
-  // Get bucket counts from histogram
-  // @ts-expect-error - accessing private fields for percentile calculation
-  const counts = metric.counts as Map<string, number[]>;
-  // @ts-expect-error - accessing private fields
-  const buckets = metric.buckets as number[];
+  const counts = metric.getCountsSnapshot();
+  const buckets = metric.getBuckets();
 
   if (counts.size === 0) {
     return { p50: 0, p95: 0, p99: 0, count: 0 };
   }
 
-  // Aggregate counts across all label combinations
-  const totalCounts = new Array(buckets.length).fill(0);
+  // Aggregate non-cumulative counts across all label combinations.
+  // Histogram stores cumulative counts per bucket, so convert each label set first.
+  const totalCounts: number[] = new Array<number>(buckets.length).fill(0);
   let totalObservations = 0;
 
   for (const [, bucketCounts] of counts) {
+    let previousCumulative = 0;
     for (let i = 0; i < buckets.length; i++) {
-      totalCounts[i]! += bucketCounts[i] ?? 0;
+      const cumulativeCount = bucketCounts[i] ?? previousCumulative;
+      const bucketCount = Math.max(cumulativeCount - previousCumulative, 0);
+      totalCounts[i] = (totalCounts[i] ?? 0) + bucketCount;
+      previousCumulative = cumulativeCount;
     }
   }
 
-  // @ts-expect-error - accessing private fields
-  const countsTotal = metric.counts_total as Map<string, number>;
+  const countsTotal = metric.getTotalsSnapshot();
   for (const [, count] of countsTotal) {
     totalObservations += count;
   }
 
   // Build histogram points
   for (let i = 0; i < buckets.length; i++) {
+    const bucketValue = buckets[i];
+    if (bucketValue === undefined) {
+      continue;
+    }
     histogramData.push({
-      value: buckets[i]!,
-      count: totalCounts[i]!,
+      value: bucketValue,
+      count: totalCounts[i] ?? 0,
     });
   }
 
@@ -478,13 +495,13 @@ export class PerformanceAlertManager {
   /**
    * Start monitoring with specified check interval
    */
-  start(checkIntervalMs: number = 30000): void {
+  start(checkIntervalMs = 30000): void {
     if (this.checkInterval) {
       this.logger.warn('Alert manager already running');
       return;
     }
 
-    this.logger.info(`Starting performance alert manager (interval: ${checkIntervalMs}ms)`);
+    this.logger.info(`Starting performance alert manager (interval: ${String(checkIntervalMs)}ms)`);
     this.checkInterval = setInterval(() => {
       void this.checkAlerts();
     }, checkIntervalMs);
@@ -507,7 +524,7 @@ export class PerformanceAlertManager {
   /**
    * Get alert history
    */
-  getAlertHistory(limit: number = 100): AlertNotification[] {
+  getAlertHistory(limit = 100): AlertNotification[] {
     return this.alertHistory.slice(-limit);
   }
 
@@ -533,7 +550,9 @@ export class PerformanceAlertManager {
           await this.fireAlert(config, currentValue);
         }
       } catch (error) {
-        this.logger.error(`Error checking alert for ${metricName}:`, error);
+        this.logger.error(`Error checking alert for ${metricName}:`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
   }
@@ -542,24 +561,51 @@ export class PerformanceAlertManager {
    * Get current value for a metric
    */
   private getMetricValue(metricName: string): number | null {
-    // Handle latency metrics
-    if (metricName.endsWith('_latency_ms') || metricName.endsWith('_processing_ms')) {
-      const mapping: Record<string, keyof typeof TradingMetrics> = {
-        orderBookUpdateLatency: 'orderBookUpdateLatency',
-        arbitrageDetectionLatency: 'arbitrageDetectionLatency',
-        wsMessageProcessingTime: 'wsMessageProcessingTime',
-        orderExecutionLatency: 'orderExecutionLatency',
-        riskCheckLatency: 'riskCheckLatency',
-      };
+    type LatencyMetricName = Parameters<typeof getLatencyPercentiles>[0];
+    const mapping: { patterns: string[]; metricKey: LatencyMetricName }[] = [
+      {
+        patterns: [
+          'orderBookUpdateLatency',
+          'orderbook_update_latency',
+          'trading_orderbook_update_latency_ms',
+        ],
+        metricKey: 'orderBookUpdateLatency',
+      },
+      {
+        patterns: [
+          'arbitrageDetectionLatency',
+          'arbitrage_detection_latency',
+          'trading_arbitrage_detection_latency_ms',
+        ],
+        metricKey: 'arbitrageDetectionLatency',
+      },
+      {
+        patterns: [
+          'wsMessageProcessingTime',
+          'ws_message_processing',
+          'trading_ws_message_processing_ms',
+        ],
+        metricKey: 'wsMessageProcessingTime',
+      },
+      {
+        patterns: [
+          'orderExecutionLatency',
+          'order_execution_latency',
+          'trading_order_execution_latency_ms',
+        ],
+        metricKey: 'orderExecutionLatency',
+      },
+      {
+        patterns: ['riskCheckLatency', 'risk_check_latency', 'trading_risk_check_latency_ms'],
+        metricKey: 'riskCheckLatency',
+      },
+    ];
 
-      for (const [key, metricKey] of Object.entries(mapping)) {
-        if (metricName.includes(key)) {
-          const percentiles = getLatencyPercentiles(metricKey);
-          // Use p95 for latency alerts
-          return percentiles.p95;
-        }
+    for (const { patterns, metricKey } of mapping) {
+      if (patterns.some((pattern) => metricName === pattern || metricName.includes(pattern))) {
+        // Use p95 for latency alerts
+        return getLatencyPercentiles(metricKey).p95;
       }
-      return null;
     }
 
     // Handle counter/gauge metrics
@@ -648,7 +694,7 @@ export class PerformanceAlertManager {
       },
       timestamp: new Date(),
       source: 'PerformanceAlertManager',
-      id: `metric-alert-${config.metricName}-${Date.now()}`,
+      id: `metric-alert-${config.metricName}-${String(Date.now())}`,
     };
 
     // Add to history
@@ -662,11 +708,13 @@ export class PerformanceAlertManager {
       try {
         await this.notificationService.send(notification);
       } catch (error) {
-        this.logger.error('Failed to send alert notification:', error);
+        this.logger.error('Failed to send alert notification:', {
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
 
-    this.logger.warn(`Alert fired: ${config.title} (value: ${currentValue})`);
+    this.logger.warn(`Alert fired: ${config.title} (value: ${String(currentValue)})`);
   }
 }
 
