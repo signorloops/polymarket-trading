@@ -16,28 +16,56 @@ import { vectorSubtract, vectorAdd, vectorScale, vectorDot } from '../utils/math
  * @returns Optimal step size γ ∈ [0, 1]
  */
 export function lineSearchKL(mu: number[], s: number[], gradient: number[]): number {
-  // For KL divergence, the optimal step size can be computed analytically
-  // or approximated using bisection
-  const d = vectorSubtract(s, mu);
+  const direction = vectorSubtract(s, mu);
 
-  // Try different step sizes and pick the best
-  let bestGamma = 0;
-  let bestValue = Infinity;
+  // Fallback (objective-free): one-step quadratic approximation around current point.
+  const denom = vectorDot(direction, direction);
+  if (denom <= 0) {
+    return 0;
+  }
 
-  for (let i = 1; i <= 20; i++) {
-    const gamma = i / 20;
-    const newMu = vectorAdd(mu, vectorScale(d, gamma));
+  const gamma = -vectorDot(gradient, direction) / denom;
+  return Math.max(0, Math.min(1, gamma));
+}
 
-    // Compute objective (approximate)
-    const value = vectorDot(gradient, vectorSubtract(newMu, mu));
+/**
+ * Line search using the real objective along segment [mu, s].
+ * Uses golden-section search in [0,1], which is robust and derivative-free.
+ */
+export function lineSearchObjective(
+  mu: number[],
+  s: number[],
+  objectiveFn: (candidate: number[]) => number,
+  maxIterations = 40
+): number {
+  const direction = vectorSubtract(s, mu);
+  let left = 0;
+  let right = 1;
+  const phi = (Math.sqrt(5) - 1) / 2;
 
-    if (value < bestValue) {
-      bestValue = value;
-      bestGamma = gamma;
+  let x1 = right - phi * (right - left);
+  let x2 = left + phi * (right - left);
+  let f1 = objectiveFn(vectorAdd(mu, vectorScale(direction, x1)));
+  let f2 = objectiveFn(vectorAdd(mu, vectorScale(direction, x2)));
+
+  for (let iter = 0; iter < maxIterations && right - left > 1e-8; iter++) {
+    if (f1 > f2) {
+      left = x1;
+      x1 = x2;
+      f1 = f2;
+      x2 = left + phi * (right - left);
+      f2 = objectiveFn(vectorAdd(mu, vectorScale(direction, x2)));
+    } else {
+      right = x2;
+      x2 = x1;
+      f2 = f1;
+      x1 = right - phi * (right - left);
+      f1 = objectiveFn(vectorAdd(mu, vectorScale(direction, x1)));
     }
   }
 
-  return bestGamma;
+  const gamma = (left + right) / 2;
+  return Math.max(0, Math.min(1, gamma));
 }
 
 /**
@@ -50,4 +78,3 @@ export function lineSearchKL(mu: number[], s: number[], gradient: number[]): num
 export function adaptiveStepSize(iteration: number): number {
   return 2 / (iteration + 2);
 }
-

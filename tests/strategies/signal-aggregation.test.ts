@@ -57,15 +57,15 @@ describe('weightedAggregation', () => {
     expect(result!.signal.marketId).toBe('market-1');
   });
 
-  it('should average price and size', () => {
+  it('should confidence-weight price and size', () => {
     const signals: SignalWithStrategy[] = [
       { strategy: 's1', signal: createSignal('market-1', 'buy', 0.8, 100, 0.5) },
       { strategy: 's2', signal: createSignal('market-1', 'buy', 0.6, 200, 0.6) },
     ];
 
     const result = weightedAggregation(signals)!;
-    expect(result.signal.price).toBeCloseTo(0.55, 2);
-    expect(result.signal.size).toBe(150);
+    expect(result.signal.price).toBeCloseTo(0.5429, 3);
+    expect(result.signal.size).toBeCloseTo(142.8571, 3);
   });
 
   it('should determine direction by majority', () => {
@@ -89,6 +89,28 @@ describe('weightedAggregation', () => {
     expect(result.signal.metadata).toBeDefined();
     expect(result.signal.metadata!.aggregated).toBe(true);
     expect(result.signal.metadata!.strategies).toContain('s1');
+  });
+
+  it('should weight price and size by confidence', () => {
+    const signals: SignalWithStrategy[] = [
+      { strategy: 's1', signal: createSignal('market-1', 'buy', 0.9, 100, 0.4) },
+      { strategy: 's2', signal: createSignal('market-1', 'buy', 0.1, 100, 0.8) },
+    ];
+
+    const result = weightedAggregation(signals)!;
+    // Weighted price = (0.4*0.9 + 0.8*0.1) / (0.9+0.1) = 0.44
+    expect(result.signal.price).toBeCloseTo(0.44, 3);
+  });
+
+  it('should determine direction by confidence-weighted vote', () => {
+    const signals: SignalWithStrategy[] = [
+      { strategy: 's1', signal: createSignal('market-1', 'buy', 0.2) },
+      { strategy: 's2', signal: createSignal('market-1', 'buy', 0.2) },
+      { strategy: 's3', signal: createSignal('market-1', 'sell', 0.95) },
+    ];
+
+    const result = weightedAggregation(signals)!;
+    expect(result.signal.type).toBe('sell');
   });
 });
 

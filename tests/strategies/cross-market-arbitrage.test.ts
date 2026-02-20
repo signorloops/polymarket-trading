@@ -322,6 +322,56 @@ describe('CrossMarketArbitrageStrategy', () => {
   });
 
   describe('边界情况', () => {
+    it('生成的解应满足每个事件的概率和约束', () => {
+      const constraintAwareStrategy = new CrossMarketArbitrageStrategy({
+        minProfitThreshold: 0,
+        maxIterations: 80,
+        alpha: 0.9,
+        minConfidence: 0,
+      });
+
+      const marketData: StrategyMarketData[] = [
+        {
+          marketId: 'event-a-yes',
+          orderBook: createOrderBook('event-a-yes', 0.69),
+          lastPrice: 0.7,
+          timestamp: Date.now(),
+        },
+        {
+          marketId: 'event-a-no',
+          orderBook: createOrderBook('event-a-no', 0.19),
+          lastPrice: 0.2,
+          timestamp: Date.now(),
+        },
+        {
+          marketId: 'event-b-yes',
+          orderBook: createOrderBook('event-b-yes', 0.79),
+          lastPrice: 0.8,
+          timestamp: Date.now(),
+        },
+        {
+          marketId: 'event-b-no',
+          orderBook: createOrderBook('event-b-no', 0.29),
+          lastPrice: 0.3,
+          timestamp: Date.now(),
+        },
+      ];
+
+      const signal = constraintAwareStrategy.analyze(marketData);
+      expect(signal).not.toBeNull();
+
+      const tradeVector = signal?.metadata?.tradeVector as number[] | undefined;
+      expect(Array.isArray(tradeVector)).toBe(true);
+      expect(tradeVector).toHaveLength(marketData.length);
+
+      const inferredMu = marketData.map((m, i) => m.lastPrice + ((tradeVector?.[i] ?? 0) / 100));
+      const eventASum = (inferredMu[0] ?? 0) + (inferredMu[1] ?? 0);
+      const eventBSum = (inferredMu[2] ?? 0) + (inferredMu[3] ?? 0);
+
+      expect(eventASum).toBeCloseTo(1, 3);
+      expect(eventBSum).toBeCloseTo(1, 3);
+    });
+
     it('处理价格总和不为1的市场', () => {
       const yesBook = new OrderBook('event-yes');
       yesBook.update([{ price: 0.9, size: 100 }], [{ price: 0.91, size: 100 }]);

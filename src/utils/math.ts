@@ -142,6 +142,39 @@ export function klDivergence(p: number[], q: number[], epsilon = 1e-10): number 
 }
 
 /**
+ * Generalized KL divergence for non-normalized non-negative vectors:
+ * D(p || q) = sum_i [ p_i * log(p_i / q_i) - p_i + q_i ]
+ *
+ * This is always non-negative for p_i, q_i >= 0 and equals standard KL
+ * when p and q are both normalized probability distributions.
+ */
+export function generalizedKLDivergence(
+  p: number[],
+  q: number[],
+  epsilon = 1e-10
+): number {
+  if (p.length !== q.length) {
+    throw new Error(`Distribution length mismatch: ${p.length.toString()} vs ${q.length.toString()}`);
+  }
+
+  let divergence = 0;
+  for (let i = 0; i < p.length; i++) {
+    const pi = p[i];
+    const qi = q[i];
+    if (pi === undefined || qi === undefined) continue;
+    if (pi < -epsilon || qi < -epsilon) {
+      throw new Error('Negative value in generalized KL divergence');
+    }
+
+    const safeP = Math.max(pi, epsilon);
+    const safeQ = Math.max(qi, epsilon);
+    divergence += safeP * Math.log(safeP / safeQ) - safeP + safeQ;
+  }
+
+  return divergence;
+}
+
+/**
  * Softmax function: converts logits to probabilities
  * softmax(x_i) = exp(x_i) / sum(exp(x_j))
  */

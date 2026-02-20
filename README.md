@@ -17,9 +17,10 @@
 ## 核心特性
 
 - **边际多面体套利检测**：通过凸优化检测跨市场套利机会
-- **Bregman 投影**：使用 KL 散度计算最优交易向量
-- **Frank-Wolfe 算法**：迭代优化避免枚举所有顶点（0.1ms~0.3ms）
+- **Bregman 投影**：使用 KL / 广义 KL 散度计算最优交易向量
+- **Frank-Wolfe 算法**：真实目标线搜索（golden-section）+ 约束可行迭代更新
 - **实时数据处理**：WebSocket 数据管道，订单簿重建（SkipList O(log n)）
+- **优化求解器升级**：LP/MILP 使用 `javascript-lp-solver` 后端并做可行性校验
 - **风险管理**：熔断机制、仓位限制、部分成交处理
 - **高性能**: Float64Array 内存池，稀疏约束处理
 
@@ -157,6 +158,16 @@ console.log(`目标值: ${result.objective}`);
 console.log(`间隙: ${result.gap}`);
 ```
 
+### 近期算法改进（2026-02-20）
+
+- **Frank-Wolfe 可行性修复**：移除迭代内全局 simplex 投影，避免破坏多事件独立等式组约束。
+- **步长策略升级**：`line-search` 改为沿 `mu -> s` 线段对真实目标做 golden-section 搜索。
+- **Barrier 收敛判据修复**：收敛条件显式包含 `tolerance`，避免“未达阈值提前收敛”。
+- **跨市场约束一致性**：`MarketDependencyGraph.addMarket()` 自动补全事件节点，保证构造约束矩阵时事件约束不丢失。
+- **跨市场目标函数修正**：跨市场策略和检测器统一使用广义 KL（适配未归一化非负向量）。
+- **订单簿性能路径优化**：`OrderBook` 使用 SkipList 维护价位顺序 + 增量维护深度，最佳买卖价 O(1) 查询。
+- **求解器能力升级**：`LP/IP` 接口接入 `javascript-lp-solver`，同时保留输入校验、可行性校验和分支定界回退路径。
+
 ### Bregman 投影
 
 ```typescript
@@ -235,10 +246,16 @@ YES ≥ 0, NO ≥ 0
 
 ### Bregman 投影
 
-使用 KL 散度作为距离度量：
+归一化分布场景使用 KL 散度：
 
 ```
 D_KL(μ || θ) = Σ μ_i * log(μ_i / θ_i)
+```
+
+跨市场未归一化向量场景使用广义 KL 散度：
+
+```
+D(μ || θ) = Σ [ μ_i * log(μ_i / θ_i) - μ_i + θ_i ]
 ```
 
 其中 μ 是投影点，θ 是价格向量。
@@ -380,6 +397,10 @@ LOG_LEVEL=warn npm start
 ## API 文档
 
 详见 [docs/api.md](./docs/api.md)
+
+## Mermaid 学习文档
+
+详见 [docs/mermaid-learning-guide.md](./docs/mermaid-learning-guide.md)
 
 ## 参考资料
 

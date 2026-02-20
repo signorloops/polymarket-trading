@@ -14,6 +14,7 @@ interface SkipListNode {
 
 export class SkipList {
   private head: SkipListNode;
+  private tail: SkipListNode | null;
   private maxLevel: number;
   private level: number;
   private size: number;
@@ -24,6 +25,7 @@ export class SkipList {
     this.p = p;
     this.level = 0;
     this.size = 0;
+    this.tail = null;
     this.head = {
       price: -Infinity,
       size: 0,
@@ -84,6 +86,11 @@ export class SkipList {
           newNode.prev[i] = updateNode;
         }
       }
+
+      if (newNode.next[0] === null) {
+        this.tail = newNode;
+      }
+      this.tail ??= newNode;
       this.size++;
     }
   }
@@ -118,6 +125,11 @@ export class SkipList {
         this.level--;
       }
 
+      if (this.tail === target) {
+        const prev = target.prev[0] ?? null;
+        this.tail = prev === this.head ? null : prev;
+      }
+
       this.size--;
       return true;
     }
@@ -149,13 +161,7 @@ export class SkipList {
   }
 
   getLast(): SkipListNode | null {
-    let current: SkipListNode = this.head;
-    let nextNode = current.next[0];
-    while (nextNode) {
-      current = nextNode;
-      nextNode = current.next[0];
-    }
-    return current === this.head ? null : current;
+    return this.tail;
   }
 
   toArray(): { price: number; size: number }[] {
@@ -167,6 +173,16 @@ export class SkipList {
       current = current.next[0];
     }
 
+    return result;
+  }
+
+  toArrayDescending(): { price: number; size: number }[] {
+    const result: { price: number; size: number }[] = [];
+    let current = this.tail;
+    while (current && current !== this.head) {
+      result.push({ price: current.price, size: current.size });
+      current = current.prev[0] ?? null;
+    }
     return result;
   }
 

@@ -58,6 +58,31 @@ export class MarketDependencyGraph {
   addMarket(market: MarketNode): void {
     this.markets.set(market.id, market);
 
+    // Auto-materialize event nodes so callers that only add markets still
+    // get valid event-level constraints in buildConstraintMatrix().
+    const existingEvent = this.events.get(market.eventId);
+    if (existingEvent) {
+      if (!existingEvent.markets.includes(market.id)) {
+        existingEvent.markets.push(market.id);
+      }
+      if (!existingEvent.outcomes.includes(market.outcome)) {
+        existingEvent.outcomes.push(market.outcome);
+      }
+      if (
+        existingEvent.type === 'binary' &&
+        existingEvent.outcomes.length > 2
+      ) {
+        existingEvent.type = 'categorical';
+      }
+    } else {
+      this.events.set(market.eventId, {
+        id: market.eventId,
+        type: 'binary',
+        outcomes: [market.outcome],
+        markets: [market.id],
+      });
+    }
+
     if (!this.adjacencyList.has(market.id)) {
       this.adjacencyList.set(market.id, new Set());
     }
@@ -191,13 +216,20 @@ export class MarketDependencyGraph {
 
     const marketList = Array.from(this.markets.keys());
     const n = marketList.length;
+    const marketIndex = new Map<string, number>();
+    for (let i = 0; i < marketList.length; i++) {
+      const marketId = marketList[i];
+      if (marketId !== undefined) {
+        marketIndex.set(marketId, i);
+      }
+    }
 
     // 1. Probability sum constraints for each event
     for (const event of this.events.values()) {
       const constraint: number[] = new Array(n).fill(0) as number[];
 
       for (const marketId of event.markets) {
-        const idx = marketList.indexOf(marketId);
+        const idx = marketIndex.get(marketId) ?? -1;
         if (idx >= 0) {
           constraint[idx] = 1;
         }
@@ -219,12 +251,12 @@ export class MarketDependencyGraph {
           const constraint: number[] = new Array(n).fill(0) as number[];
 
           for (const marketId of event1.markets) {
-            const idx = marketList.indexOf(marketId);
+            const idx = marketIndex.get(marketId) ?? -1;
             if (idx >= 0) constraint[idx] = 1;
           }
 
           for (const marketId of event2.markets) {
-            const idx = marketList.indexOf(marketId);
+            const idx = marketIndex.get(marketId) ?? -1;
             if (idx >= 0) constraint[idx] = 1;
           }
 
@@ -245,12 +277,12 @@ export class MarketDependencyGraph {
           const constraint: number[] = new Array(n).fill(0) as number[];
 
           for (const marketId of event.markets) {
-            const idx = marketList.indexOf(marketId);
+            const idx = marketIndex.get(marketId) ?? -1;
             if (idx >= 0) constraint[idx] = 1;
           }
 
           for (const marketId of parent.markets) {
-            const idx = marketList.indexOf(marketId);
+            const idx = marketIndex.get(marketId) ?? -1;
             if (idx >= 0) constraint[idx] = -1;
           }
 

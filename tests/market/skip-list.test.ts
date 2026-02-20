@@ -126,6 +126,15 @@ describe('SkipList', () => {
     it('should return empty array for empty list', () => {
       expect(list.toArray()).toEqual([]);
     });
+
+    it('should return descending array', () => {
+      list.insert(10, 100);
+      list.insert(5, 200);
+      list.insert(15, 300);
+
+      const result = list.toArrayDescending();
+      expect(result.map((r) => r.price)).toEqual([15, 10, 5]);
+    });
   });
 
   describe('getSize', () => {

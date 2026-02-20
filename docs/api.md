@@ -256,7 +256,8 @@ frankWolfe(
 - `lmoFn`: 线性最小化 oracle
 - `options.maxIterations`: 最大迭代次数
 - `options.tolerance`: 收敛阈值
-- `options.stepSize`: 步长策略 ('line-search' | 'adaptive')
+- `options.stepSize`: 步长策略 (`line-search` | `adaptive`)
+  - `line-search`: 沿 `mu -> s` 线段对真实目标函数做 golden-section 搜索
 
 **返回:**
 - `mu`: 最优解
@@ -264,6 +265,22 @@ frankWolfe(
 - `gap`: Frank-Wolfe 间隙
 - `iterations`: 迭代次数
 - `converged`: 是否收敛
+
+### lineSearchObjective()
+
+对 Frank-Wolfe 线段方向执行目标函数线搜索。
+
+```typescript
+lineSearchObjective(
+  mu: number[],
+  s: number[],
+  objectiveFn: (candidate: number[]) => number,
+  maxIterations?: number
+): number
+```
+
+**返回:**
+- `gamma`: 区间 `[0, 1]` 内的步长
 
 ### bregmanProjection()
 
@@ -289,6 +306,9 @@ bregmanProjection(
 - `divergence`: KL 散度
 - `iterations`: 迭代次数
 - `converged`: 是否收敛
+
+> 注：跨市场套利模块在未归一化向量场景使用广义 KL 散度  
+> `D(p||q) = Σ [ p_i log(p_i/q_i) - p_i + q_i ]`
 
 ---
 

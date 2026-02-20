@@ -57,6 +57,33 @@ describe('FrankWolfe', () => {
   });
 
   describe('frankWolfe', () => {
+    it('should preserve independent equality-group feasibility without global simplex projection', () => {
+      const constraints = [
+        { coefficients: [1, 1, 0, 0], rhs: 1, type: 'equality' as const },
+        { coefficients: [0, 0, 1, 1], rhs: 1, type: 'equality' as const },
+      ];
+      const theta = [0.8, 0.2, 0.1, 0.9];
+      const initialMu = [0.5, 0.5, 0.5, 0.5];
+
+      const objectiveFn = (mu: number[] | Float64Array) => klDivergence(Array.from(mu), theta);
+      const gradientFn = (mu: number[] | Float64Array) => {
+        const epsilon = 1e-10;
+        return Array.from(mu).map((m, i) => Math.log(Math.max(m, epsilon) / Math.max(theta[i]!, epsilon)) + 1);
+      };
+      const lmoFn = (grad: number[] | Float64Array) =>
+        linearMinimizationOracle(Array.from(grad), constraints);
+
+      const result = frankWolfe(initialMu, objectiveFn, gradientFn, lmoFn, {
+        maxIterations: 25,
+        stepSize: 'adaptive',
+      });
+
+      const group1 = (result.mu[0] ?? 0) + (result.mu[1] ?? 0);
+      const group2 = (result.mu[2] ?? 0) + (result.mu[3] ?? 0);
+      expect(group1).toBeCloseTo(1, 6);
+      expect(group2).toBeCloseTo(1, 6);
+    });
+
     it('should converge for simple KL divergence minimization', () => {
       const theta = [0.6, 0.4]; // Target distribution
       const initialMu = [0.5, 0.5];
@@ -400,6 +427,27 @@ describe('FrankWolfe', () => {
   });
 
   describe('barrierFrankWolfe', () => {
+    it('should respect tolerance in convergence check', () => {
+      const initialMu = [0.5, 0.5];
+
+      const objectiveFn = () => 1;
+      const gradientFn = () => [0, 0.1];
+      const lmoFn = (grad: number[]) => {
+        const vertex = new Array(grad.length).fill(0);
+        vertex[0] = 1;
+        return vertex;
+      };
+
+      const result = barrierFrankWolfe(initialMu, objectiveFn, gradientFn, lmoFn, {
+        maxIterations: 1,
+        tolerance: 1e-6,
+        initialEpsilon: 0.1,
+      });
+
+      expect(result.converged).toBe(false);
+      expect(result.iterations).toBe(1);
+    });
+
     it('should converge with barrier function', () => {
       const theta = [0.6, 0.4];
       const initialMu = [0.5, 0.5];

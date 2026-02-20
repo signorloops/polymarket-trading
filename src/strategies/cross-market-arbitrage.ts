@@ -7,8 +7,13 @@
 
 import { BaseStrategy, type StrategyMarketData, type TradeSignal, type StrategyConfig } from './base.js';
 import { MarketDependencyGraph } from '../market/dependency-graph.js';
-import { frankWolfe, type FrankWolfeResult } from '../core/frank-wolfe.js';
-import { klDivergence } from '../utils/math.js';
+import {
+  frankWolfe,
+  linearMinimizationOracle,
+  type FrankWolfeResult,
+  type Constraint,
+} from '../core/frank-wolfe.js';
+import { generalizedKLDivergence } from '../utils/math.js';
 
 export interface CrossMarketArbitrageConfig extends StrategyConfig {
   /** Minimum profit threshold ($) */
@@ -94,6 +99,8 @@ export class CrossMarketArbitrageStrategy extends BaseStrategy {
   private findCrossMarketOpportunity(data: StrategyMarketData[]): CrossMarketOpportunity | null {
     if (data.length < 2) return null;
 
+    this.dependencyGraph.clear();
+
     // Build dependency graph from market relationships
     for (const market of data) {
       this.dependencyGraph.addMarket({
@@ -106,62 +113,60 @@ export class CrossMarketArbitrageStrategy extends BaseStrategy {
     }
 
     // Build constraints from dependency graph
-    this.dependencyGraph.buildConstraintMatrix();
+    const matrix = this.dependencyGraph.buildConstraintMatrix();
+    const constraints: Constraint[] = matrix.coefficients.map((coefficients, i) => ({
+      coefficients,
+      rhs: matrix.rhs[i] ?? 0,
+      type: matrix.types[i] ?? 'inequality',
+    }));
 
     // Get current prices as theta
-    const theta = data.map((m) => m.lastPrice);
+    const epsilon = 1e-10;
+    const theta = data.map((m) => {
+      const value = m.lastPrice;
+      if (!Number.isFinite(value)) {
+        return Number.NaN;
+      }
+      return Math.max(value, epsilon);
+    });
+    if (theta.some((v) => !Number.isFinite(v))) {
+      return null;
+    }
 
-    // Objective function: KL divergence
-    const objectiveFn = (mu: number[] | Float64Array): number => klDivergence(Array.from(mu), theta);
+    // Objective function: generalized KL (non-negative even when distributions are unnormalized)
+    const objectiveFn = (mu: number[] | Float64Array): number =>
+      generalizedKLDivergence(Array.from(mu), theta);
 
     // Gradient function
     const gradientFn = (mu: number[] | Float64Array): number[] => {
-      const epsilon = 1e-10;
       return Array.from(mu).map((m, i) => {
         const thetaVal = theta[i];
-        if (thetaVal === undefined) return 1;
-        return Math.log(Math.max(m, epsilon) / Math.max(thetaVal, epsilon)) + 1;
+        if (thetaVal === undefined) return 0;
+        return Math.log(Math.max(m, epsilon) / Math.max(thetaVal, epsilon));
       });
     };
 
     // Linear minimization oracle with constraints
-    const lmoFn = (grad: number[] | Float64Array): number[] => {
-      const gradArray = Array.from(grad);
-      const n = gradArray.length;
-      const vertex: number[] = new Array<number>(n).fill(0);
+    const lmoFn = (grad: number[] | Float64Array): number[] =>
+      linearMinimizationOracle(Array.from(grad), constraints);
 
-      // Simplex constraint: sum = 1
-      let minIdx = 0;
-      const firstGrad = gradArray[0];
-      if (firstGrad === undefined) return vertex;
-      let minValue = firstGrad;
-      for (let i = 1; i < n; i++) {
-        const gradVal = gradArray[i];
-        if (gradVal === undefined) continue;
-        if (gradVal < minValue) {
-          minValue = gradVal;
-          minIdx = i;
-        }
-      }
-      vertex[minIdx] = 1;
-      return vertex;
-    };
-
-    // Initial point
-    const initialMu: number[] = new Array<number>(theta.length).fill(1 / theta.length);
+    // Build a feasible initial point for event-level equality constraints.
+    const initialMu = this.buildFeasibleInitialPoint(theta, constraints);
 
     // Run Frank-Wolfe optimization
     const result = frankWolfe(initialMu, objectiveFn, gradientFn, lmoFn, {
       maxIterations: this.crossConfig.maxIterations,
       tolerance: 1e-6,
-      stepSize: 'adaptive',
+      stepSize: 'line-search',
     });
 
     // Calculate guaranteed profit
-    const divergence = klDivergence(result.mu, theta);
-    const guaranteedProfit = divergence - result.gap;
+    const divergence = generalizedKLDivergence(result.mu, theta);
+    const guaranteedProfit = Math.max(0, divergence - Math.max(result.gap, 0));
+    // Report edge in percentage points for strategy-level thresholding.
+    const expectedProfit = Math.max(divergence, guaranteedProfit) * 100;
 
-    if (guaranteedProfit < this.crossConfig.minProfitThreshold) {
+    if (expectedProfit < this.crossConfig.minProfitThreshold) {
       return null;
     }
 
@@ -173,15 +178,17 @@ export class CrossMarketArbitrageStrategy extends BaseStrategy {
     });
 
     // Confidence based on convergence and profit
+    const convergenceConfidence =
+      divergence / (divergence + Math.max(result.gap, 0) + 1e-10);
     const confidence = Math.min(
-      (1 - result.gap / Math.max(divergence, 1e-10)) * this.crossConfig.alpha,
+      0.5 + 0.5 * convergenceConfidence * this.crossConfig.alpha,
       1.0
     );
 
     return {
       markets: data.map((m) => m.marketId),
       tradeVector,
-      expectedProfit: guaranteedProfit,
+      expectedProfit,
       confidence,
       frankWolfeResult: result,
     };
@@ -204,6 +211,66 @@ export class CrossMarketArbitrageStrategy extends BaseStrategy {
     if (lower.endsWith('-yes') || lower.endsWith('_yes')) return 'YES';
     if (lower.endsWith('-no') || lower.endsWith('_no')) return 'NO';
     return 'YES'; // Default
+  }
+
+  private buildFeasibleInitialPoint(theta: number[], constraints: Constraint[]): number[] {
+    const n = theta.length;
+    const initial = new Array<number>(n).fill(0);
+    const assigned = new Set<number>();
+
+    const equalityConstraints = constraints.filter(
+      (c) => c.type === 'equality' && c.coefficients.some((coef) => coef > 0)
+    );
+
+    if (equalityConstraints.length === 0) {
+      const uniform = 1 / n;
+      return new Array<number>(n).fill(uniform);
+    }
+
+    for (const constraint of equalityConstraints) {
+      const support: number[] = [];
+      for (let i = 0; i < n; i++) {
+        if ((constraint.coefficients[i] ?? 0) > 0) {
+          support.push(i);
+        }
+      }
+      if (support.length === 0) {
+        continue;
+      }
+
+      let sum = 0;
+      for (const idx of support) {
+        sum += Math.max(theta[idx] ?? 0, 1e-12);
+      }
+
+      const target = constraint.rhs;
+      if (sum <= 0) {
+        const uniform = target / support.length;
+        for (const idx of support) {
+          initial[idx] = uniform;
+          assigned.add(idx);
+        }
+      } else {
+        for (const idx of support) {
+          const value = Math.max(theta[idx] ?? 0, 1e-12);
+          initial[idx] = (target * value) / sum;
+          assigned.add(idx);
+        }
+      }
+    }
+
+    // Fallback for variables not covered by equality constraints.
+    const remaining = n - assigned.size;
+    if (remaining > 0) {
+      const fallback = 1 / remaining;
+      for (let i = 0; i < n; i++) {
+        if (!assigned.has(i)) {
+          initial[i] = fallback;
+        }
+      }
+    }
+
+    return initial;
   }
 
   /**

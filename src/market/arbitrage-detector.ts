@@ -15,8 +15,7 @@ import {
   isProfitableArbitrage,
   linearMinimizationOracle as fwLinearMinimizationOracle,
 } from '../core/frank-wolfe.js';
-import { initFW } from '../core/init-fw.js';
-import { vectorSubtract, klDivergence } from '../utils/math.js';
+import { vectorSubtract, generalizedKLDivergence } from '../utils/math.js';
 import { getLogger } from '../utils/logger.js';
 import { ALGORITHM_CONFIG } from '../utils/config.js';
 import { OrderBook } from './order-book.js';
@@ -134,18 +133,13 @@ export class ArbitrageDetector {
     const prices = this.polytope.getPriceVector();
     const constraints = this.polytope.getConstraints();
 
-    // Initialize with InitFW
-    const initResult = initFW(
-      prices.length,
-      (mu) => this.computeGradient(mu, prices),
-      (mu) => klDivergence(mu, prices),
-      { initIterations: 5 }
-    );
+    // Start from a polytope-feasible point to preserve equality constraints.
+    const initialPoint = this.polytope.project(prices);
 
     // Run Frank-Wolfe
     const fwResult = frankWolfe(
-      initResult.initialPoint,
-      (mu) => klDivergence(Array.from(mu), prices),
+      initialPoint,
+      (mu) => generalizedKLDivergence(Array.from(mu), prices),
       (mu) => this.computeGradient(Array.from(mu), prices),
       (grad: number[] | Float64Array) => this.linearMinimizationOracle([...Array.from(grad)], constraints),
       {
@@ -261,13 +255,13 @@ export class ArbitrageDetector {
   }
 
   private computeGradient(mu: number[], theta: number[]): number[] {
-    // Gradient of KL divergence: ∇_μ D(μ||θ) = log(μ/θ) + 1
+    // Gradient of generalized KL divergence: ∇_μ D(μ||θ) = log(μ/θ)
     const epsilon = 1e-10;
     return mu.map((m, i) => {
       const safeMu = Math.max(m, epsilon);
       const thetaValue = theta[i];
       const safeTheta = thetaValue === undefined ? epsilon : Math.max(thetaValue, epsilon);
-      return Math.log(safeMu / safeTheta) + 1;
+      return Math.log(safeMu / safeTheta);
     });
   }
 

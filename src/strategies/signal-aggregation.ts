@@ -76,17 +76,31 @@ export function weightedAggregation(
   const marketSignals = byMarket.get(bestMarket);
   if (!marketSignals) return null;
 
-  // Average signal properties
-  const avgPrice =
-    marketSignals.reduce((sum, s) => sum + s.signal.price, 0) / marketSignals.length;
-  const avgSize =
-    marketSignals.reduce((sum, s) => sum + s.signal.size, 0) / marketSignals.length;
+  const totalWeight = marketSignals.reduce((sum, s) => sum + Math.max(s.signal.confidence, 0), 0);
+  const safeWeight = totalWeight > 0 ? totalWeight : marketSignals.length;
+
+  // Confidence-weighted aggregation of execution parameters.
+  const avgPrice = marketSignals.reduce(
+    (sum, s) => sum + s.signal.price * (totalWeight > 0 ? Math.max(s.signal.confidence, 0) : 1),
+    0
+  ) / safeWeight;
+  const avgSize = marketSignals.reduce(
+    (sum, s) => sum + s.signal.size * (totalWeight > 0 ? Math.max(s.signal.confidence, 0) : 1),
+    0
+  ) / safeWeight;
   const avgConfidence =
     marketSignals.reduce((sum, s) => sum + s.signal.confidence, 0) / marketSignals.length;
 
-  // Determine direction by majority
-  const buyCount = marketSignals.filter((s) => s.signal.type === 'buy').length;
-  const direction: 'buy' | 'sell' = buyCount > marketSignals.length / 2 ? 'buy' : 'sell';
+  // Direction determined by confidence-weighted vote, not raw count.
+  const buyWeight = marketSignals.reduce(
+    (sum, s) => sum + (s.signal.type === 'buy' ? Math.max(s.signal.confidence, 0) : 0),
+    0
+  );
+  const sellWeight = marketSignals.reduce(
+    (sum, s) => sum + (s.signal.type === 'sell' ? Math.max(s.signal.confidence, 0) : 0),
+    0
+  );
+  const direction: 'buy' | 'sell' = buyWeight >= sellWeight ? 'buy' : 'sell';
 
   const aggregatedSignal: TradeSignal = {
     type: direction,

@@ -681,6 +681,30 @@ describe('MarketDependencyGraph', () => {
   });
 
   describe('constraint matrix construction', () => {
+    it('should auto-create event constraints when only markets are added', () => {
+      const market1: MarketNode = {
+        id: 'event-1-yes',
+        eventId: 'event-1',
+        outcome: 'Yes',
+        price: 0.6,
+        metadata: {},
+      };
+      const market2: MarketNode = {
+        id: 'event-1-no',
+        eventId: 'event-1',
+        outcome: 'No',
+        price: 0.4,
+        metadata: {},
+      };
+
+      graph.addMarket(market1);
+      graph.addMarket(market2);
+
+      const matrix = graph.buildConstraintMatrix();
+      const hasEventEquality = matrix.descriptions.some((d) => d.includes('Event event-1'));
+      expect(hasEventEquality).toBe(true);
+    });
+
     it('should build constraint matrix for single event', () => {
       const event: EventNode = {
         id: 'event-1',

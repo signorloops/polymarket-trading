@@ -11,6 +11,7 @@
 
 import { getLogger } from '../utils/logger.js';
 import { TRADING_CONFIG } from '../utils/config.js';
+import { SkipList } from './skip-list.js';
 
 export interface PriceLevel {
   price: number;
@@ -47,6 +48,10 @@ export class OrderBook {
   private marketId: string;
   private bids: Map<number, number> = new Map();
   private asks: Map<number, number> = new Map();
+  private bidLevels = new SkipList();
+  private askLevels = new SkipList();
+  private bidDepth = 0;
+  private askDepth = 0;
   private lastUpdate = 0;
   private sequence = 0;
   private logger = getLogger().child({ module: 'OrderBook' });
@@ -65,19 +70,39 @@ export class OrderBook {
   ): void {
     // Update bids
     for (const { price, size } of bids) {
+      const prevSize = this.bids.get(price) ?? 0;
       if (size <= 0) {
-        this.bids.delete(price);
+        if (this.bids.delete(price)) {
+          this.bidLevels.delete(price);
+          this.bidDepth -= prevSize;
+        }
       } else {
+        if (this.bids.has(price)) {
+          this.bidDepth += size - prevSize;
+        } else {
+          this.bidDepth += size;
+        }
         this.bids.set(price, size);
+        this.bidLevels.insert(price, size);
       }
     }
 
     // Update asks
     for (const { price, size } of asks) {
+      const prevSize = this.asks.get(price) ?? 0;
       if (size <= 0) {
-        this.asks.delete(price);
+        if (this.asks.delete(price)) {
+          this.askLevels.delete(price);
+          this.askDepth -= prevSize;
+        }
       } else {
+        if (this.asks.has(price)) {
+          this.askDepth += size - prevSize;
+        } else {
+          this.askDepth += size;
+        }
         this.asks.set(price, size);
+        this.askLevels.insert(price, size);
       }
     }
 
@@ -105,16 +130,16 @@ export class OrderBook {
    * Get best bid (highest price)
    */
   getBestBid(): PriceLevel | null {
-    const sorted = this.getSortedBids();
-    return sorted[0] ?? null;
+    const best = this.bidLevels.getLast();
+    return best ? { price: best.price, size: best.size } : null;
   }
 
   /**
    * Get best ask (lowest price)
    */
   getBestAsk(): PriceLevel | null {
-    const sorted = this.getSortedAsks();
-    return sorted[0] ?? null;
+    const best = this.askLevels.getFirst();
+    return best ? { price: best.price, size: best.size } : null;
   }
 
   /**
@@ -288,19 +313,19 @@ export class OrderBook {
   clear(): void {
     this.bids.clear();
     this.asks.clear();
+    this.bidLevels = new SkipList();
+    this.askLevels = new SkipList();
+    this.bidDepth = 0;
+    this.askDepth = 0;
     this.sequence = 0;
   }
 
   private getSortedBids(): PriceLevel[] {
-    return Array.from(this.bids.entries())
-      .map(([price, size]) => ({ price, size }))
-      .sort((a, b) => b.price - a.price);
+    return this.bidLevels.toArrayDescending();
   }
 
   private getSortedAsks(): PriceLevel[] {
-    return Array.from(this.asks.entries())
-      .map(([price, size]) => ({ price, size }))
-      .sort((a, b) => a.price - b.price);
+    return this.askLevels.toArray();
   }
 
   /**
@@ -318,8 +343,7 @@ export class OrderBook {
   }
 
   private calculateDepth(side: 'bid' | 'ask'): number {
-    const levels = side === 'bid' ? this.bids : this.asks;
-    return Array.from(levels.values()).reduce((sum, size) => sum + size, 0);
+    return side === 'bid' ? this.bidDepth : this.askDepth;
   }
 
   private calculateSlippageForValue(

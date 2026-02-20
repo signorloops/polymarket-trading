@@ -11,16 +11,15 @@
  * - LMO: Find vertex v that minimizes ⟨∇f(μ), v⟩
  */
 
-import { projectOntoSimplex } from '../utils/math.js';
 import { getLogger } from '../utils/logger.js';
 import { ALGORITHM_CONFIG } from '../utils/config.js';
 import type { FrankWolfeResult, FrankWolfeOptions } from './frank-wolfe-types.js';
-import { lineSearchKL, adaptiveStepSize } from './line-search.js';
+import { lineSearchObjective, adaptiveStepSize } from './line-search.js';
 
 export type { FrankWolfeResult, FrankWolfeOptions };
 export type { Constraint } from './frank-wolfe-types.js';
 export { linearMinimizationOracle } from './lmo.js';
-export { lineSearchKL, adaptiveStepSize } from './line-search.js';
+export { lineSearchKL, lineSearchObjective, adaptiveStepSize } from './line-search.js';
 export { isProfitableArbitrage, computeTradeRecommendation } from './arbitrage-utils.js';
 
 /**
@@ -151,7 +150,8 @@ export function frankWolfe(
       }
 
       // Check convergence
-      if (gap <= tolerance * (1 - ALGORITHM_CONFIG.ALPHA) * objective) {
+      const objectiveScale = Math.max(1, Math.abs(objective));
+      if (gap <= tolerance * (1 - ALGORITHM_CONFIG.ALPHA) * objectiveScale) {
         logger.debug('Frank-Wolfe converged', {
           iterations: iter + 1,
           objective,
@@ -171,20 +171,23 @@ export function frankWolfe(
       // Compute step size
       let gamma: number;
       if (stepSize === 'line-search') {
-        gamma = lineSearchKL(Array.from(mu), Array.from(s), gradArray);
+        const muArray = Array.from(mu);
+        const sArrayForSearch = Array.from(s);
+        gamma = lineSearchObjective(
+          muArray,
+          sArrayForSearch,
+          (candidate) => objectiveFn(candidate)
+        );
       } else if (stepSize === 'adaptive') {
         gamma = adaptiveStepSize(iter);
       } else {
         gamma = options.initialStepSize ?? 0.1;
       }
+      gamma = Math.max(0, Math.min(1, Number.isFinite(gamma) ? gamma : 0));
 
       // Update
       addScaledInPlace(tempMu, mu, s, 1 - gamma, gamma);
       [mu, tempMu] = [tempMu, mu];
-
-      // Ensure feasibility
-      const projected = projectOntoSimplex(Array.from(mu));
-      copyTo(mu, projected);
     }
 
     // Max iterations reached
@@ -280,7 +283,8 @@ export function barrierFrankWolfe(
         logger.debug('Iteration ' + String(iter), { objective, gap, epsilon });
       }
 
-      if (gap <= (1 - ALGORITHM_CONFIG.ALPHA) * objective) {
+      const objectiveScale = Math.max(1, Math.abs(objective));
+      if (gap <= tolerance * (1 - ALGORITHM_CONFIG.ALPHA) * objectiveScale) {
         logger.debug('Barrier Frank-Wolfe converged', {
           iterations: iter + 1,
           objective,
@@ -298,12 +302,9 @@ export function barrierFrankWolfe(
         };
       }
 
-      const gamma = adaptiveStepSize(iter);
+      const gamma = Math.max(0, Math.min(1, adaptiveStepSize(iter)));
       addScaledInPlace(tempMu, mu, s, 1 - gamma, gamma);
       [mu, tempMu] = [tempMu, mu];
-
-      const projected = projectOntoSimplex(Array.from(mu));
-      copyTo(mu, projected);
     }
 
     const finalObjective = objectiveFn(mu, epsilon);

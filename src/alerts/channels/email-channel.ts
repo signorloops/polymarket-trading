@@ -22,7 +22,7 @@ export class EmailChannel implements NotificationChannel {
   private config: EmailConfig | null = null;
 
   constructor(config?: EmailConfig) {
-    if (config?.smtp?.host && config.from && config.to.length > 0) {
+    if (config && config.smtp.host && config.from && config.to.length > 0) {
       this.config = config;
       this.transporter = nodemailer.createTransport({
         host: config.smtp.host,
@@ -229,7 +229,14 @@ Time: ${notification.timestamp.toISOString()}
     if (typeof value === 'object') {
       return `<pre style="background: #f4f4f4; padding: 10px; border-radius: 4px; overflow-x: auto;">${this.escapeHtml(JSON.stringify(value, null, 2))}</pre>`;
     }
-    return this.escapeHtml(String(value));
+    if (typeof value === 'string') return this.escapeHtml(value);
+    if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+      return this.escapeHtml(value.toString());
+    }
+    if (typeof value === 'symbol') {
+      return this.escapeHtml(value.description ?? 'Symbol');
+    }
+    return this.escapeHtml('[Function]');
   }
 
   /**
@@ -241,6 +248,13 @@ Time: ${notification.timestamp.toISOString()}
     if (typeof value === 'object') {
       return JSON.stringify(value, null, 2);
     }
-    return String(value);
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+      return value.toString();
+    }
+    if (typeof value === 'symbol') {
+      return value.description ?? 'Symbol';
+    }
+    return '[Function]';
   }
 }

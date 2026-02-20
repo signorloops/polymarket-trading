@@ -84,6 +84,23 @@ describe('LPSolver', () => {
       expect(constraintValue).toBeGreaterThanOrEqual(0);
       expect(constraintValue).toBeLessThanOrEqual(2);
     });
+
+    it('应精确满足等式约束并找到线性目标最优解', () => {
+      const problem: LPProblem = {
+        objective: [1, 2], // minimize x + 2y
+        equalityMatrix: [[1, 1]], // x + y = 1
+        equalityRhs: [1],
+        lowerBounds: [0, 0],
+      };
+
+      const solution = solveLP(problem);
+      const sum = (solution.solution[0] ?? 0) + (solution.solution[1] ?? 0);
+      const objective = (solution.solution[0] ?? 0) + 2 * (solution.solution[1] ?? 0);
+
+      expect(solution.status).toBe('optimal');
+      expect(sum).toBeCloseTo(1, 4);
+      expect(objective).toBeCloseTo(1, 4);
+    });
   });
 
   describe('solveLMO', () => {
@@ -138,6 +155,17 @@ describe('LPSolver', () => {
       expect(vertex[0]).toBe(1);
       expect(vertex[1]).toBe(0);
       expect(vertex[2]).toBe(0);
+    });
+
+    it('在独立等式组约束下应选择每组最优顶点', () => {
+      const gradient = [5, 1, -2, 7];
+      const constraints = [
+        { coefficients: [1, 1, 0, 0], rhs: 1, type: 'equality' as const },
+        { coefficients: [0, 0, 1, 1], rhs: 1, type: 'equality' as const },
+      ];
+
+      const vertex = solveLMO(gradient, constraints);
+      expect(vertex).toEqual([0, 1, 1, 0]);
     });
   });
 

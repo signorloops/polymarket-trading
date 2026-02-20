@@ -2,10 +2,6 @@
  * Linear Programming Solver Interface
  *
  * Provides a unified interface for LP solvers.
- * Can be backed by:
- * - glpk.js (JavaScript implementation)
- * - External solver via API
- * - Custom implementation for simple cases
  *
  * Standard form:
  *   minimize: c^T x
@@ -14,6 +10,7 @@
  *                lb <= x <= ub
  */
 
+import lpSolver from 'javascript-lp-solver';
 import { getLogger } from '../utils/logger.js';
 
 export interface LPProblem {
@@ -57,63 +54,91 @@ export interface LPSolverOptions {
   verbose?: boolean;
 }
 
+interface SolverConstraint {
+  max?: number;
+  min?: number;
+  equal?: number;
+}
+
+interface SolverModel {
+  optimize: string;
+  opType: 'max' | 'min';
+  constraints: Record<string, SolverConstraint>;
+  variables: Record<string, Record<string, number>>;
+  ints?: Record<string, 1>;
+  binaries?: Record<string, 1>;
+  unrestricted?: Record<string, 1>;
+  timeout?: number;
+}
+
+interface SolverResult {
+  feasible?: boolean;
+  bounded?: boolean;
+  result?: number;
+  [key: string]: unknown;
+}
+
+const solverBackend = lpSolver as unknown as { Solve: (model: SolverModel) => SolverResult };
 const logger = getLogger().child({ module: 'LPSolver' });
 
 /**
- * Solve a linear programming problem
- *
- * This is a placeholder implementation using a simple gradient descent approach.
- * For production use, replace with a proper LP solver like glpk.js or an external API.
+ * Solve a linear programming problem via javascript-lp-solver backend.
  */
 export function solveLP(
   problem: LPProblem,
   options: LPSolverOptions = {}
 ): LPSolution {
-  const { maxIterations = 1000, tolerance = 1e-6 } = options;
-
+  const { tolerance = 1e-6 } = options;
   const n = problem.objective.length;
 
+  if (n === 0) {
+    return {
+      solution: [],
+      objectiveValue: 0,
+      optimal: true,
+      status: 'optimal',
+    };
+  }
+
   try {
-    // Validate problem
     validateProblem(problem);
+    const { model, variableNames } = buildSolverModel(problem, options);
+    const raw = solverBackend.Solve(model);
 
-    // Initialize with zeros or midpoint of bounds
-    let x = initializeVariables(problem);
-
-    // Simple projected gradient descent
-    // Note: This is NOT a proper LP solver, just a placeholder
-    const learningRate = 0.01;
-
-    for (let iter = 0; iter < maxIterations; iter++) {
-      const gradient = [...problem.objective];
-
-      // Gradient step
-      const newX = x.map((xi, i) => {
-        const grad = gradient[i];
-        return grad !== undefined ? xi - learningRate * grad : xi;
-      });
-
-      // Project onto feasible region (simplified)
-      x = projectOntoFeasibleRegion(newX, problem);
-
-      // Check convergence
-      const change = Math.sqrt(x.reduce((sum, xi, i) => {
-        const newXi = newX[i];
-        return newXi !== undefined ? sum + Math.pow(xi - newXi, 2) : sum;
-      }, 0));
-      if (change < tolerance) {
-        break;
-      }
+    if (raw.feasible === false) {
+      return {
+        solution: Array<number>(n).fill(0),
+        objectiveValue: Infinity,
+        optimal: false,
+        status: raw.bounded === false ? 'unbounded' : 'infeasible',
+      };
     }
 
-    const objectiveValue = dotProduct(problem.objective, x);
+    const solution = variableNames.map((name) => {
+      const val = raw[name];
+      return Number.isFinite(val as number) ? Number(val) : 0;
+    });
 
+    const objectiveValue = dotProduct(problem.objective, solution);
+    const feasibility = checkFeasibility(solution, problem, tolerance);
+
+    if (!feasibility.feasible) {
+      return {
+        solution,
+        objectiveValue,
+        optimal: false,
+        status: 'error',
+        error: `Backend produced infeasible solution: ${feasibility.violations.join('; ')}`,
+      };
+    }
+
+    const iter = Number(raw.iter);
     return {
-      solution: x,
+      solution,
       objectiveValue,
       optimal: true,
       status: 'optimal',
-      iterations: maxIterations,
+      ...(Number.isFinite(iter) ? { iterations: iter } : {}),
     };
   } catch (error) {
     logger.error('LP solver failed', {
@@ -121,7 +146,7 @@ export function solveLP(
     });
 
     return {
-      solution: new Array(n).fill(0) as number[],
+      solution: Array<number>(n).fill(0),
       objectiveValue: Infinity,
       optimal: false,
       status: 'error',
@@ -131,40 +156,52 @@ export function solveLP(
 }
 
 /**
- * Solve the linear minimization oracle (LMO) for Frank-Wolfe
- *
- * This is a special case of LP where we minimize <gradient, x>
- * over the marginal polytope.
+ * Solve the linear minimization oracle (LMO) for Frank-Wolfe.
  */
 export function solveLMO(
   gradient: number[],
-  _constraints: {
+  constraints: {
     coefficients: number[];
     rhs: number;
     type: 'equality' | 'inequality';
   }[]
 ): number[] {
   const n = gradient.length;
+  if (n === 0) {
+    return [1];
+  }
 
-  // For a simplex constraint, the LMO picks the vertex with minimum gradient
-  // For more complex constraints, solve a proper LP
+  if (constraints.length === 0) {
+    return fallbackSimplexVertex(gradient);
+  }
 
-  // Simple case: just find minimum gradient component
-  let minIdx = 0;
-  let minValue = gradient[0] ?? Infinity;
+  const equalityMatrix: number[][] = [];
+  const equalityRhs: number[] = [];
+  const inequalityMatrix: number[][] = [];
+  const inequalityRhs: number[] = [];
 
-  for (let i = 1; i < n; i++) {
-    const grad = gradient[i];
-    if (grad !== undefined && grad < minValue) {
-      minValue = grad;
-      minIdx = i;
+  for (const constraint of constraints) {
+    if (constraint.type === 'equality') {
+      equalityMatrix.push(constraint.coefficients);
+      equalityRhs.push(constraint.rhs);
+    } else {
+      inequalityMatrix.push(constraint.coefficients);
+      inequalityRhs.push(constraint.rhs);
     }
   }
 
-  const vertex: number[] = new Array(n).fill(0) as number[];
-  vertex[minIdx] = 1;
+  const result = solveLP({
+    objective: gradient,
+    ...(equalityMatrix.length > 0 ? { equalityMatrix, equalityRhs } : {}),
+    ...(inequalityMatrix.length > 0 ? { inequalityMatrix, inequalityRhs } : {}),
+    lowerBounds: Array<number>(n).fill(0),
+  });
 
-  return vertex;
+  if (result.status === 'optimal' && result.solution.length === n) {
+    return result.solution;
+  }
+
+  return fallbackSimplexVertex(gradient);
 }
 
 /**
@@ -249,6 +286,14 @@ function validateProblem(problem: LPProblem): void {
     }
   }
 
+  if (problem.inequalityMatrix && problem.inequalityRhs && problem.inequalityMatrix.length !== problem.inequalityRhs.length) {
+    throw new Error('Inequality RHS dimension mismatch');
+  }
+
+  if (problem.equalityMatrix && problem.equalityRhs && problem.equalityMatrix.length !== problem.equalityRhs.length) {
+    throw new Error('Equality RHS dimension mismatch');
+  }
+
   if (problem.lowerBounds && problem.lowerBounds.length !== n) {
     throw new Error('Lower bounds dimension mismatch');
   }
@@ -258,47 +303,139 @@ function validateProblem(problem: LPProblem): void {
   }
 }
 
-function initializeVariables(problem: LPProblem): number[] {
+function buildSolverModel(
+  problem: LPProblem,
+  options: LPSolverOptions
+): { model: SolverModel; variableNames: string[] } {
   const n = problem.objective.length;
+  const variableNames = Array.from({ length: n }, (_, i) => `x_${String(i)}`);
 
-  if (problem.lowerBounds && problem.upperBounds) {
-    // Initialize at midpoint of bounds
-    return problem.lowerBounds.map((lb, i) => {
-      const ub = problem.upperBounds?.[i];
-      return ub !== undefined ? (lb + ub) / 2 : lb;
-    });
+  const model: SolverModel = {
+    optimize: 'objective',
+    opType: 'max',
+    constraints: {},
+    variables: {},
+  };
+
+  if (options.maxIterations !== undefined) {
+    model.timeout = Math.max(1, options.maxIterations);
   }
 
-  // Default to zeros or lower bounds
-  return problem.lowerBounds ? [...problem.lowerBounds] : new Array(n).fill(0) as number[];
+  // Objective: backend maximizes, so negate to represent minimization.
+  for (let i = 0; i < n; i++) {
+    const varName = variableNames[i] ?? `x_${String(i)}`;
+    model.variables[varName] = {
+      objective: -(problem.objective[i] ?? 0),
+    };
+  }
+
+  const unrestricted: Record<string, 1> = {};
+
+  // Variable bounds. Default lower bound is 0 to keep legacy behavior.
+  for (let i = 0; i < n; i++) {
+    const varName = variableNames[i] ?? `x_${String(i)}`;
+    const lb = problem.lowerBounds?.[i] ?? 0;
+    const ub = problem.upperBounds?.[i];
+
+    if (lb < 0) {
+      unrestricted[varName] = 1;
+    }
+
+    const variable = model.variables[varName];
+    if (!variable) {
+      continue;
+    }
+    addConstraint(model, variable, `lb_${String(i)}`, 'min', lb, 1);
+
+    if (ub !== undefined) {
+      addConstraint(model, variable, `ub_${String(i)}`, 'max', ub, 1);
+    }
+  }
+
+  if (Object.keys(unrestricted).length > 0) {
+    model.unrestricted = unrestricted;
+  }
+
+  if (problem.inequalityMatrix && problem.inequalityRhs) {
+    for (let r = 0; r < problem.inequalityMatrix.length; r++) {
+      const row = problem.inequalityMatrix[r] ?? [];
+      const rhs = problem.inequalityRhs[r];
+      if (rhs === undefined) continue;
+
+      const name = `ineq_${String(r)}`;
+      model.constraints[name] = { max: rhs };
+
+      for (let c = 0; c < n; c++) {
+        const coef = row[c] ?? 0;
+        if (coef !== 0) {
+          const varName = variableNames[c] ?? `x_${String(c)}`;
+          const variable = model.variables[varName];
+          if (variable) {
+            variable[name] = coef;
+          }
+        }
+      }
+    }
+  }
+
+  if (problem.equalityMatrix && problem.equalityRhs) {
+    for (let r = 0; r < problem.equalityMatrix.length; r++) {
+      const row = problem.equalityMatrix[r] ?? [];
+      const rhs = problem.equalityRhs[r];
+      if (rhs === undefined) continue;
+
+      const name = `eq_${String(r)}`;
+      model.constraints[name] = { equal: rhs };
+
+      for (let c = 0; c < n; c++) {
+        const coef = row[c] ?? 0;
+        if (coef !== 0) {
+          const varName = variableNames[c] ?? `x_${String(c)}`;
+          const variable = model.variables[varName];
+          if (variable) {
+            variable[name] = coef;
+          }
+        }
+      }
+    }
+  }
+
+  return { model, variableNames };
 }
 
-function projectOntoFeasibleRegion(x: number[], problem: LPProblem): number[] {
-  let result = [...x];
-
-  // Apply bounds
-  if (problem.lowerBounds) {
-    result = result.map((xi, i) => {
-      const lb = problem.lowerBounds?.[i];
-      return lb !== undefined ? Math.max(xi, lb) : xi;
-    });
+function addConstraint(
+  model: SolverModel,
+  variable: Record<string, number>,
+  name: string,
+  type: 'min' | 'max' | 'equal',
+  value: number,
+  coefficient: number
+): void {
+  if (!Number.isFinite(value)) {
+    return;
   }
 
-  if (problem.upperBounds) {
-    result = result.map((xi, i) => {
-      const ub = problem.upperBounds?.[i];
-      return ub !== undefined ? Math.min(xi, ub) : xi;
-    });
+  model.constraints[name] ??= {};
+  model.constraints[name][type] = value;
+  variable[name] = coefficient;
+}
+
+function fallbackSimplexVertex(gradient: number[]): number[] {
+  const n = gradient.length;
+  const vertex: number[] = Array<number>(n).fill(0);
+  let minIdx = 0;
+  let minValue = gradient[0] ?? Infinity;
+
+  for (let i = 1; i < n; i++) {
+    const grad = gradient[i];
+    if (grad !== undefined && grad < minValue) {
+      minValue = grad;
+      minIdx = i;
+    }
   }
 
-  // Simple projection for sum-to-one constraint (if present)
-  // This is a simplified version - proper implementation would use proper projection
-  const sum = result.reduce((s, xi) => s + xi, 0);
-  if (Math.abs(sum - 1) > 1e-6 && sum > 0) {
-    result = result.map((xi) => xi / sum);
-  }
-
-  return result;
+  vertex[minIdx] = 1;
+  return vertex;
 }
 
 function dotProduct(a: number[], b: number[]): number {
