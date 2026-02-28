@@ -1,6 +1,6 @@
 # Polymarket Arbitrage Trading System
 
-[English](./README.en.md) | [中文](./README.zh-CN.md)
+[English (Default)](./README.md) | [中文](./README.zh-CN.md)
 
 A high-frequency arbitrage trading system built on the Marginal Polytope and Frank-Wolfe optimization algorithm.
 

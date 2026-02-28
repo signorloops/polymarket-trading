@@ -1,6 +1,6 @@
 # Polymarket 套利交易系统
 
-[English](./README.en.md) | [中文](./README.zh-CN.md)
+[English (Default)](./README.md) | [中文](./README.zh-CN.md)
 
 基于边际多面体（Marginal Polytope）和 Frank-Wolfe 优化算法的高频套利交易系统。
 
