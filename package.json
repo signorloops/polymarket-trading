@@ -34,7 +34,7 @@
     "@types/jest": "^30.0.0",
     "@types/node": "^25.3.0",
     "@types/ws": "^8.18.1",
-    "eslint": "^10.0.1",
+    "eslint": "^10.0.2",
     "eslint-config-prettier": "^10.1.8",
     "husky": "^8.0.0",
     "jest": "^30.2.0",
