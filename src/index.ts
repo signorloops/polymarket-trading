@@ -33,7 +33,7 @@ import {
 } from './utils/config.js';
 
 // Trading system constants
-const MIN_PROFIT_THRESHOLD = 0.05; // Minimum $0.05 profit to execute
+const MIN_PROFIT_THRESHOLD = 0.05; // Minimum guaranteed profit (divergence units)
 const POSITION_SIZE_MULTIPLIER = 100; // Base multiplier for position sizing
 const MAIN_LOOP_INTERVAL_MS = 1000; // Normal cycle interval
 const ERROR_RETRY_INTERVAL_MS = 5000; // Retry interval after error
@@ -221,6 +221,7 @@ export class PolymarketTradingSystem {
       case 'trade':
         // Update detector with new price
         this.detector.updatePrice(event.data.marketId, event.data.price);
+        getRiskManager().updateMarketPrice(event.data.marketId, event.data.price);
         break;
 
       case 'orderbook':

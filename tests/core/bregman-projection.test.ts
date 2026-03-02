@@ -55,6 +55,21 @@ describe('Bregman Projection', () => {
       expect(result.divergence).toBeGreaterThanOrEqual(0);
       expect(result.iterations).toBeGreaterThan(0);
     });
+
+    it('should preserve independent event equalities without global renormalization', () => {
+      const priceVector = [0.6, 0.4, 0.2, 0.8];
+      const constraints = [
+        { coefficients: [1, 1, 0, 0], rhs: 1, type: 'equality' as const },
+        { coefficients: [0, 0, 1, 1], rhs: 1, type: 'equality' as const },
+      ];
+
+      const result = bregmanProjection(priceVector, constraints, 200, 1e-9);
+
+      const group1 = (result.projection[0] ?? 0) + (result.projection[1] ?? 0);
+      const group2 = (result.projection[2] ?? 0) + (result.projection[3] ?? 0);
+      expect(group1).toBeCloseTo(1, 6);
+      expect(group2).toBeCloseTo(1, 6);
+    });
   });
 
   describe('klGradient', () => {
@@ -390,7 +405,8 @@ describe('Bregman Projection', () => {
       const result = bregmanProjection(priceVector, constraints);
 
       expect(result.projection).toHaveLength(2);
-      expect(result.projection[0]! + result.projection[1]!).toBeCloseTo(1, 5);
+      const lhs = (result.projection[0] ?? 0) * 1e-11 + (result.projection[1] ?? 0);
+      expect(lhs).toBeCloseTo(1, 5);
     });
 
     it('should handle single element price vector', () => {

@@ -43,7 +43,7 @@ describe('RiskManager', () => {
     });
 
     it('should reject trade exceeding max exposure', () => {
-      const result = riskManager.checkTrade('market-1', 50000, 'buy', 1000);
+      const result = riskManager.checkTrade('market-1', 50000, 'buy', 50000);
 
       expect(result.allowed).toBe(false);
       expect(result.riskLevel).toBe('high');
@@ -68,6 +68,22 @@ describe('RiskManager', () => {
       // The trade itself won't be rejected for concentration (newPositionValue/totalExposure ≈ 1)
       // But we verify the concentration calculation works
       expect(result).toBeDefined();
+    });
+
+    it('should use provided trade notional directly (not size * notional)', () => {
+      const baseStatus: OrderStatus = {
+        orderId: 'base-order',
+        status: 'filled',
+        filledSize: 200,
+        remainingSize: 0,
+        avgPrice: 2,
+        timestamp: Date.now(),
+      };
+      riskManager.updatePosition(baseStatus, 'market-base', 'buy');
+
+      // Additional trade notional is 50 (size 10 at unit value 5).
+      const result = riskManager.checkTrade('market-new', 10, 'buy', 50);
+      expect(result.allowed).toBe(true);
     });
   });
 
@@ -242,6 +258,25 @@ describe('RiskManager', () => {
 
       expect(result.allowed).toBe(false);
       expect(result.reason).toContain('Circuit breaker');
+    });
+  });
+
+  describe('emergency stop', () => {
+    it('should trigger emergency stop on large unrealized loss after mark-to-market update', () => {
+      const tightRisk = new RiskManager({ emergencyStopThreshold: 10 });
+
+      const openStatus: OrderStatus = {
+        orderId: 'open-order',
+        status: 'filled',
+        filledSize: 100,
+        remainingSize: 0,
+        avgPrice: 0.5,
+        timestamp: Date.now(),
+      };
+      tightRisk.updatePosition(openStatus, 'market-1', 'buy');
+
+      tightRisk.updateMarketPrice('market-1', 0.1);
+      expect(tightRisk.checkEmergencyStop()).toBe(true);
     });
   });
 

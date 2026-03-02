@@ -24,7 +24,7 @@ export const AlgorithmConfigSchema = z.object({
   /** Maximum iterations for Frank-Wolfe */
   MAX_ITERATIONS: z.number().int().positive().default(150),
 
-  /** Minimum profit threshold in USD */
+  /** Minimum guaranteed-profit threshold (divergence units) */
   MIN_PROFIT_THRESHOLD: z.number().nonnegative().default(0.05),
 
   /** Barrier function parameter for LMSR gradient handling */

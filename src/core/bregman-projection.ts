@@ -212,9 +212,6 @@ export function bregmanProjection(
       applyConstraintUpdate(mu, constraint, ratio);
     }
 
-    // Normalize to ensure valid probability distribution (in-place)
-    normalizeInPlace(mu);
-
     // Check convergence
     const change = computeChange(mu, prevMu);
     if (change < tolerance) {

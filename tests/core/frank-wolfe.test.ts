@@ -54,6 +54,21 @@ describe('FrankWolfe', () => {
       // For each equality group, choose the coordinate with minimum gradient.
       expect(vertex).toEqual([0, 1, 1, 0]);
     });
+
+    it('should respect inequality constraints in LMO', () => {
+      const gradient = [-10, 0];
+      const constraints = [
+        { coefficients: [1, 1], rhs: 1, type: 'equality' as const },
+        // Inequality convention in core constraints is: coefficients · x >= rhs
+        // This encodes x0 <= 0.2 as -x0 >= -0.2.
+        { coefficients: [-1, 0], rhs: -0.2, type: 'inequality' as const },
+      ];
+
+      const vertex = linearMinimizationOracle(gradient, constraints);
+
+      expect(vertex[0]).toBeCloseTo(0.2, 4);
+      expect(vertex[1]).toBeCloseTo(0.8, 4);
+    });
   });
 
   describe('frankWolfe', () => {

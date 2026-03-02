@@ -43,6 +43,7 @@ export interface RiskManagerConfig {
 
 export class RiskManager {
   private positions: Map<string, Position> = new Map();
+  private marketPrices: Map<string, number> = new Map();
   private dailyPnL = 0;
   private maxDailyPnL = 0;
   private minDailyPnL = 0;
@@ -78,7 +79,7 @@ export class RiskManager {
     marketId: string,
     size: number,
     side: 'buy' | 'sell',
-    estimatedValue: number
+    estimatedNotional: number
   ): RiskCheckResult {
     // Check circuit breaker
     if (this.circuitBreakerTriggered) {
@@ -101,8 +102,8 @@ export class RiskManager {
 
     // Calculate new exposure
     const currentExposure = this.getTotalExposure();
-    const positionChange = side === 'buy' ? size * estimatedValue : -size * estimatedValue;
-    const newExposure = currentExposure + Math.abs(positionChange);
+    const tradeNotional = Math.abs(estimatedNotional);
+    const newExposure = currentExposure + tradeNotional;
 
     // Check max exposure
     if (newExposure > this.config.maxExposure) {
@@ -116,9 +117,10 @@ export class RiskManager {
     // Check position concentration
     const currentPosition = this.positions.get(marketId);
     const newPositionSize = (currentPosition?.size ?? 0) + (side === 'buy' ? size : -size);
-    const concentration = Math.abs(newPositionSize * estimatedValue) / (newExposure || 1);
+    const unitValue = Math.abs(size) > 0 ? tradeNotional / Math.abs(size) : 0;
+    const concentration = Math.abs(newPositionSize * unitValue) / (newExposure || 1);
 
-    if (concentration > 0.5) {
+    if (currentExposure > 0 && concentration > 0.5) {
       return {
         allowed: false,
         reason: `Position concentration too high: ${(concentration * 100).toFixed(1)}%`,
@@ -149,6 +151,7 @@ export class RiskManager {
         const pnl = this.calculatePnL(existingPosition, orderStatus.avgPrice, orderStatus.filledSize);
         this.dailyPnL += pnl;
         this.positions.delete(marketId);
+        this.marketPrices.delete(marketId);
         this.logger.info(`Position closed for ${marketId}`, { pnl });
       } else if (newSize * existingPosition.size < 0) {
         // Position flipped
@@ -163,6 +166,7 @@ export class RiskManager {
           side: newSize > 0 ? 'long' : 'short',
           timestamp: Date.now(),
         });
+        this.marketPrices.set(marketId, orderStatus.avgPrice);
         this.logger.info(`Position flipped for ${marketId}`, { newSize, pnl });
       } else {
         // Add to position (average down/up)
@@ -171,6 +175,7 @@ export class RiskManager {
 
         existingPosition.size = newSize;
         existingPosition.avgPrice = newAvgPrice;
+        this.marketPrices.set(marketId, this.marketPrices.get(marketId) ?? orderStatus.avgPrice);
         this.logger.debug(`Position updated for ${marketId}`, { newSize, newAvgPrice });
       }
     } else {
@@ -182,11 +187,22 @@ export class RiskManager {
         side: filledSize > 0 ? 'long' : 'short',
         timestamp: Date.now(),
       });
+      this.marketPrices.set(marketId, orderStatus.avgPrice);
       this.logger.debug(`New position for ${marketId}`, { size: filledSize, avgPrice: orderStatus.avgPrice });
     }
 
     // Update PnL tracking
     this.updatePnLTracking();
+  }
+
+  /**
+   * Update market mark price for unrealized PnL estimation
+   */
+  updateMarketPrice(marketId: string, price: number): void {
+    if (!Number.isFinite(price) || price <= 0) {
+      return;
+    }
+    this.marketPrices.set(marketId, price);
   }
 
   /**
@@ -322,6 +338,7 @@ export class RiskManager {
    */
   clearPositions(): void {
     this.positions.clear();
+    this.marketPrices.clear();
     this.logger.warn('All positions cleared');
   }
 
@@ -339,8 +356,15 @@ export class RiskManager {
   }
 
   private calculateUnrealizedPnL(): number {
-    // Simplified - in real implementation, use current market prices
-    return 0;
+    let unrealized = 0;
+    for (const position of this.positions.values()) {
+      const markPrice = this.marketPrices.get(position.marketId);
+      if (markPrice === undefined) {
+        continue;
+      }
+      unrealized += (markPrice - position.avgPrice) * position.size;
+    }
+    return unrealized;
   }
 
   private updatePnLTracking(): void {

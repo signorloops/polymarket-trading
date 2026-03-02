@@ -12,7 +12,7 @@ describe('CrossMarketArbitrageStrategy', () => {
   beforeEach(() => {
     resetDependencyGraph();
     strategy = new CrossMarketArbitrageStrategy({
-      minProfitThreshold: 0.01,
+      minProfitThreshold: 0.001,
       maxIterations: 50,
       alpha: 0.9,
       minConfidence: 0.5,
@@ -294,6 +294,11 @@ describe('CrossMarketArbitrageStrategy', () => {
       expect(signal === null || typeof signal === 'object').toBe(true);
     });
 
+    it('不应错误截断非 yes/no 后缀市场ID 的事件名', () => {
+      const eventId = (strategy as any).extractEventId('market-a');
+      expect(eventId).toBe('market-a');
+    });
+
     it('处理复杂事件ID格式', () => {
       const yesBook = new OrderBook('us-election-2024-winner-yes');
       yesBook.update([{ price: 0.65, size: 100 }], [{ price: 0.66, size: 100 }]);
@@ -318,6 +323,38 @@ describe('CrossMarketArbitrageStrategy', () => {
 
       const signal = strategy.analyze(marketData);
       expect(signal === null || typeof signal === 'object').toBe(true);
+    });
+  });
+
+  describe('单位一致性', () => {
+    it('trade vector 应保持概率单位而非放大 100 倍', () => {
+      const yesBook = new OrderBook('event-yes');
+      yesBook.update([{ price: 0.8, size: 100 }], [{ price: 0.81, size: 100 }]);
+
+      const noBook = new OrderBook('event-no');
+      noBook.update([{ price: 0.1, size: 100 }], [{ price: 0.11, size: 100 }]);
+
+      const marketData: StrategyMarketData[] = [
+        {
+          marketId: 'event-yes',
+          orderBook: yesBook,
+          lastPrice: 0.8,
+          timestamp: Date.now(),
+        },
+        {
+          marketId: 'event-no',
+          orderBook: noBook,
+          lastPrice: 0.1,
+          timestamp: Date.now(),
+        },
+      ];
+
+      const signal = strategy.analyze(marketData);
+      expect(signal).not.toBeNull();
+
+      const tradeVector = (signal?.metadata as { tradeVector?: number[] } | undefined)?.tradeVector ?? [];
+      const maxAbs = tradeVector.reduce((max, v) => Math.max(max, Math.abs(v)), 0);
+      expect(maxAbs).toBeLessThanOrEqual(1);
     });
   });
 
@@ -364,7 +401,7 @@ describe('CrossMarketArbitrageStrategy', () => {
       expect(Array.isArray(tradeVector)).toBe(true);
       expect(tradeVector).toHaveLength(marketData.length);
 
-      const inferredMu = marketData.map((m, i) => m.lastPrice + ((tradeVector?.[i] ?? 0) / 100));
+      const inferredMu = marketData.map((m, i) => m.lastPrice + (tradeVector?.[i] ?? 0));
       const eventASum = (inferredMu[0] ?? 0) + (inferredMu[1] ?? 0);
       const eventBSum = (inferredMu[2] ?? 0) + (inferredMu[3] ?? 0);
 

@@ -189,7 +189,7 @@ describe('Trading System Integration', () => {
       });
 
       // Try to create position exceeding limit
-      const result = riskManager.checkTrade('market-1', 2000, 'buy', 100);
+      const result = riskManager.checkTrade('market-1', 2000, 'buy', 2000);
 
       expect(result.allowed).toBe(false);
       expect(result.riskLevel).toBe('high');

@@ -824,6 +824,30 @@ describe('MarketDependencyGraph', () => {
       expect(meConstraintIdx).toBeGreaterThan(-1);
     });
 
+    it('should map market-level mutually exclusive edges to event-level constraints', () => {
+      const markets: MarketNode[] = [
+        { id: 'event-1-yes', eventId: 'event-1', outcome: 'Yes', price: 0.6, metadata: {} },
+        { id: 'event-1-no', eventId: 'event-1', outcome: 'No', price: 0.4, metadata: {} },
+        { id: 'event-2-yes', eventId: 'event-2', outcome: 'Yes', price: 0.7, metadata: {} },
+        { id: 'event-2-no', eventId: 'event-2', outcome: 'No', price: 0.3, metadata: {} },
+      ];
+      markets.forEach((m) => graph.addMarket(m));
+
+      // Strategy layer currently registers dependency by market IDs.
+      graph.addEdge({
+        from: 'event-1-yes',
+        to: 'event-2-yes',
+        type: 'mutually_exclusive',
+        weight: 1,
+      });
+
+      const matrix = graph.buildConstraintMatrix();
+      const meConstraintIdx = matrix.descriptions.findIndex((d) =>
+        d.includes('Mutually exclusive')
+      );
+      expect(meConstraintIdx).toBeGreaterThan(-1);
+    });
+
     it('should include conditional probability constraints', () => {
       const parentEvent: EventNode = {
         id: 'event-1',

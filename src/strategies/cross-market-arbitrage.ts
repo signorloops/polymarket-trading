@@ -16,7 +16,7 @@ import {
 import { generalizedKLDivergence } from '../utils/math.js';
 
 export interface CrossMarketArbitrageConfig extends StrategyConfig {
-  /** Minimum profit threshold ($) */
+  /** Minimum guaranteed-profit threshold (divergence units) */
   minProfitThreshold: number;
   /** Maximum Frank-Wolfe iterations */
   maxIterations: number;
@@ -163,8 +163,7 @@ export class CrossMarketArbitrageStrategy extends BaseStrategy {
     // Calculate guaranteed profit
     const divergence = generalizedKLDivergence(result.mu, theta);
     const guaranteedProfit = Math.max(0, divergence - Math.max(result.gap, 0));
-    // Report edge in percentage points for strategy-level thresholding.
-    const expectedProfit = Math.max(divergence, guaranteedProfit) * 100;
+    const expectedProfit = Math.max(divergence, guaranteedProfit);
 
     if (expectedProfit < this.crossConfig.minProfitThreshold) {
       return null;
@@ -174,7 +173,7 @@ export class CrossMarketArbitrageStrategy extends BaseStrategy {
     const tradeVector = result.mu.map((m, i) => {
       const thetaVal = theta[i];
       if (thetaVal === undefined) return 0;
-      return (m - thetaVal) * 100;
+      return m - thetaVal;
     });
 
     // Confidence based on convergence and profit
@@ -198,19 +197,22 @@ export class CrossMarketArbitrageStrategy extends BaseStrategy {
    * Extract event ID from market ID
    */
   private extractEventId(marketId: string): string {
-    // Assume format: event-outcome or event_outcome
-    const parts = marketId.split(/[-_]/);
-    return parts.slice(0, -1).join('-') || marketId;
+    const normalized = marketId.trim();
+    const match = normalized.match(/^(.*?)(?:[-_](yes|no))$/i);
+    if (match && match[1]) {
+      return match[1];
+    }
+    return normalized;
   }
 
   /**
    * Extract outcome from market ID
    */
-  private extractOutcome(marketId: string): 'YES' | 'NO' {
+  private extractOutcome(marketId: string): 'YES' | 'NO' | 'UNKNOWN' {
     const lower = marketId.toLowerCase();
     if (lower.endsWith('-yes') || lower.endsWith('_yes')) return 'YES';
     if (lower.endsWith('-no') || lower.endsWith('_no')) return 'NO';
-    return 'YES'; // Default
+    return 'UNKNOWN';
   }
 
   private buildFeasibleInitialPoint(theta: number[], constraints: Constraint[]): number[] {
@@ -277,9 +279,15 @@ export class CrossMarketArbitrageStrategy extends BaseStrategy {
    * Add explicit market dependency
    */
   addDependency(marketId1: string, marketId2: string, type: 'mutex' | 'implies'): void {
+    const fromEventId = this.extractEventId(marketId1);
+    const toEventId = this.extractEventId(marketId2);
+    if (fromEventId === toEventId) {
+      return;
+    }
+
     this.dependencyGraph.addEdge({
-      from: marketId1,
-      to: marketId2,
+      from: fromEventId,
+      to: toEventId,
       type: type === 'mutex' ? 'mutually_exclusive' : 'implies',
       weight: 1,
     });
