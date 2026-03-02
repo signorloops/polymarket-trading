@@ -848,6 +848,32 @@ describe('MarketDependencyGraph', () => {
       expect(meConstraintIdx).toBeGreaterThan(-1);
     });
 
+    it('should include implication constraints for implies edges', () => {
+      const markets: MarketNode[] = [
+        { id: 'event-1-yes', eventId: 'event-1', outcome: 'Yes', price: 0.6, metadata: {} },
+        { id: 'event-1-no', eventId: 'event-1', outcome: 'No', price: 0.4, metadata: {} },
+        { id: 'event-2-yes', eventId: 'event-2', outcome: 'Yes', price: 0.7, metadata: {} },
+        { id: 'event-2-no', eventId: 'event-2', outcome: 'No', price: 0.3, metadata: {} },
+      ];
+      markets.forEach((m) => graph.addMarket(m));
+
+      graph.addEdge({
+        from: 'event-1-yes',
+        to: 'event-2-yes',
+        type: 'implies',
+        weight: 1,
+      });
+
+      const matrix = graph.buildConstraintMatrix();
+      const implicationIdx = matrix.descriptions.findIndex((d) =>
+        d.includes('Implication: event-1 <= event-2')
+      );
+      expect(implicationIdx).toBeGreaterThan(-1);
+      expect(matrix.types[implicationIdx]).toBe('inequality');
+      expect(matrix.rhs[implicationIdx]).toBe(0);
+      expect(matrix.coefficients[implicationIdx]).toEqual([-1, -1, 1, 1]);
+    });
+
     it('should include conditional probability constraints', () => {
       const parentEvent: EventNode = {
         id: 'event-1',

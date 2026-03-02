@@ -58,6 +58,7 @@ export class PolymarketTradingSystem {
   private isRunning = false;
   private unsubscribe?: () => void;
   private config: TradingSystemConfig;
+  private latestPrices: Map<string, number> = new Map();
 
   constructor(config: TradingSystemConfig) {
     this.config = config;
@@ -93,6 +94,12 @@ export class PolymarketTradingSystem {
         })),
         outcomes: ['YES', 'NO'],
       });
+
+      for (const market of event.markets) {
+        if (Number.isFinite(market.price) && market.price > 0) {
+          this.latestPrices.set(market.id, market.price);
+        }
+      }
     }
 
     this.logger.info('Trading system initialized');
@@ -165,33 +172,74 @@ export class PolymarketTradingSystem {
   async executeOpportunity(opportunity: ArbitrageOpportunity): Promise<boolean> {
     const riskManager = getRiskManager();
 
-    // Validate opportunity has required data
-    const primaryMarket = opportunity.markets[0];
-    const primaryDirection = opportunity.tradeDirection[0];
-    if (primaryMarket === undefined || primaryDirection === undefined) {
-      this.logger.warn('Invalid opportunity: missing primary market or direction', { id: opportunity.id });
+    // Build executable legs with per-leg notional estimates.
+    const legs: Array<{
+      marketId: string;
+      side: 'buy' | 'sell';
+      size: number;
+      notional: number;
+    }> = [];
+
+    for (let i = 0; i < opportunity.markets.length; i++) {
+      const marketId = opportunity.markets[i];
+      const direction = opportunity.tradeDirection[i];
+      if (marketId === undefined || direction === undefined) {
+        continue;
+      }
+
+      const size = Math.abs(direction) * POSITION_SIZE_MULTIPLIER;
+      if (!Number.isFinite(size) || size <= 0) {
+        continue;
+      }
+
+      const side: 'buy' | 'sell' = direction > 0 ? 'buy' : 'sell';
+      const referencePrice = this.getReferencePrice(marketId);
+      const notional = size * referencePrice;
+      legs.push({ marketId, side, size, notional });
+    }
+
+    if (legs.length === 0) {
+      this.logger.warn('Invalid opportunity: no executable legs', { id: opportunity.id });
       return false;
     }
 
-    // Calculate position sizes before risk check
-    // This is simplified - real implementation would use order books
-    const sizes = opportunity.tradeDirection.map((d) => Math.abs(d) * POSITION_SIZE_MULTIPLIER);
-    const primaryLegSize = sizes[0] ?? 0;
-    const estimatedNotional = sizes.reduce((sum, size) => sum + size, 0);
+    const primaryLeg = legs[0];
+    if (!primaryLeg) {
+      this.logger.warn('Invalid opportunity: missing primary leg', { id: opportunity.id });
+      return false;
+    }
 
-    // Check risk limits
-    const riskCheck = riskManager.checkTrade(
-      primaryMarket,
-      primaryLegSize,
-      primaryDirection > 0 ? 'buy' : 'sell',
-      estimatedNotional
+    // Portfolio-level check uses aggregate notional across all legs.
+    const totalEstimatedNotional = legs.reduce((sum, leg) => sum + leg.notional, 0);
+    const aggregateCheck = riskManager.checkTrade(
+      primaryLeg.marketId,
+      primaryLeg.size,
+      primaryLeg.side,
+      totalEstimatedNotional
     );
-
-    if (!riskCheck.allowed) {
-      this.logger.warn('Trade rejected by risk manager', { reason: riskCheck.reason });
+    if (!aggregateCheck.allowed) {
+      this.logger.warn('Trade rejected by risk manager', { reason: aggregateCheck.reason });
       return false;
     }
 
+    // Per-leg checks catch concentration and single-market risks.
+    for (const leg of legs) {
+      const riskCheck = riskManager.checkTrade(
+        leg.marketId,
+        leg.size,
+        leg.side,
+        leg.notional
+      );
+      if (!riskCheck.allowed) {
+        this.logger.warn('Trade rejected by per-leg risk check', {
+          reason: riskCheck.reason,
+          marketId: leg.marketId,
+        });
+        return false;
+      }
+    }
+
+    const sizes = legs.map((leg) => leg.size);
     this.logger.info('Executing arbitrage', {
       id: opportunity.id,
       type: opportunity.type,
@@ -222,6 +270,9 @@ export class PolymarketTradingSystem {
         // Update detector with new price
         this.detector.updatePrice(event.data.marketId, event.data.price);
         getRiskManager().updateMarketPrice(event.data.marketId, event.data.price);
+        if (Number.isFinite(event.data.price) && event.data.price > 0) {
+          this.latestPrices.set(event.data.marketId, event.data.price);
+        }
         break;
 
       case 'orderbook':
@@ -276,6 +327,23 @@ export class PolymarketTradingSystem {
         await sleep(ERROR_RETRY_INTERVAL_MS); // Wait longer on error
       }
     }
+  }
+
+  private getReferencePrice(marketId: string): number {
+    const cachedPrice = this.latestPrices.get(marketId);
+    if (cachedPrice !== undefined && Number.isFinite(cachedPrice) && cachedPrice > 0) {
+      return cachedPrice;
+    }
+
+    const book = getOrderBookManager().peekBook(marketId);
+    const midPrice = book?.getMidPrice();
+    if (midPrice !== null && midPrice !== undefined && Number.isFinite(midPrice) && midPrice > 0) {
+      this.latestPrices.set(marketId, midPrice);
+      return midPrice;
+    }
+
+    // Conservative fallback for binary market contracts in [0, 1].
+    return 1;
   }
 }
 

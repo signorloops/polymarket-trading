@@ -282,7 +282,55 @@ export class MarketDependencyGraph {
       }
     }
 
-    // 3. Conditional probability constraints
+    // 3. Implication constraints from explicit dependency edges:
+    // from => to  =>  P(from) <= P(to)  =>  P(to) - P(from) >= 0
+    for (const edge of this.edges) {
+      if (edge.type !== 'implies') {
+        continue;
+      }
+
+      const fromEventId = this.resolveEdgeEventId(edge.from);
+      const toEventId = this.resolveEdgeEventId(edge.to);
+      if (!fromEventId || !toEventId || fromEventId === toEventId) {
+        continue;
+      }
+
+      const fromEvent = this.events.get(fromEventId);
+      const toEvent = this.events.get(toEventId);
+      if (!fromEvent || !toEvent) {
+        continue;
+      }
+
+      const constraint: number[] = new Array(n).fill(0) as number[];
+      let hasTerm = false;
+
+      for (const marketId of toEvent.markets) {
+        const idx = marketIndex.get(marketId) ?? -1;
+        if (idx >= 0) {
+          constraint[idx] = 1;
+          hasTerm = true;
+        }
+      }
+
+      for (const marketId of fromEvent.markets) {
+        const idx = marketIndex.get(marketId) ?? -1;
+        if (idx >= 0) {
+          constraint[idx] = -1;
+          hasTerm = true;
+        }
+      }
+
+      if (!hasTerm) {
+        continue;
+      }
+
+      coefficients.push(constraint);
+      rhs.push(0);
+      types.push('inequality');
+      descriptions.push(`Implication: ${fromEventId} <= ${toEventId}`);
+    }
+
+    // 4. Conditional probability constraints
     for (const event of this.events.values()) {
       if (event.parentEvent) {
         const parent = this.events.get(event.parentEvent);
@@ -308,7 +356,7 @@ export class MarketDependencyGraph {
       }
     }
 
-    // 4. Non-negativity constraints
+    // 5. Non-negativity constraints
     for (let i = 0; i < n; i++) {
       const constraint: number[] = new Array(n).fill(0) as number[];
       constraint[i] = 1;

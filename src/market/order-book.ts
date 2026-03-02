@@ -381,6 +381,13 @@ export class OrderBookManager {
   }
 
   /**
+   * Get an existing order book without creating a new one
+   */
+  peekBook(marketId: string): OrderBook | undefined {
+    return this.books.get(marketId);
+  }
+
+  /**
    * Update an order book
    */
   updateBook(

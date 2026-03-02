@@ -167,6 +167,18 @@ describe('LPSolver', () => {
       const vertex = solveLMO(gradient, constraints);
       expect(vertex).toEqual([0, 1, 1, 0]);
     });
+
+    it('strict 模式下，约束 LP 不可解时应抛错', () => {
+      const gradient = [1, 2];
+      const constraints = [
+        { coefficients: [1, 0], rhs: 1, type: 'equality' as const },
+        { coefficients: [1, 0], rhs: 2, type: 'equality' as const },
+      ];
+
+      expect(() => solveLMO(gradient, constraints, { strict: true })).toThrow(
+        'LMO LP solve failed under constraints'
+      );
+    });
   });
 
   describe('validateProblem', () => {

@@ -4,8 +4,6 @@
  * Provides step size selection strategies.
  */
 
-import { vectorSubtract, vectorAdd, vectorScale, vectorDot } from '../utils/math.js';
-
 /**
  * Line search for KL divergence minimization
  * Finds optimal step size γ that minimizes D((1-γ)μ + γs || θ)
@@ -16,15 +14,23 @@ import { vectorSubtract, vectorAdd, vectorScale, vectorDot } from '../utils/math
  * @returns Optimal step size γ ∈ [0, 1]
  */
 export function lineSearchKL(mu: number[], s: number[], gradient: number[]): number {
-  const direction = vectorSubtract(s, mu);
+  if (mu.length !== s.length || mu.length !== gradient.length) {
+    throw new Error('Line search dimension mismatch');
+  }
 
   // Fallback (objective-free): one-step quadratic approximation around current point.
-  const denom = vectorDot(direction, direction);
+  let numer = 0;
+  let denom = 0;
+  for (let i = 0; i < mu.length; i++) {
+    const direction = (s[i] ?? 0) - (mu[i] ?? 0);
+    numer += (gradient[i] ?? 0) * direction;
+    denom += direction * direction;
+  }
   if (denom <= 0) {
     return 0;
   }
 
-  const gamma = -vectorDot(gradient, direction) / denom;
+  const gamma = -numer / denom;
   return Math.max(0, Math.min(1, gamma));
 }
 
@@ -33,20 +39,39 @@ export function lineSearchKL(mu: number[], s: number[], gradient: number[]): num
  * Uses golden-section search in [0,1], which is robust and derivative-free.
  */
 export function lineSearchObjective(
-  mu: number[],
-  s: number[],
-  objectiveFn: (candidate: number[]) => number,
-  maxIterations = 40
+  mu: ArrayLike<number>,
+  s: ArrayLike<number>,
+  objectiveFn: (candidate: number[] | Float64Array) => number,
+  maxIterations = 40,
+  candidateBuffer?: Float64Array
 ): number {
-  const direction = vectorSubtract(s, mu);
+  if (mu.length !== s.length) {
+    throw new Error('Line search dimension mismatch');
+  }
+
+  const n = mu.length;
+  const candidate =
+    candidateBuffer !== undefined && candidateBuffer.length === n
+      ? candidateBuffer
+      : new Float64Array(n);
+
+  const evaluateAtGamma = (gamma: number): number => {
+    for (let i = 0; i < n; i++) {
+      const muVal = mu[i] ?? 0;
+      const sVal = s[i] ?? 0;
+      candidate[i] = muVal + gamma * (sVal - muVal);
+    }
+    return objectiveFn(candidate);
+  };
+
   let left = 0;
   let right = 1;
   const phi = (Math.sqrt(5) - 1) / 2;
 
   let x1 = right - phi * (right - left);
   let x2 = left + phi * (right - left);
-  let f1 = objectiveFn(vectorAdd(mu, vectorScale(direction, x1)));
-  let f2 = objectiveFn(vectorAdd(mu, vectorScale(direction, x2)));
+  let f1 = evaluateAtGamma(x1);
+  let f2 = evaluateAtGamma(x2);
 
   for (let iter = 0; iter < maxIterations && right - left > 1e-8; iter++) {
     if (f1 > f2) {
@@ -54,13 +79,13 @@ export function lineSearchObjective(
       x1 = x2;
       f1 = f2;
       x2 = left + phi * (right - left);
-      f2 = objectiveFn(vectorAdd(mu, vectorScale(direction, x2)));
+      f2 = evaluateAtGamma(x2);
     } else {
       right = x2;
       x2 = x1;
       f2 = f1;
       x1 = right - phi * (right - left);
-      f1 = objectiveFn(vectorAdd(mu, vectorScale(direction, x1)));
+      f1 = evaluateAtGamma(x1);
     }
   }
 

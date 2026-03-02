@@ -237,6 +237,44 @@ describe('CrossMarketArbitrageStrategy', () => {
         strategy.addDependency('market-e', 'market-f', 'mutex');
       }).not.toThrow();
     });
+
+    it('analyze 重建图后仍应重放已注册依赖', () => {
+      const replayStrategy = new CrossMarketArbitrageStrategy({
+        minProfitThreshold: 0.001,
+        maxIterations: 50,
+        alpha: 0.9,
+        cooldownMs: 0,
+      });
+      replayStrategy.addDependency('event-a-yes', 'event-b-yes', 'implies');
+
+      const aYesBook = new OrderBook('event-a-yes');
+      aYesBook.update([{ price: 0.7, size: 100 }], [{ price: 0.71, size: 100 }]);
+      const aNoBook = new OrderBook('event-a-no');
+      aNoBook.update([{ price: 0.2, size: 100 }], [{ price: 0.21, size: 100 }]);
+      const bYesBook = new OrderBook('event-b-yes');
+      bYesBook.update([{ price: 0.65, size: 100 }], [{ price: 0.66, size: 100 }]);
+      const bNoBook = new OrderBook('event-b-no');
+      bNoBook.update([{ price: 0.25, size: 100 }], [{ price: 0.26, size: 100 }]);
+
+      const marketData: StrategyMarketData[] = [
+        { marketId: 'event-a-yes', orderBook: aYesBook, lastPrice: 0.7, timestamp: Date.now() },
+        { marketId: 'event-a-no', orderBook: aNoBook, lastPrice: 0.2, timestamp: Date.now() },
+        { marketId: 'event-b-yes', orderBook: bYesBook, lastPrice: 0.65, timestamp: Date.now() },
+        { marketId: 'event-b-no', orderBook: bNoBook, lastPrice: 0.25, timestamp: Date.now() },
+      ];
+
+      replayStrategy.analyze(marketData);
+      let matrix = (replayStrategy as any).dependencyGraph.buildConstraintMatrix() as {
+        descriptions: string[];
+      };
+      expect(matrix.descriptions.some((d) => d.includes('Implication'))).toBe(true);
+
+      replayStrategy.analyze(marketData);
+      matrix = (replayStrategy as any).dependencyGraph.buildConstraintMatrix() as {
+        descriptions: string[];
+      };
+      expect(matrix.descriptions.some((d) => d.includes('Implication'))).toBe(true);
+    });
   });
 
   describe('市场ID解析', () => {

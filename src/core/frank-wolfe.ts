@@ -126,6 +126,7 @@ export function frankWolfe(
   const gradient = pool.acquire();
   const tempDiff = pool.acquire();
   let tempMu = pool.acquire();
+  const lineSearchCandidate = pool.acquire();
 
   logger.debug('Starting Frank-Wolfe', { maxIterations, tolerance, stepSize });
 
@@ -171,12 +172,12 @@ export function frankWolfe(
       // Compute step size
       let gamma: number;
       if (stepSize === 'line-search') {
-        const muArray = Array.from(mu);
-        const sArrayForSearch = Array.from(s);
         gamma = lineSearchObjective(
-          muArray,
-          sArrayForSearch,
-          (candidate) => objectiveFn(candidate)
+          mu,
+          s,
+          objectiveFn,
+          40,
+          lineSearchCandidate
         );
       } else if (stepSize === 'adaptive') {
         gamma = adaptiveStepSize(iter);
@@ -215,7 +216,7 @@ export function frankWolfe(
       history,
     };
   } finally {
-    pool.releaseMultiple([s, gradient, tempDiff, tempMu]);
+    pool.releaseMultiple([s, gradient, tempDiff, tempMu, lineSearchCandidate]);
   }
 }
 

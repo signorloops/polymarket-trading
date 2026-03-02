@@ -988,6 +988,45 @@ describe('Trading System Integration', () => {
       expect(typeof result).toBe('boolean');
     });
 
+    it('should estimate notional using market prices instead of raw size sum', async () => {
+      const config: TradingSystemConfig = {
+        liveTrading: false,
+        markets: ['market-1', 'market-2'],
+        events: [
+          {
+            id: 'priced-event',
+            markets: [
+              { id: 'market-1', outcome: 'YES', price: 0.1 },
+              { id: 'market-2', outcome: 'NO', price: 0.1 },
+            ],
+          },
+        ],
+      };
+
+      const system = new PolymarketTradingSystem(config);
+      await system.initialize();
+
+      const riskManager = getRiskManager();
+      riskManager.updateConfig({
+        maxExposure: 50,
+      });
+
+      const opportunity: ArbitrageOpportunity = {
+        id: 'price-aware-notional',
+        type: 'cross-market',
+        markets: ['market-1', 'market-2'],
+        expectedProfit: 1,
+        guaranteedProfit: 1,
+        confidence: 0.9,
+        tradeDirection: [1, 1],
+        timestamp: Date.now(),
+        expiresAt: Date.now() + 60000,
+      };
+
+      const result = await system.executeOpportunity(opportunity);
+      expect(result).toBe(true);
+    });
+
     it('should handle cross-market opportunity execution', async () => {
       const config: TradingSystemConfig = {
         liveTrading: false,

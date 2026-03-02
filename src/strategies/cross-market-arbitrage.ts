@@ -32,9 +32,16 @@ export interface CrossMarketOpportunity {
   frankWolfeResult: FrankWolfeResult;
 }
 
+interface RegisteredDependency {
+  fromEventId: string;
+  toEventId: string;
+  type: 'mutually_exclusive' | 'implies';
+}
+
 export class CrossMarketArbitrageStrategy extends BaseStrategy {
   private crossConfig: CrossMarketArbitrageConfig;
   private dependencyGraph: MarketDependencyGraph;
+  private registeredDependencies: RegisteredDependency[] = [];
 
   constructor(config: Partial<CrossMarketArbitrageConfig> = {}) {
     super('CrossMarketArbitrage', config);
@@ -111,6 +118,7 @@ export class CrossMarketArbitrageStrategy extends BaseStrategy {
         metadata: {},
       });
     }
+    this.applyRegisteredDependencies();
 
     // Build constraints from dependency graph
     const matrix = this.dependencyGraph.buildConstraintMatrix();
@@ -285,11 +293,31 @@ export class CrossMarketArbitrageStrategy extends BaseStrategy {
       return;
     }
 
-    this.dependencyGraph.addEdge({
-      from: fromEventId,
-      to: toEventId,
-      type: type === 'mutex' ? 'mutually_exclusive' : 'implies',
-      weight: 1,
-    });
+    const normalizedType: RegisteredDependency['type'] =
+      type === 'mutex' ? 'mutually_exclusive' : 'implies';
+    const alreadyRegistered = this.registeredDependencies.some(
+      (dep) =>
+        dep.fromEventId === fromEventId &&
+        dep.toEventId === toEventId &&
+        dep.type === normalizedType
+    );
+    if (!alreadyRegistered) {
+      this.registeredDependencies.push({
+        fromEventId,
+        toEventId,
+        type: normalizedType,
+      });
+    }
+  }
+
+  private applyRegisteredDependencies(): void {
+    for (const dep of this.registeredDependencies) {
+      this.dependencyGraph.addEdge({
+        from: dep.fromEventId,
+        to: dep.toEventId,
+        type: dep.type,
+        weight: 1,
+      });
+    }
   }
 }

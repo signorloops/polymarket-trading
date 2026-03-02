@@ -54,6 +54,11 @@ export interface LPSolverOptions {
   verbose?: boolean;
 }
 
+export interface SolveLMOOptions {
+  /** When true, constrained LP failure throws instead of returning simplex fallback */
+  strict?: boolean;
+}
+
 interface SolverConstraint {
   max?: number;
   min?: number;
@@ -164,7 +169,8 @@ export function solveLMO(
     coefficients: number[];
     rhs: number;
     type: 'equality' | 'inequality';
-  }[]
+  }[],
+  options: SolveLMOOptions = {}
 ): number[] {
   const n = gradient.length;
   if (n === 0) {
@@ -199,6 +205,12 @@ export function solveLMO(
 
   if (result.status === 'optimal' && result.solution.length === n) {
     return result.solution;
+  }
+
+  if (options.strict) {
+    throw new Error(
+      `LMO LP solve failed under constraints (status=${result.status}${result.error ? `, error=${result.error}` : ''})`
+    );
   }
 
   return fallbackSimplexVertex(gradient);

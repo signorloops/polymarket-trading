@@ -119,5 +119,5 @@ export function linearMinimizationOracle(
     };
   });
 
-  return solveLPOBasedLMO(gradient, lpConstraints);
+  return solveLPOBasedLMO(gradient, lpConstraints, { strict: true });
 }
