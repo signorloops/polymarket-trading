@@ -19,6 +19,7 @@ import { vectorSubtract, generalizedKLDivergence } from '../utils/math.js';
 import { getLogger } from '../utils/logger.js';
 import { ALGORITHM_CONFIG } from '../utils/config.js';
 import { OrderBook } from './order-book.js';
+import { createSingleton } from '../utils/singleton.js';
 
 export interface ArbitrageOpportunity {
   id: string;
@@ -313,16 +314,7 @@ export class ArbitrageDetector {
 /**
  * Create a singleton arbitrage detector
  */
-let globalDetector: ArbitrageDetector | null = null;
+const arbitrageDetectorSingleton = createSingleton(() => new ArbitrageDetector());
 
-export function getArbitrageDetector(): ArbitrageDetector {
-  globalDetector ??= new ArbitrageDetector();
-  return globalDetector;
-}
-
-/**
- * Reset the global detector (for testing)
- */
-export function resetArbitrageDetector(): void {
-  globalDetector = null;
-}
+export const getArbitrageDetector = arbitrageDetectorSingleton.get;
+export const resetArbitrageDetector = arbitrageDetectorSingleton.reset;

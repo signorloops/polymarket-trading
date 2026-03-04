@@ -11,6 +11,7 @@
 import { getLogger } from '../utils/logger.js';
 import { RISK_CONFIG } from '../utils/config.js';
 import { OrderStatus } from './execution-engine.js';
+import { createSingleton } from '../utils/singleton.js';
 
 export interface Position {
   marketId: string;
@@ -380,16 +381,6 @@ export class RiskManager {
 /**
  * Global risk manager instance
  */
-let globalRiskManager: RiskManager | null = null;
-
-export function getRiskManager(): RiskManager {
-  globalRiskManager ??= new RiskManager();
-  return globalRiskManager;
-}
-
-/**
- * Reset the global risk manager (for testing)
- */
-export function resetRiskManager(): void {
-  globalRiskManager = null;
-}
+const riskManagerSingleton = createSingleton(() => new RiskManager());
+export const getRiskManager = riskManagerSingleton.get;
+export const resetRiskManager = riskManagerSingleton.reset;

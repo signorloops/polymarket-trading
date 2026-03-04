@@ -39,3 +39,6 @@ Thumbs.db
 # Temporary files
 tmp/
 temp/
+
+# Codex snapshots
+.codex-snapshots/

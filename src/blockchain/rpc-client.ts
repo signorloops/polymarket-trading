@@ -11,6 +11,8 @@
  */
 
 import { getLogger } from '../utils/logger.js';
+import { getErrorMessage } from '../utils/errors.js';
+import { createSingleton } from '../utils/singleton.js';
 
 export type NetworkType = 'mainnet' | 'mumbai';
 
@@ -338,7 +340,7 @@ export class RpcClient {
       return chainId === this.chainId;
     } catch (error) {
       this.logger.error('Failed to validate network', {
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
       return false;
     }
@@ -346,17 +348,19 @@ export class RpcClient {
 }
 
 // Singleton instance
-let globalClient: RpcClient | null = null;
+const rpcClientSingleton = createSingleton<RpcClient | null>(() => RpcClient.fromEnv());
+
+let rpcClientOverride: RpcClient | null = null;
 
 export function getRpcClient(): RpcClient | null {
-  globalClient ??= RpcClient.fromEnv();
-  return globalClient;
+  return rpcClientOverride ?? rpcClientSingleton.get();
 }
 
 export function resetRpcClient(): void {
-  globalClient = null;
+  rpcClientOverride = null;
+  rpcClientSingleton.reset();
 }
 
 export function setRpcClient(client: RpcClient): void {
-  globalClient = client;
+  rpcClientOverride = client;
 }

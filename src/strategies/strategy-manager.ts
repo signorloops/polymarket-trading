@@ -10,6 +10,7 @@ import { CrossMarketArbitrageStrategy, type CrossMarketArbitrageConfig } from '.
 import { MarketMakingStrategy, type MarketMakingConfig } from './market-making.js';
 import { TrendFollowingStrategy, type TrendFollowingConfig } from './trend-following.js';
 import { getLogger } from '../utils/logger.js';
+import { getErrorMessage } from '../utils/errors.js';
 import {
   aggregateSignals,
   priorityAggregation,
@@ -110,7 +111,7 @@ export class StrategyManager {
         }
       } catch (error) {
         this.logger.error(`Strategy ${name} failed`, {
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         });
       }
     }

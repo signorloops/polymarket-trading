@@ -8,6 +8,7 @@
 import { getLogger, Logger } from '../utils/logger.js';
 import type { AppConfig } from '../utils/config-schema.js';
 import { createDefaultConfig } from '../utils/config-schema.js';
+import { createSingleton } from '../utils/singleton.js';
 
 type Factory<T> = (container: Container) => T;
 
@@ -127,9 +128,6 @@ export const Tokens = {
   PolymarketWebSocketClient: 'polymarketWebSocketClient',
 } as const;
 
-// Global container instance
-let globalContainer: Container | null = null;
-
 export function createContainer(config?: AppConfig): Container {
   const container = new Container();
   const appConfig = config ?? createDefaultConfig();
@@ -145,11 +143,8 @@ export function createContainer(config?: AppConfig): Container {
   return container;
 }
 
-export function getContainer(): Container {
-  globalContainer ??= createContainer();
-  return globalContainer;
-}
+// Global container instance
+const containerSingleton = createSingleton(() => createContainer());
 
-export function resetContainer(): void {
-  globalContainer = null;
-}
+export const getContainer = containerSingleton.get;
+export const resetContainer = containerSingleton.reset;

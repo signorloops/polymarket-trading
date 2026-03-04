@@ -13,8 +13,16 @@ import { TRADING_CONFIG } from '../utils/config.js';
 import type { TradeOrder, OrderStatus, ExecutionResult, TradeLeg } from './types.js';
 import { OrderManager } from './order-manager.js';
 import { PolymarketClient } from '../api/polymarket-client.js';
-import { TradingMetrics, recordTrade, recordArbitrage } from '../utils/metrics.js';
-import { sendAlert } from '../alerts/index.js';
+import { TradingMetrics } from '../utils/metrics.js';
+import { getErrorMessage } from '../utils/errors.js';
+import { createSingleton } from '../utils/singleton.js';
+import {
+  recordOrderMetrics,
+  recordArbitrageMetrics,
+  alertPartialFills,
+  legsToOrders,
+  detectPartialFills,
+} from './execution-metrics.js';
 
 export type { TradeOrder, OrderStatus, ExecutionResult, TradeLeg };
 
@@ -77,11 +85,7 @@ export class ExecutionEngine {
 
       this.orderManager.updateStatus(status);
       this.orderManager.removePending(order.id);
-
-      // Record metrics
-      recordTrade(order.marketId, order.side, status.filledSize, status.avgPrice, executionTime, status.status !== 'error');
-      TradingMetrics.orderExecutionLatency.observe({ market_id: order.marketId }, executionTime);
-
+      recordOrderMetrics(order, status, executionTime);
       return status;
     } catch (error) {
       const executionTime = performance.now() - startTime;
@@ -92,16 +96,13 @@ export class ExecutionEngine {
         remainingSize: order.size,
         avgPrice: 0,
         timestamp: Date.now(),
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       };
 
       this.orderManager.updateStatus(errorStatus);
       this.orderManager.removePending(order.id);
-
-      // Record failure metrics
       TradingMetrics.ordersFailed.inc({ market_id: order.marketId, side: order.side });
-      TradingMetrics.orderExecutionLatency.observe({ market_id: order.marketId }, executionTime);
-
+      recordOrderMetrics(order, errorStatus, executionTime);
       this.logger.error(`Order ${order.id} failed`, { error: errorStatus.error });
       return errorStatus;
     }
@@ -136,7 +137,7 @@ export class ExecutionEngine {
         remainingSize: order.size,
         avgPrice: 0,
         timestamp: Date.now(),
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       })))
     );
 
@@ -177,98 +178,22 @@ export class ExecutionEngine {
   /**
    * Execute an arbitrage trade with multiple legs
    */
-  async executeArbitrage(
-    legs: TradeLeg[],
-    arbitrageId: string
-  ): Promise<ExecutionResult> {
+  async executeArbitrage(legs: TradeLeg[], arbitrageId: string): Promise<ExecutionResult> {
     const startTime = performance.now();
     this.logger.info(`Executing arbitrage ${arbitrageId} with ${String(legs.length)} legs`);
 
-    // Convert legs to orders
-    const orders: TradeOrder[] = legs.map((leg, index) => ({
-      id: `${arbitrageId}-${String(index)}`,
-      marketId: leg.marketId,
-      side: leg.side,
-      size: leg.size,
-      price: leg.expectedPrice,
-      orderType: 'limit',
-      timeInForce: 'IOC', // Immediate or cancel for arbitrage
-    }));
-
-    // Execute in parallel
+    const orders = legsToOrders(legs, arbitrageId);
     const result = await this.executeParallel(orders);
+    recordArbitrageMetrics(arbitrageId, result, performance.now() - startTime);
 
-    // Record arbitrage detection latency (from detection to execution start)
-    const detectionLatency = performance.now() - startTime;
-    TradingMetrics.arbitrageDetectionLatency.observe(
-      { arbitrage_id: arbitrageId },
-      detectionLatency
-    );
-
-    // Check for partial fills
-    const partialFills = result.orders.filter(
-      (o) => o.status === 'partial' || (o.status === 'filled' && o.filledSize < (orders.find(oo => oo.id === o.orderId)?.size ?? 0))
-    );
-
-    const totalProfit = result.success ? result.totalFilled * 0.01 : 0; // Simplified profit calc
-    recordArbitrage(arbitrageId, totalProfit, result.success, totalProfit);
-
+    const partialFills = detectPartialFills(result, orders);
     if (partialFills.length > 0) {
-      this.logger.warn(`Arbitrage ${arbitrageId} has partial fills`, {
-        partialFills: partialFills.map((o) => ({
-          orderId: o.orderId,
-          filled: o.filledSize,
-          remaining: o.remainingSize,
-        })),
-      });
-
-      // Handle partial fills - may need to unwind or adjust
+      this.logger.warn(`Arbitrage ${arbitrageId} has partial fills`, { partialFills });
       await this.handlePartialFills(arbitrageId, result.orders);
-
-      // Alert manual intervention needed
-      await this.alertManualIntervention({
-        arbitrageId,
-        partialFills: partialFills.map(o => ({
-          orderId: o.orderId,
-          filled: o.filledSize,
-          remaining: o.remainingSize,
-        })),
-        totalFilled: result.totalFilled,
-      });
+      await alertPartialFills({ arbitrageId, partialFills, totalFilled: result.totalFilled });
     }
 
     return result;
-  }
-
-  /**
-   * Alert for manual intervention when partial fills occur
-   */
-  private async alertManualIntervention(context: {
-    arbitrageId: string;
-    partialFills: { orderId: string; filled: number; remaining: number }[];
-    totalFilled: number;
-  }): Promise<void> {
-    const { arbitrageId, partialFills, totalFilled } = context;
-
-    this.logger.warn(`Manual intervention required for arbitrage ${arbitrageId}`, {
-      partialFills,
-      totalFilled,
-    });
-
-    // Send alert through notification service
-    await sendAlert(
-      'critical',
-      'Arbitrage Partial Fill - Manual Intervention Required',
-      `Arbitrage ${arbitrageId} has partial fills that may require manual intervention. ` +
-      `Total filled: ${String(totalFilled)}. Partial orders: ${String(partialFills.length)}`,
-      {
-        arbitrageId,
-        partialFills,
-        totalFilled,
-        timestamp: Date.now(),
-        recommendation: 'Review positions and consider unwinding or hedging',
-      }
-    );
   }
 
   /**
@@ -305,7 +230,7 @@ export class ExecutionEngine {
       return true;
     } catch (error) {
       this.logger.error(`Failed to cancel order ${orderId}`, {
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
       return false;
     }
@@ -448,19 +373,13 @@ export class ExecutionEngine {
 /**
  * Global execution engine instance
  */
-let globalEngine: ExecutionEngine | null = null;
-
-export function getExecutionEngine(): ExecutionEngine {
-  globalEngine ??= new ExecutionEngine();
-  return globalEngine;
-}
+const executionEngineSingleton = createSingleton(() => new ExecutionEngine());
+export const getExecutionEngine = executionEngineSingleton.get;
 
 /**
  * Reset the global engine (for testing)
  */
 export function resetExecutionEngine(): void {
-  if (globalEngine) {
-    globalEngine.stop();
-  }
-  globalEngine = null;
+  executionEngineSingleton.get().stop();
+  executionEngineSingleton.reset();
 }

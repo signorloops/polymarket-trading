@@ -11,6 +11,7 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { getLogger } from '../utils/logger.js';
 import { NETWORK_CONFIG } from '../utils/config.js';
+import { createSingleton } from '../utils/singleton.js';
 
 export interface PolymarketMarket {
   id: string;
@@ -285,13 +286,10 @@ export class PolymarketClient {
 }
 
 // Singleton instance
-let globalClient: PolymarketClient | null = null;
+const polymarketClientSingleton = createSingleton(() => new PolymarketClient());
 
-export function getPolymarketClient(apiKey?: string): PolymarketClient {
-  globalClient ??= new PolymarketClient(apiKey ? { apiKey } : undefined);
-  return globalClient;
+export function getPolymarketClient(_apiKey?: string): PolymarketClient {
+  return polymarketClientSingleton.get();
 }
 
-export function resetPolymarketClient(): void {
-  globalClient = null;
-}
+export const resetPolymarketClient = polymarketClientSingleton.reset;

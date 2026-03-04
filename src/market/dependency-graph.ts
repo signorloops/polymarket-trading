@@ -11,6 +11,8 @@
  */
 
 import { getLogger } from '../utils/logger.js';
+import { createSingleton } from '../utils/singleton.js';
+import { buildConstraintMatrix as buildConstraintMatrixImpl, type ConstraintMatrix } from './constraint-builder.js';
 
 export interface MarketNode {
   id: string;
@@ -203,172 +205,8 @@ export class MarketDependencyGraph {
   /**
    * Build constraint matrix for the marginal polytope
    */
-  buildConstraintMatrix(): {
-    coefficients: number[][];
-    rhs: number[];
-    types: ('equality' | 'inequality')[];
-    descriptions: string[];
-  } {
-    const coefficients: number[][] = [];
-    const rhs: number[] = [];
-    const types: ('equality' | 'inequality')[] = [];
-    const descriptions: string[] = [];
-
-    const marketList = Array.from(this.markets.keys());
-    const n = marketList.length;
-    const marketIndex = new Map<string, number>();
-    for (let i = 0; i < marketList.length; i++) {
-      const marketId = marketList[i];
-      if (marketId !== undefined) {
-        marketIndex.set(marketId, i);
-      }
-    }
-
-    // 1. Probability sum constraints for each event
-    for (const event of this.events.values()) {
-      const constraint: number[] = new Array(n).fill(0) as number[];
-      let presentMarketCount = 0;
-
-      for (const marketId of event.markets) {
-        const idx = marketIndex.get(marketId) ?? -1;
-        if (idx >= 0) {
-          constraint[idx] = 1;
-          presentMarketCount++;
-        }
-      }
-
-      // Skip degenerate event groups with less than 2 present markets.
-      // Keep legacy behavior for n=0 test fixtures that only validate structure.
-      if (presentMarketCount < 2 && !(n === 0 && event.markets.length > 0)) {
-        continue;
-      }
-
-      coefficients.push(constraint);
-      rhs.push(1);
-      types.push('equality');
-      descriptions.push(`Event ${event.id}: probability sum = 1`);
-    }
-
-    // 2. Mutually exclusive event constraints
-    for (const edge of this.edges) {
-      if (edge.type === 'mutually_exclusive') {
-        const fromEventId = this.resolveEdgeEventId(edge.from);
-        const toEventId = this.resolveEdgeEventId(edge.to);
-        if (!fromEventId || !toEventId || fromEventId === toEventId) {
-          continue;
-        }
-
-        const event1 = this.events.get(fromEventId);
-        const event2 = this.events.get(toEventId);
-
-        if (event1 && event2) {
-          const constraint: number[] = new Array(n).fill(0) as number[];
-
-          for (const marketId of event1.markets) {
-            const idx = marketIndex.get(marketId) ?? -1;
-            if (idx >= 0) constraint[idx] = -1;
-          }
-
-          for (const marketId of event2.markets) {
-            const idx = marketIndex.get(marketId) ?? -1;
-            if (idx >= 0) constraint[idx] = -1;
-          }
-
-          coefficients.push(constraint);
-          rhs.push(-1);
-          types.push('inequality');
-          descriptions.push(`Mutually exclusive: ${fromEventId} + ${toEventId} <= 1`);
-        }
-      }
-    }
-
-    // 3. Implication constraints from explicit dependency edges:
-    // from => to  =>  P(from) <= P(to)  =>  P(to) - P(from) >= 0
-    for (const edge of this.edges) {
-      if (edge.type !== 'implies') {
-        continue;
-      }
-
-      const fromEventId = this.resolveEdgeEventId(edge.from);
-      const toEventId = this.resolveEdgeEventId(edge.to);
-      if (!fromEventId || !toEventId || fromEventId === toEventId) {
-        continue;
-      }
-
-      const fromEvent = this.events.get(fromEventId);
-      const toEvent = this.events.get(toEventId);
-      if (!fromEvent || !toEvent) {
-        continue;
-      }
-
-      const constraint: number[] = new Array(n).fill(0) as number[];
-      let hasTerm = false;
-
-      for (const marketId of toEvent.markets) {
-        const idx = marketIndex.get(marketId) ?? -1;
-        if (idx >= 0) {
-          constraint[idx] = 1;
-          hasTerm = true;
-        }
-      }
-
-      for (const marketId of fromEvent.markets) {
-        const idx = marketIndex.get(marketId) ?? -1;
-        if (idx >= 0) {
-          constraint[idx] = -1;
-          hasTerm = true;
-        }
-      }
-
-      if (!hasTerm) {
-        continue;
-      }
-
-      coefficients.push(constraint);
-      rhs.push(0);
-      types.push('inequality');
-      descriptions.push(`Implication: ${fromEventId} <= ${toEventId}`);
-    }
-
-    // 4. Conditional probability constraints
-    for (const event of this.events.values()) {
-      if (event.parentEvent) {
-        const parent = this.events.get(event.parentEvent);
-        if (parent) {
-          // P(child) <= P(parent)
-          const constraint: number[] = new Array(n).fill(0) as number[];
-
-          for (const marketId of event.markets) {
-            const idx = marketIndex.get(marketId) ?? -1;
-            if (idx >= 0) constraint[idx] = -1;
-          }
-
-          for (const marketId of parent.markets) {
-            const idx = marketIndex.get(marketId) ?? -1;
-            if (idx >= 0) constraint[idx] = 1;
-          }
-
-          coefficients.push(constraint);
-          rhs.push(0);
-          types.push('inequality');
-          descriptions.push(`Conditional: ${event.id} <= ${parent.id}`);
-        }
-      }
-    }
-
-    // 5. Non-negativity constraints
-    for (let i = 0; i < n; i++) {
-      const constraint: number[] = new Array(n).fill(0) as number[];
-      constraint[i] = 1;
-
-      coefficients.push(constraint);
-      rhs.push(0);
-      types.push('inequality');
-      const marketId = marketList[i];
-      descriptions.push(`Market ${marketId ?? 'unknown'}: non-negative`);
-    }
-
-    return { coefficients, rhs, types, descriptions };
+  buildConstraintMatrix(): ConstraintMatrix {
+    return buildConstraintMatrixImpl(this.markets, this.events, this.edges);
   }
 
   /**
@@ -448,14 +286,6 @@ export class MarketDependencyGraph {
     this.logger.debug('Cleared dependency graph');
   }
 
-  private resolveEdgeEventId(id: string): string | undefined {
-    if (this.events.has(id)) {
-      return id;
-    }
-
-    return this.markets.get(id)?.eventId;
-  }
-
   private analyzeCycle(marketIds: string[]): ArbitrageCycle {
     const markets = marketIds
       .map((id) => this.markets.get(id))
@@ -481,16 +311,7 @@ export class MarketDependencyGraph {
 /**
  * Global dependency graph instance
  */
-let globalGraph: MarketDependencyGraph | null = null;
+const dependencyGraphSingleton = createSingleton(() => new MarketDependencyGraph());
 
-export function getDependencyGraph(): MarketDependencyGraph {
-  globalGraph ??= new MarketDependencyGraph();
-  return globalGraph;
-}
-
-/**
- * Reset the global graph (for testing)
- */
-export function resetDependencyGraph(): void {
-  globalGraph = null;
-}
+export const getDependencyGraph = dependencyGraphSingleton.get;
+export const resetDependencyGraph = dependencyGraphSingleton.reset;

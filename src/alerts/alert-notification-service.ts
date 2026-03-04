@@ -13,6 +13,7 @@ import { SlackChannel } from './channels/slack-channel.js';
 import { DiscordChannel } from './channels/discord-channel.js';
 import { EmailChannel } from './channels/email-channel.js';
 import { PagerDutyChannel } from './channels/pagerduty-channel.js';
+import { createSingleton } from '../utils/singleton.js';
 
 function parseAlertLevel(value: string | undefined): AlertLevel {
   if (value === 'info' || value === 'warning' || value === 'critical') {
@@ -345,20 +346,22 @@ export class AlertNotificationService {
 }
 
 // Global instance
-let globalNotificationService: AlertNotificationService | null = null;
+const notificationServiceSingleton = createSingleton(() => AlertNotificationService.fromEnv());
+
+let notificationServiceOverride: AlertNotificationService | null = null;
 
 /**
  * Initialize global notification service
  */
 export function initNotificationService(service: AlertNotificationService): void {
-  globalNotificationService = service;
+  notificationServiceOverride = service;
 }
 
 /**
  * Get global notification service
  */
 export function getNotificationService(): AlertNotificationService | null {
-  return globalNotificationService;
+  return notificationServiceOverride ?? notificationServiceSingleton.get();
 }
 
 /**
@@ -370,10 +373,11 @@ export async function sendAlert(
   message: string,
   metadata?: Record<string, unknown>
 ): Promise<AlertHistoryEntry | null> {
-  if (!globalNotificationService) {
+  const service = notificationServiceOverride ?? notificationServiceSingleton.get();
+  if (!service) {
     console.warn('[AlertNotificationService] No global service initialized');
     return null;
   }
 
-  return globalNotificationService.alert(level, title, message, metadata);
+  return service.alert(level, title, message, metadata);
 }

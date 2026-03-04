@@ -7,6 +7,8 @@
 import WebSocket from 'ws';
 import { getLogger } from '../utils/logger.js';
 import { NETWORK_CONFIG } from '../utils/config.js';
+import { getErrorMessage } from '../utils/errors.js';
+import { createSingleton } from '../utils/singleton.js';
 
 export interface WsTrade {
   marketId: string;
@@ -137,7 +139,7 @@ export class PolymarketWebSocketClient {
         this.handleMessage(message);
       } catch (error) {
         const dataStr = this.webSocketDataToString(data);
-        this.logger.error('Failed to parse message', { error: error instanceof Error ? error.message : String(error), data: dataStr });
+        this.logger.error('Failed to parse message', { error: getErrorMessage(error), data: dataStr });
       }
     });
 
@@ -295,14 +297,13 @@ export class PolymarketWebSocketClient {
 }
 
 // Singleton instance
-let globalWsClient: PolymarketWebSocketClient | null = null;
+const polymarketWsSingleton = createSingleton(() => new PolymarketWebSocketClient());
 
-export function getPolymarketWebSocketClient(url?: string, apiKey?: string): PolymarketWebSocketClient {
-  globalWsClient ??= new PolymarketWebSocketClient(url, apiKey);
-  return globalWsClient;
+export function getPolymarketWebSocketClient(_url?: string, _apiKey?: string): PolymarketWebSocketClient {
+  return polymarketWsSingleton.get();
 }
 
 export function resetPolymarketWebSocketClient(): void {
-  globalWsClient?.disconnect();
-  globalWsClient = null;
+  polymarketWsSingleton.get().disconnect();
+  polymarketWsSingleton.reset();
 }

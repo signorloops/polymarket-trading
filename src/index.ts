@@ -31,6 +31,7 @@ import {
   NETWORK_CONFIG,
   RISK_CONFIG,
 } from './utils/config.js';
+import { getErrorMessage } from './utils/errors.js';
 
 // Trading system constants
 const MIN_PROFIT_THRESHOLD = 0.05; // Minimum guaranteed profit (divergence units)
@@ -322,7 +323,7 @@ export class PolymarketTradingSystem {
         await sleep(MAIN_LOOP_INTERVAL_MS);
       } catch (error) {
         this.logger.error('Error in main loop', {
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         });
         await sleep(ERROR_RETRY_INTERVAL_MS); // Wait longer on error
       }

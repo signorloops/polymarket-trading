@@ -2,6 +2,8 @@
  * Structured logging system with multiple log levels and context support
  */
 
+import { createSingleton } from './singleton.js';
+
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 interface LogEntry {
@@ -134,23 +136,30 @@ export class Logger {
 }
 
 // Global logger instance
-let globalLogger: Logger | null = null;
+let _pendingLoggerArgs: { level: LogLevel; silent: boolean; structured: boolean } | null = null;
+
+const loggerSingleton = createSingleton(() => {
+  if (_pendingLoggerArgs) {
+    const { level, silent, structured } = _pendingLoggerArgs;
+    _pendingLoggerArgs = null;
+    return new Logger(level, silent, {}, structured);
+  }
+  return new Logger();
+});
 
 /**
  * Initialize the global logger
  */
 export function initLogger(level: LogLevel = 'info', silent = false, structured = false): Logger {
-  globalLogger = new Logger(level, silent, {}, structured);
-  return globalLogger;
+  loggerSingleton.reset();
+  _pendingLoggerArgs = { level, silent, structured };
+  return loggerSingleton.get();
 }
 
 /**
  * Get the global logger instance
  */
-export function getLogger(): Logger {
-  globalLogger ??= new Logger();
-  return globalLogger;
-}
+export const getLogger = loggerSingleton.get;
 
 /**
  * Create a silent logger for testing

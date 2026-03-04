@@ -13,6 +13,8 @@ import WebSocket from 'ws';
 import { getLogger } from '../utils/logger.js';
 import { NETWORK_CONFIG } from '../utils/config.js';
 import { TradingMetrics } from '../utils/metrics.js';
+import { getErrorMessage } from '../utils/errors.js';
+import { createSingleton } from '../utils/singleton.js';
 
 export interface MarketData {
   marketId: string;
@@ -73,7 +75,7 @@ export class DataPipeline {
       this.setupEventHandlers();
     } catch (error) {
       this.logger.error('Failed to create WebSocket', {
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
       this.scheduleReconnect();
     }
@@ -145,7 +147,7 @@ export class DataPipeline {
           }
         })();
         this.logger.error('Failed to parse message', {
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
           data: dataPreview,
         });
         TradingMetrics.websocketErrors.inc();
@@ -327,7 +329,7 @@ export class DataPipeline {
         handler(event);
       } catch (error) {
         this.logger.error('Error in event handler', {
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         });
       }
     }
@@ -398,17 +400,22 @@ export class DataPipeline {
 /**
  * Create a singleton data pipeline instance
  */
-let globalPipeline: DataPipeline | null = null;
+const pipelineSingleton = createSingleton(() => new DataPipeline());
+let pipelineCreated = false;
 
-export function getDataPipeline(url?: string): DataPipeline {
-  globalPipeline ??= new DataPipeline(url);
-  return globalPipeline;
+export function getDataPipeline(): DataPipeline {
+  pipelineCreated = true;
+  return pipelineSingleton.get();
 }
 
 /**
  * Reset the global pipeline (for testing)
+ * Disconnects the WebSocket before clearing the instance.
  */
 export function resetDataPipeline(): void {
-  globalPipeline?.disconnect();
-  globalPipeline = null;
+  if (pipelineCreated) {
+    pipelineSingleton.get().disconnect();
+    pipelineCreated = false;
+  }
+  pipelineSingleton.reset();
 }

@@ -13,6 +13,9 @@ import { getLogger } from '../utils/logger.js';
 import { TRADING_CONFIG } from '../utils/config.js';
 import { SkipList } from './skip-list.js';
 
+// Re-export OrderBookManager so existing imports keep working
+export { OrderBookManager, getOrderBookManager, resetOrderBookManager } from './order-book-manager.js';
+
 export interface PriceLevel {
   price: number;
   size: number;
@@ -360,83 +363,3 @@ export class OrderBook {
   }
 }
 
-/**
- * OrderBookManager manages multiple order books
- */
-export class OrderBookManager {
-  private books: Map<string, OrderBook> = new Map();
-  private logger = getLogger().child({ module: 'OrderBookManager' });
-
-  /**
-   * Get or create an order book for a market
-   */
-  getBook(marketId: string): OrderBook {
-    let book = this.books.get(marketId);
-    if (!book) {
-      book = new OrderBook(marketId);
-      this.books.set(marketId, book);
-      this.logger.debug(`Created order book for ${marketId}`);
-    }
-    return book;
-  }
-
-  /**
-   * Get an existing order book without creating a new one
-   */
-  peekBook(marketId: string): OrderBook | undefined {
-    return this.books.get(marketId);
-  }
-
-  /**
-   * Update an order book
-   */
-  updateBook(
-    marketId: string,
-    bids: { price: number; size: number }[],
-    asks: { price: number; size: number }[],
-    timestamp?: number
-  ): void {
-    const book = this.getBook(marketId);
-    book.update(bids, asks, timestamp);
-  }
-
-  /**
-   * Get all order books
-   */
-  getAllBooks(): OrderBook[] {
-    return Array.from(this.books.values());
-  }
-
-  /**
-   * Remove an order book
-   */
-  removeBook(marketId: string): void {
-    this.books.delete(marketId);
-    this.logger.debug(`Removed order book for ${marketId}`);
-  }
-
-  /**
-   * Clear all order books
-   */
-  clear(): void {
-    this.books.clear();
-    this.logger.debug('Cleared all order books');
-  }
-}
-
-/**
- * Global order book manager instance
- */
-let globalManager: OrderBookManager | null = null;
-
-export function getOrderBookManager(): OrderBookManager {
-  globalManager ??= new OrderBookManager();
-  return globalManager;
-}
-
-/**
- * Reset the global manager (for testing)
- */
-export function resetOrderBookManager(): void {
-  globalManager = null;
-}
