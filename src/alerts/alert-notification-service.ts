@@ -108,16 +108,14 @@ export class AlertNotificationService {
       channels,
       routing: {
         info: parseCsvList(process.env.ALERT_ROUTING_INFO),
-        warning: parseCsvList(process.env.ALERT_ROUTING_WARNING).length > 0
-          ? parseCsvList(process.env.ALERT_ROUTING_WARNING)
-          : ['slack', 'email'],
-        critical: parseCsvList(process.env.ALERT_ROUTING_CRITICAL).length > 0
-          ? parseCsvList(process.env.ALERT_ROUTING_CRITICAL)
-          : [
-          'slack',
-          'email',
-          'pagerduty',
-        ],
+        warning:
+          parseCsvList(process.env.ALERT_ROUTING_WARNING).length > 0
+            ? parseCsvList(process.env.ALERT_ROUTING_WARNING)
+            : ['slack', 'email'],
+        critical:
+          parseCsvList(process.env.ALERT_ROUTING_CRITICAL).length > 0
+            ? parseCsvList(process.env.ALERT_ROUTING_CRITICAL)
+            : ['slack', 'email', 'pagerduty'],
       },
     };
 

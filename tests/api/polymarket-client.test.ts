@@ -66,9 +66,8 @@ jest.unstable_mockModule('../../src/utils/config.js', () => ({
 }));
 
 // Import after mocks
-const { PolymarketClient, getPolymarketClient, resetPolymarketClient } = await import(
-  '../../src/api/polymarket-client.js'
-);
+const { PolymarketClient, getPolymarketClient, resetPolymarketClient } =
+  await import('../../src/api/polymarket-client.js');
 
 describe('PolymarketClient', () => {
   let client: InstanceType<typeof PolymarketClient>;
@@ -179,10 +178,7 @@ describe('PolymarketClient', () => {
 
       expect(config.headers.set).toHaveBeenCalledWith('Authorization', 'Bearer test-api-key');
       expect(config.headers.set).toHaveBeenCalledWith('POLYMARKET-PASSPHRASE', 'test-passphrase');
-      expect(config.headers.set).toHaveBeenCalledWith(
-        'POLYMARKET-TIMESTAMP',
-        expect.any(String)
-      );
+      expect(config.headers.set).toHaveBeenCalledWith('POLYMARKET-TIMESTAMP', expect.any(String));
     });
   });
 

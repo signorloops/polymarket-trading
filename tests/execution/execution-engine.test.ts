@@ -414,7 +414,9 @@ describe('ExecutionEngine', () => {
     });
 
     it('should handle API client errors during order submission', async () => {
-      const mockPlaceOrder = jest.fn().mockRejectedValue(new Error('API Error: Insufficient funds'));
+      const mockPlaceOrder = jest
+        .fn()
+        .mockRejectedValue(new Error('API Error: Insufficient funds'));
 
       const mockClient = {
         placeOrder: mockPlaceOrder,
@@ -709,7 +711,9 @@ describe('ExecutionEngine', () => {
     });
 
     it('should handle API client errors during cancel', async () => {
-      const mockCancelOrder = jest.fn().mockRejectedValue(new Error('Cancel failed: Order already filled'));
+      const mockCancelOrder = jest
+        .fn()
+        .mockRejectedValue(new Error('Cancel failed: Order already filled'));
 
       const mockClient = {
         cancelOrder: mockCancelOrder,
@@ -773,7 +777,8 @@ describe('ExecutionEngine', () => {
       // This test verifies that partial fills are detected and logged
       // handlePartialFills is called but may not find orders to cancel
       // since orders are removed from pending after execution
-      const mockPlaceOrder = jest.fn()
+      const mockPlaceOrder = jest
+        .fn()
         .mockResolvedValueOnce({
           id: 'arb-1-0',
           marketId: 'market-1',
@@ -859,7 +864,8 @@ describe('ExecutionEngine', () => {
       // where orders have 'open' or 'pending' status in the result
       // Note: In practice, orders are removed from pending after executeParallel,
       // so cancelOrder may not find them. But the branch at line 370 is covered.
-      const mockPlaceOrder = jest.fn()
+      const mockPlaceOrder = jest
+        .fn()
         .mockResolvedValueOnce({
           id: 'arb-3-0',
           marketId: 'market-1',
@@ -917,7 +923,7 @@ describe('ExecutionEngine', () => {
         size: 100,
         price: 0.6,
         status: 'filled', // Status is 'filled' but filledSize < original order size
-        filledSize: 60,   // Less than the order size of 100
+        filledSize: 60, // Less than the order size of 100
         remainingSize: 40,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),

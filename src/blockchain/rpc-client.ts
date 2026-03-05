@@ -135,7 +135,7 @@ export class RpcClient {
       throw new Error(`RPC request failed: ${String(response.status)} ${response.statusText}`);
     }
 
-    const data = await response.json() as {
+    const data = (await response.json()) as {
       jsonrpc: string;
       id: number;
       result?: T;
@@ -161,9 +161,8 @@ export class RpcClient {
    * Get block by number
    */
   async getBlock(blockNumber: number | 'latest' | 'pending'): Promise<Block | null> {
-    const blockParam = typeof blockNumber === 'number'
-      ? `0x${blockNumber.toString(16)}`
-      : blockNumber;
+    const blockParam =
+      typeof blockNumber === 'number' ? `0x${blockNumber.toString(16)}` : blockNumber;
 
     return this.rpcCall<Block>('eth_getBlockByNumber', [blockParam, false]);
   }
@@ -345,4 +344,3 @@ export class RpcClient {
     }
   }
 }
-

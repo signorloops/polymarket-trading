@@ -23,16 +23,26 @@ export function validateIPProblem(problem: IPProblem): void {
     }
   }
 
-  if (problem.inequalityMatrix && problem.inequalityRhs && problem.inequalityMatrix.length !== problem.inequalityRhs.length) {
+  if (
+    problem.inequalityMatrix &&
+    problem.inequalityRhs &&
+    problem.inequalityMatrix.length !== problem.inequalityRhs.length
+  ) {
     throw new Error('Inequality RHS dimension mismatch');
   }
 
-  if (problem.equalityMatrix && problem.equalityRhs && problem.equalityMatrix.length !== problem.equalityRhs.length) {
+  if (
+    problem.equalityMatrix &&
+    problem.equalityRhs &&
+    problem.equalityMatrix.length !== problem.equalityRhs.length
+  ) {
     throw new Error('Equality RHS dimension mismatch');
   }
 
-  if (problem.lowerBounds && problem.lowerBounds.length !== n) throw new Error('Lower bounds dimension mismatch');
-  if (problem.upperBounds && problem.upperBounds.length !== n) throw new Error('Upper bounds dimension mismatch');
+  if (problem.lowerBounds && problem.lowerBounds.length !== n)
+    throw new Error('Lower bounds dimension mismatch');
+  if (problem.upperBounds && problem.upperBounds.length !== n)
+    throw new Error('Upper bounds dimension mismatch');
 
   for (const idx of problem.integerIndices ?? []) {
     if (idx < 0 || idx >= n) throw new Error('Integer index out of range');
@@ -269,16 +279,27 @@ export function branchAndBound(
     const rightResult = solveLP(createSubproblem(problem, rightFixed), options);
 
     if (leftResult.status === 'optimal' && leftResult.objectiveValue < bestValue * (1 + mipGap)) {
-      queue.push({ solution: leftResult.solution, objectiveValue: leftResult.objectiveValue, depth: node.depth + 1, fixedIndices: leftFixed });
+      queue.push({
+        solution: leftResult.solution,
+        objectiveValue: leftResult.objectiveValue,
+        depth: node.depth + 1,
+        fixedIndices: leftFixed,
+      });
     }
     if (rightResult.status === 'optimal' && rightResult.objectiveValue < bestValue * (1 + mipGap)) {
-      queue.push({ solution: rightResult.solution, objectiveValue: rightResult.objectiveValue, depth: node.depth + 1, fixedIndices: rightFixed });
+      queue.push({
+        solution: rightResult.solution,
+        objectiveValue: rightResult.objectiveValue,
+        depth: node.depth + 1,
+        fixedIndices: rightFixed,
+      });
     }
   }
 
-  const relaxationGap = lpSolution.objectiveValue > 0
-    ? (bestValue - lpSolution.objectiveValue) / lpSolution.objectiveValue
-    : 0;
+  const relaxationGap =
+    lpSolution.objectiveValue > 0
+      ? (bestValue - lpSolution.objectiveValue) / lpSolution.objectiveValue
+      : 0;
 
   return {
     solution: bestSolution,
@@ -312,9 +333,13 @@ function findBranchingVariable(solution: number[], problem: IPProblem): number {
 function createSubproblem(problem: IPProblem, fixedIndices: Map<number, number>): LPProblem {
   const subproblem: LPProblem = {
     ...problem,
-    ...(problem.inequalityMatrix ? { inequalityMatrix: problem.inequalityMatrix.map((row) => [...row]) } : {}),
+    ...(problem.inequalityMatrix
+      ? { inequalityMatrix: problem.inequalityMatrix.map((row) => [...row]) }
+      : {}),
     ...(problem.inequalityRhs ? { inequalityRhs: [...problem.inequalityRhs] } : {}),
-    ...(problem.equalityMatrix ? { equalityMatrix: problem.equalityMatrix.map((row) => [...row]) } : {}),
+    ...(problem.equalityMatrix
+      ? { equalityMatrix: problem.equalityMatrix.map((row) => [...row]) }
+      : {}),
     ...(problem.equalityRhs ? { equalityRhs: [...problem.equalityRhs] } : {}),
     ...(problem.lowerBounds ? { lowerBounds: [...problem.lowerBounds] } : {}),
     ...(problem.upperBounds ? { upperBounds: [...problem.upperBounds] } : {}),

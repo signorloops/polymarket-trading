@@ -180,9 +180,7 @@ describe('IPSolver', () => {
 
     it('should handle equality constraints in binary IP', () => {
       const objective = [1, 1];
-      const constraints = [
-        { coefficients: [1, 1], rhs: 1, type: '=' as const },
-      ];
+      const constraints = [{ coefficients: [1, 1], rhs: 1, type: '=' as const }];
 
       const result = solveBinaryIP(objective, constraints, { nodeLimit: 50 });
 
@@ -192,9 +190,7 @@ describe('IPSolver', () => {
 
     it('should handle >= constraints by converting to <=', () => {
       const objective = [1, 1];
-      const constraints = [
-        { coefficients: [1, 1], rhs: 1, type: '>=' as const },
-      ];
+      const constraints = [{ coefficients: [1, 1], rhs: 1, type: '>=' as const }];
 
       const result = solveBinaryIP(objective, constraints, { nodeLimit: 50 });
 
@@ -214,9 +210,7 @@ describe('IPSolver', () => {
 
     it('should handle single variable binary IP', () => {
       const objective = [5];
-      const constraints = [
-        { coefficients: [1], rhs: 1, type: '<=' as const },
-      ];
+      const constraints = [{ coefficients: [1], rhs: 1, type: '<=' as const }];
 
       const result = solveBinaryIP(objective, constraints, { nodeLimit: 10 });
 
@@ -227,9 +221,7 @@ describe('IPSolver', () => {
 
   describe('enumerateVertices', () => {
     it('should return unit vectors for simplex', () => {
-      const constraints = [
-        { coefficients: [1, 1, 1], rhs: 1, type: 'equality' as const },
-      ];
+      const constraints = [{ coefficients: [1, 1, 1], rhs: 1, type: 'equality' as const }];
 
       const vertices = enumerateVertices(constraints, 3, 100);
 
@@ -241,7 +233,11 @@ describe('IPSolver', () => {
     });
 
     it('should respect maxVertices limit', () => {
-      const constraints: { coefficients: number[]; rhs: number; type: 'equality' | 'inequality' }[] = [];
+      const constraints: {
+        coefficients: number[];
+        rhs: number;
+        type: 'equality' | 'inequality';
+      }[] = [];
 
       const vertices = enumerateVertices(constraints, 10, 5);
 
@@ -262,9 +258,7 @@ describe('IPSolver', () => {
     });
 
     it('should handle inequality constraints', () => {
-      const constraints = [
-        { coefficients: [1, 1], rhs: 1, type: 'inequality' as const },
-      ];
+      const constraints = [{ coefficients: [1, 1], rhs: 1, type: 'inequality' as const }];
 
       const vertices = enumerateVertices(constraints, 2, 100);
 

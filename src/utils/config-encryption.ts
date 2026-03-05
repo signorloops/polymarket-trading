@@ -5,11 +5,7 @@
 import fs from 'fs/promises';
 import { getLogger } from './logger.js';
 import { getErrorMessage } from './errors.js';
-import {
-  isEncrypted,
-  encryptValue,
-  decryptValue,
-} from './crypto-utils.js';
+import { isEncrypted, encryptValue, decryptValue } from './crypto-utils.js';
 
 // Re-export primitives so existing imports keep working
 export {
@@ -66,7 +62,10 @@ export async function checkFilePermissions(filePath: string): Promise<{
     const mode = stats.mode & 0o777;
     const isSecure = mode === 0o600;
     if (!isSecure) {
-      if ((mode & 0o077) !== 0) issues.push(`File ${filePath} has permissions ${mode.toString(8)} - should be 600 (owner only)`);
+      if ((mode & 0o077) !== 0)
+        issues.push(
+          `File ${filePath} has permissions ${mode.toString(8)} - should be 600 (owner only)`
+        );
       if ((mode & 0o040) !== 0) issues.push(`File ${filePath} is readable by group`);
       if ((mode & 0o004) !== 0) issues.push(`File ${filePath} is readable by others`);
       if ((mode & 0o020) !== 0) issues.push(`File ${filePath} is writable by group`);
@@ -89,13 +88,20 @@ export async function setSecurePermissions(filePath: string): Promise<void> {
   }
 }
 
-export async function encryptEnvFile(filePath: string, fieldsToEncrypt?: string[]): Promise<{
+export async function encryptEnvFile(
+  filePath: string,
+  fieldsToEncrypt?: string[]
+): Promise<{
   encrypted: number;
   skipped: number;
 }> {
   const defaultSensitiveFields = [
-    'PRIVATE_KEY', 'POLYMARKET_API_KEY', 'POLYMARKET_SECRET',
-    'POLYMARKET_PASSPHRASE', 'RPC_URL', 'WS_URL',
+    'PRIVATE_KEY',
+    'POLYMARKET_API_KEY',
+    'POLYMARKET_SECRET',
+    'POLYMARKET_PASSPHRASE',
+    'RPC_URL',
+    'WS_URL',
   ];
   const fields = fieldsToEncrypt ?? defaultSensitiveFields;
 
@@ -118,7 +124,10 @@ export async function encryptEnvFile(filePath: string, fieldsToEncrypt?: string[
       if (!key || !value) return line;
       const trimmedKey = key.trim();
 
-      if (isEncrypted(value.trim())) { skipped++; return line; }
+      if (isEncrypted(value.trim())) {
+        skipped++;
+        return line;
+      }
       if (!fields.includes(trimmedKey)) return line;
 
       try {
@@ -158,7 +167,10 @@ export async function decryptEnvFile(filePath: string): Promise<{
       const value = valueParts.join('=');
       if (!key || !value) return line;
 
-      if (!isEncrypted(value.trim())) { skipped++; return line; }
+      if (!isEncrypted(value.trim())) {
+        skipped++;
+        return line;
+      }
 
       try {
         const decryptedValue = decryptValue(value.trim());
@@ -179,4 +191,3 @@ export async function decryptEnvFile(filePath: string): Promise<{
     throw error;
   }
 }
-

@@ -154,7 +154,7 @@ describe('Softmax', () => {
     it('should handle large values', () => {
       const logits = [1000, 1001, 1002];
       const result = softmax(logits);
-      expect(result.every(x => x >= 0 && x <= 1)).toBe(true);
+      expect(result.every((x) => x >= 0 && x <= 1)).toBe(true);
       expect(result.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 10);
     });
   });

@@ -16,10 +16,7 @@ describe('Position Sizing', () => {
 
   beforeEach(() => {
     mockOrderBook = new OrderBook('test-market');
-    mockOrderBook.update(
-      [{ price: 0.6, size: 1000 }],
-      [{ price: 0.7, size: 1000 }]
-    );
+    mockOrderBook.update([{ price: 0.6, size: 1000 }], [{ price: 0.7, size: 1000 }]);
   });
 
   describe('calculatePositionSize', () => {
@@ -107,12 +104,7 @@ describe('Position Sizing', () => {
 
     it('should throw for mismatched array lengths', () => {
       expect(() =>
-        calculateMultiLegPositionSize(
-          [0.6],
-          [0.5, 0.5],
-          10000,
-          [mockOrderBook]
-        )
+        calculateMultiLegPositionSize([0.6], [0.5, 0.5], 10000, [mockOrderBook])
       ).toThrow('Input arrays must have the same length');
     });
   });

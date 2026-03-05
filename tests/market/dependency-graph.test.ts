@@ -1337,9 +1337,28 @@ describe('MarketDependencyGraph', () => {
     it('should handle complex graph structure', () => {
       // Create a complex graph with multiple events and relationships
       const events: EventNode[] = [
-        { id: 'election', type: 'categorical', outcomes: ['Trump', 'Biden', 'Other'], markets: ['m1', 'm2', 'm3'] },
-        { id: 'trump-legal', type: 'conditional', outcomes: ['Guilty', 'Not Guilty'], markets: ['m4', 'm5'], parentEvent: 'election', condition: 'election = Trump' },
-        { id: 'biden-health', type: 'conditional', outcomes: ['Yes', 'No'], markets: ['m6', 'm7'], parentEvent: 'election', condition: 'election = Biden' },
+        {
+          id: 'election',
+          type: 'categorical',
+          outcomes: ['Trump', 'Biden', 'Other'],
+          markets: ['m1', 'm2', 'm3'],
+        },
+        {
+          id: 'trump-legal',
+          type: 'conditional',
+          outcomes: ['Guilty', 'Not Guilty'],
+          markets: ['m4', 'm5'],
+          parentEvent: 'election',
+          condition: 'election = Trump',
+        },
+        {
+          id: 'biden-health',
+          type: 'conditional',
+          outcomes: ['Yes', 'No'],
+          markets: ['m6', 'm7'],
+          parentEvent: 'election',
+          condition: 'election = Biden',
+        },
       ];
 
       const markets: MarketNode[] = [

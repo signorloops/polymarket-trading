@@ -108,11 +108,17 @@ export function buildConstraintMatrix(
 
     for (const marketId of toEvent.markets) {
       const idx = marketIndex.get(marketId) ?? -1;
-      if (idx >= 0) { constraint[idx] = 1; hasTerm = true; }
+      if (idx >= 0) {
+        constraint[idx] = 1;
+        hasTerm = true;
+      }
     }
     for (const marketId of fromEvent.markets) {
       const idx = marketIndex.get(marketId) ?? -1;
-      if (idx >= 0) { constraint[idx] = -1; hasTerm = true; }
+      if (idx >= 0) {
+        constraint[idx] = -1;
+        hasTerm = true;
+      }
     }
 
     if (!hasTerm) continue;

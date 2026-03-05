@@ -149,7 +149,11 @@ export class RiskManager {
 
       if (Math.abs(newSize) < 1e-10) {
         // Position closed
-        const pnl = this.calculatePnL(existingPosition, orderStatus.avgPrice, orderStatus.filledSize);
+        const pnl = this.calculatePnL(
+          existingPosition,
+          orderStatus.avgPrice,
+          orderStatus.filledSize
+        );
         this.dailyPnL += pnl;
         this.positions.delete(marketId);
         this.marketPrices.delete(marketId);
@@ -171,7 +175,8 @@ export class RiskManager {
         this.logger.info(`Position flipped for ${marketId}`, { newSize, pnl });
       } else {
         // Add to position (average down/up)
-        const totalValue = existingPosition.size * existingPosition.avgPrice + filledSize * orderStatus.avgPrice;
+        const totalValue =
+          existingPosition.size * existingPosition.avgPrice + filledSize * orderStatus.avgPrice;
         const newAvgPrice = newSize !== 0 ? totalValue / newSize : existingPosition.avgPrice;
 
         existingPosition.size = newSize;
@@ -189,7 +194,10 @@ export class RiskManager {
         timestamp: Date.now(),
       });
       this.marketPrices.set(marketId, orderStatus.avgPrice);
-      this.logger.debug(`New position for ${marketId}`, { size: filledSize, avgPrice: orderStatus.avgPrice });
+      this.logger.debug(`New position for ${marketId}`, {
+        size: filledSize,
+        avgPrice: orderStatus.avgPrice,
+      });
     }
 
     // Update PnL tracking

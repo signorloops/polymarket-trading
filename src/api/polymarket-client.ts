@@ -92,7 +92,7 @@ export class PolymarketClient {
       timeout: NETWORK_CONFIG.CONNECTION_TIMEOUT,
       headers: {
         'Content-Type': 'application/json',
-        'Accept': 'application/json',
+        Accept: 'application/json',
       },
     });
 
@@ -115,7 +115,9 @@ export class PolymarketClient {
           }
         }
 
-        this.logger.debug(`API Request: ${String(config.method?.toUpperCase())} ${String(config.url)}`);
+        this.logger.debug(
+          `API Request: ${String(config.method?.toUpperCase())} ${String(config.url)}`
+        );
         return config;
       },
       (error: unknown) => {
@@ -128,7 +130,9 @@ export class PolymarketClient {
     // Response interceptor
     this.client.interceptors.response.use(
       (response) => {
-        this.logger.debug(`API Response: ${String(response.status)} ${String(response.config.url)}`);
+        this.logger.debug(
+          `API Response: ${String(response.status)} ${String(response.config.url)}`
+        );
         return response;
       },
       (error: AxiosError) => {
@@ -268,7 +272,10 @@ export class PolymarketClient {
       interval?: '1m' | '5m' | '15m' | '1h' | '1d';
     }
   ): Promise<{ timestamp: string; price: string; volume: string }[]> {
-    const response = await this.client.get<{ timestamp: string; price: string; volume: string }[]>(`/markets/${marketId}/prices`, { params });
+    const response = await this.client.get<{ timestamp: string; price: string; volume: string }[]>(
+      `/markets/${marketId}/prices`,
+      { params }
+    );
     return response.data;
   }
 

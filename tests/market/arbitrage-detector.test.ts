@@ -98,7 +98,9 @@ describe('ArbitrageDetector', () => {
     it('should throw when updating price for non-existent market', () => {
       const detector = new ArbitrageDetector();
 
-      expect(() => detector.updatePrice('non-existent', 0.5)).toThrow('Market non-existent not found');
+      expect(() => detector.updatePrice('non-existent', 0.5)).toThrow(
+        'Market non-existent not found'
+      );
     });
 
     it('should clear all events', () => {
@@ -228,9 +230,7 @@ describe('ArbitrageDetector', () => {
 
       detector.addEvent({
         id: 'event-1',
-        markets: [
-          { id: 'no-m1', eventId: 'event-1', outcome: 'NO', price: 0.4 },
-        ],
+        markets: [{ id: 'no-m1', eventId: 'event-1', outcome: 'NO', price: 0.4 }],
         outcomes: ['YES', 'NO'],
       });
 
@@ -243,9 +243,7 @@ describe('ArbitrageDetector', () => {
 
       detector.addEvent({
         id: 'event-1',
-        markets: [
-          { id: 'yes-m1', eventId: 'event-1', outcome: 'YES', price: 0.6 },
-        ],
+        markets: [{ id: 'yes-m1', eventId: 'event-1', outcome: 'YES', price: 0.6 }],
         outcomes: ['YES', 'NO'],
       });
 
@@ -774,9 +772,11 @@ describe('ArbitrageDetector', () => {
       const detector = new ArbitrageDetector();
 
       // Access private method using type assertion
-      const computeGradient = (detector as unknown as {
-        computeGradient(mu: number[], theta: number[]): number[];
-      }).computeGradient.bind(detector);
+      const computeGradient = (
+        detector as unknown as {
+          computeGradient(mu: number[], theta: number[]): number[];
+        }
+      ).computeGradient.bind(detector);
 
       // Test with theta shorter than mu
       const mu = [0.5, 0.5, 0.5];
@@ -793,9 +793,11 @@ describe('ArbitrageDetector', () => {
     it('should handle empty theta array in computeGradient', () => {
       const detector = new ArbitrageDetector();
 
-      const computeGradient = (detector as unknown as {
-        computeGradient(mu: number[], theta: number[]): number[];
-      }).computeGradient.bind(detector);
+      const computeGradient = (
+        detector as unknown as {
+          computeGradient(mu: number[], theta: number[]): number[];
+        }
+      ).computeGradient.bind(detector);
 
       const mu = [0.5, 0.5];
       const theta: number[] = [];
@@ -821,9 +823,11 @@ describe('ArbitrageDetector', () => {
       });
 
       // Access private method
-      const getEventsFromPolytope = (detector as unknown as {
-        getEventsFromPolytope(): { id: string; markets: unknown[]; outcomes: string[] }[];
-      }).getEventsFromPolytope.bind(detector);
+      const getEventsFromPolytope = (
+        detector as unknown as {
+          getEventsFromPolytope(): { id: string; markets: unknown[]; outcomes: string[] }[];
+        }
+      ).getEventsFromPolytope.bind(detector);
 
       const events = getEventsFromPolytope();
 
@@ -852,9 +856,11 @@ describe('ArbitrageDetector', () => {
         outcomes: ['YES', 'NO'],
       });
 
-      const getEventsFromPolytope = (detector as unknown as {
-        getEventsFromPolytope(): { id: string; markets: unknown[] }[];
-      }).getEventsFromPolytope.bind(detector);
+      const getEventsFromPolytope = (
+        detector as unknown as {
+          getEventsFromPolytope(): { id: string; markets: unknown[] }[];
+        }
+      ).getEventsFromPolytope.bind(detector);
 
       const events = getEventsFromPolytope();
 
@@ -864,9 +870,11 @@ describe('ArbitrageDetector', () => {
     it('should compute trade direction for sum < 1', () => {
       const detector = new ArbitrageDetector();
 
-      const computeSingleMarketTrade = (detector as unknown as {
-        computeSingleMarketTrade(arb: SingleMarketArbitrage): number[];
-      }).computeSingleMarketTrade.bind(detector);
+      const computeSingleMarketTrade = (
+        detector as unknown as {
+          computeSingleMarketTrade(arb: SingleMarketArbitrage): number[];
+        }
+      ).computeSingleMarketTrade.bind(detector);
 
       const arb: SingleMarketArbitrage = {
         eventId: 'event-1',
@@ -887,9 +895,11 @@ describe('ArbitrageDetector', () => {
     it('should compute trade direction for sum > 1', () => {
       const detector = new ArbitrageDetector();
 
-      const computeSingleMarketTrade = (detector as unknown as {
-        computeSingleMarketTrade(arb: SingleMarketArbitrage): number[];
-      }).computeSingleMarketTrade.bind(detector);
+      const computeSingleMarketTrade = (
+        detector as unknown as {
+          computeSingleMarketTrade(arb: SingleMarketArbitrage): number[];
+        }
+      ).computeSingleMarketTrade.bind(detector);
 
       const arb: SingleMarketArbitrage = {
         eventId: 'event-1',
@@ -910,9 +920,11 @@ describe('ArbitrageDetector', () => {
     it('should compute trade direction for sum = 1', () => {
       const detector = new ArbitrageDetector();
 
-      const computeSingleMarketTrade = (detector as unknown as {
-        computeSingleMarketTrade(arb: SingleMarketArbitrage): number[];
-      }).computeSingleMarketTrade.bind(detector);
+      const computeSingleMarketTrade = (
+        detector as unknown as {
+          computeSingleMarketTrade(arb: SingleMarketArbitrage): number[];
+        }
+      ).computeSingleMarketTrade.bind(detector);
 
       const arb: SingleMarketArbitrage = {
         eventId: 'event-1',

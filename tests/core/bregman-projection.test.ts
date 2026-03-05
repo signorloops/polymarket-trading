@@ -17,9 +17,7 @@ describe('Bregman Projection', () => {
   describe('bregmanProjection', () => {
     it('should converge for simple constraints', () => {
       const priceVector = [0.6, 0.4];
-      const constraints = [
-        { coefficients: [1, 1], rhs: 1, type: 'equality' as const },
-      ];
+      const constraints = [{ coefficients: [1, 1], rhs: 1, type: 'equality' as const }];
 
       const result = bregmanProjection(priceVector, constraints, 100, 1e-6);
 
@@ -30,9 +28,7 @@ describe('Bregman Projection', () => {
 
     it('should return valid probability distribution', () => {
       const priceVector = [0.7, 0.3];
-      const constraints = [
-        { coefficients: [1, 1], rhs: 1, type: 'equality' as const },
-      ];
+      const constraints = [{ coefficients: [1, 1], rhs: 1, type: 'equality' as const }];
 
       const result = bregmanProjection(priceVector, constraints);
 
@@ -46,9 +42,7 @@ describe('Bregman Projection', () => {
 
     it('should compute divergence correctly', () => {
       const priceVector = [0.6, 0.4];
-      const constraints = [
-        { coefficients: [1, 1], rhs: 1, type: 'equality' as const },
-      ];
+      const constraints = [{ coefficients: [1, 1], rhs: 1, type: 'equality' as const }];
 
       const result = bregmanProjection(priceVector, constraints);
 
@@ -176,9 +170,7 @@ describe('Bregman Projection', () => {
   describe('Non-convergence scenarios', () => {
     it('should return converged=false when max iterations reached', () => {
       const priceVector = [0.6, 0.4];
-      const constraints = [
-        { coefficients: [1, 1], rhs: 1, type: 'equality' as const },
-      ];
+      const constraints = [{ coefficients: [1, 1], rhs: 1, type: 'equality' as const }];
 
       // Use maxIterations=0 to force non-convergence (loop never executes)
       const result = bregmanProjection(priceVector, constraints, 0, 1e-10);
@@ -203,9 +195,7 @@ describe('Bregman Projection', () => {
 
     it('should handle constraints with all zero coefficients', () => {
       const priceVector = [0.6, 0.4];
-      const constraints = [
-        { coefficients: [0, 0], rhs: 1, type: 'equality' as const },
-      ];
+      const constraints = [{ coefficients: [0, 0], rhs: 1, type: 'equality' as const }];
 
       const result = bregmanProjection(priceVector, constraints);
 
@@ -216,9 +206,7 @@ describe('Bregman Projection', () => {
 
     it('should handle inequality constraints (filtered out)', () => {
       const priceVector = [0.6, 0.4];
-      const constraints = [
-        { coefficients: [1, 1], rhs: 1, type: 'inequality' as const },
-      ];
+      const constraints = [{ coefficients: [1, 1], rhs: 1, type: 'inequality' as const }];
 
       const result = bregmanProjection(priceVector, constraints);
 
@@ -232,9 +220,7 @@ describe('Bregman Projection', () => {
     it('should compute dual value with no constraint violations', () => {
       const mu = [0.5, 0.5];
       const theta = [0.6, 0.4];
-      const constraints = [
-        { coefficients: [1, 1], rhs: 1, type: 'equality' as const },
-      ];
+      const constraints = [{ coefficients: [1, 1], rhs: 1, type: 'equality' as const }];
 
       const dualValue = dualFunctionValue(mu, theta, constraints);
       const expectedDivergence = klDivergence(mu, theta);
@@ -246,9 +232,7 @@ describe('Bregman Projection', () => {
     it('should subtract penalty for constraint violations', () => {
       const mu = [0.6, 0.3]; // Sums to 0.9, violating constraint of 1
       const theta = [0.6, 0.4];
-      const constraints = [
-        { coefficients: [1, 1], rhs: 1, type: 'equality' as const },
-      ];
+      const constraints = [{ coefficients: [1, 1], rhs: 1, type: 'equality' as const }];
 
       const dualValue = dualFunctionValue(mu, theta, constraints);
       const divergence = klDivergence(mu, theta);
@@ -372,9 +356,7 @@ describe('Bregman Projection', () => {
   describe('Edge cases with sparse arrays', () => {
     it('should handle price vector with undefined elements', () => {
       const priceVector = [undefined as unknown as number, 0.4];
-      const constraints = [
-        { coefficients: [1, 1], rhs: 1, type: 'equality' as const },
-      ];
+      const constraints = [{ coefficients: [1, 1], rhs: 1, type: 'equality' as const }];
 
       const result = bregmanProjection(priceVector, constraints);
 
@@ -385,9 +367,7 @@ describe('Bregman Projection', () => {
     it('should handle constraint coefficients with sparse indices', () => {
       const priceVector = [0.6, 0.4];
       // Create constraint with explicit zeros to test sparse filtering
-      const constraints = [
-        { coefficients: [0, 1], rhs: 0.4, type: 'equality' as const },
-      ];
+      const constraints = [{ coefficients: [0, 1], rhs: 0.4, type: 'equality' as const }];
 
       const result = bregmanProjection(priceVector, constraints);
 
@@ -398,9 +378,7 @@ describe('Bregman Projection', () => {
     it('should handle constraint with coefficient exactly at boundary', () => {
       const priceVector = [0.6, 0.4];
       // Very small coefficient should still be included
-      const constraints = [
-        { coefficients: [1e-11, 1], rhs: 1, type: 'equality' as const },
-      ];
+      const constraints = [{ coefficients: [1e-11, 1], rhs: 1, type: 'equality' as const }];
 
       const result = bregmanProjection(priceVector, constraints);
 
@@ -411,9 +389,7 @@ describe('Bregman Projection', () => {
 
     it('should handle single element price vector', () => {
       const priceVector = [1];
-      const constraints = [
-        { coefficients: [1], rhs: 1, type: 'equality' as const },
-      ];
+      const constraints = [{ coefficients: [1], rhs: 1, type: 'equality' as const }];
 
       const result = bregmanProjection(priceVector, constraints);
 
@@ -424,7 +400,7 @@ describe('Bregman Projection', () => {
 
     it('should handle large dimension price vector', () => {
       const n = 100;
-      const priceVector = new Array(n).fill(0).map((_, i) => (i + 1) / (n * (n + 1) / 2));
+      const priceVector = new Array(n).fill(0).map((_, i) => (i + 1) / ((n * (n + 1)) / 2));
       const constraints = [
         { coefficients: new Array(n).fill(1), rhs: 1, type: 'equality' as const },
       ];

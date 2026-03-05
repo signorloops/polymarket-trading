@@ -28,7 +28,11 @@ jest.unstable_mockModule('../../src/utils/config.js', () => ({
   },
 }));
 
-const { TransactionTracker: TransactionTrackerClass, getTransactionTracker, resetTransactionTracker } = await import('../../src/blockchain/transaction-tracker.js');
+const {
+  TransactionTracker: TransactionTrackerClass,
+  getTransactionTracker,
+  resetTransactionTracker,
+} = await import('../../src/blockchain/transaction-tracker.js');
 
 describe('TransactionTracker', () => {
   let tracker: InstanceType<typeof TransactionTrackerClass>;
@@ -52,11 +56,7 @@ describe('TransactionTracker', () => {
 
   describe('trackTransaction', () => {
     it('should start tracking a new transaction', () => {
-      const tx = tracker.trackTransaction(
-        '0xabc123',
-        'order-1',
-        'market-1'
-      );
+      const tx = tracker.trackTransaction('0xabc123', 'order-1', 'market-1');
 
       expect(tx.hash).toBe('0xabc123');
       expect(tx.orderId).toBe('order-1');

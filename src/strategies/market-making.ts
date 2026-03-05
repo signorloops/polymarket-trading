@@ -5,7 +5,12 @@
  * Captures spread while managing inventory risk
  */
 
-import { BaseStrategy, type StrategyMarketData, type TradeSignal, type StrategyConfig } from './base.js';
+import {
+  BaseStrategy,
+  type StrategyMarketData,
+  type TradeSignal,
+  type StrategyConfig,
+} from './base.js';
 
 export interface MarketMakingConfig extends StrategyConfig {
   /** Spread to capture (0-1, e.g., 0.01 = 1%) */
@@ -75,15 +80,19 @@ export class MarketMakingStrategy extends BaseStrategy {
     if (Math.abs(currentInventory) >= this.mmConfig.maxInventory) {
       // Need to reduce inventory - send aggressive order
       const direction = currentInventory > 0 ? 'sell' : 'buy';
-      const reduceSize = Math.min(Math.abs(currentInventory) * 0.5, this.config.maxPositionSize ?? 1000);
+      const reduceSize = Math.min(
+        Math.abs(currentInventory) * 0.5,
+        this.config.maxPositionSize ?? 1000
+      );
 
       return {
         type: direction,
         marketId: market.marketId,
         size: reduceSize,
-        price: direction === 'sell'
-          ? market.orderBook.getBestBid()?.price ?? fairValue * 0.99
-          : market.orderBook.getBestAsk()?.price ?? fairValue * 1.01,
+        price:
+          direction === 'sell'
+            ? (market.orderBook.getBestBid()?.price ?? fairValue * 0.99)
+            : (market.orderBook.getBestAsk()?.price ?? fairValue * 1.01),
         confidence: 0.8,
         reason: `Inventory reduction: ${currentInventory.toString()} contracts`,
         metadata: {

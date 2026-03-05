@@ -83,7 +83,9 @@ describe('FrankWolfe', () => {
       const objectiveFn = (mu: number[] | Float64Array) => klDivergence(Array.from(mu), theta);
       const gradientFn = (mu: number[] | Float64Array) => {
         const epsilon = 1e-10;
-        return Array.from(mu).map((m, i) => Math.log(Math.max(m, epsilon) / Math.max(theta[i]!, epsilon)) + 1);
+        return Array.from(mu).map(
+          (m, i) => Math.log(Math.max(m, epsilon) / Math.max(theta[i]!, epsilon)) + 1
+        );
       };
       const lmoFn = (grad: number[] | Float64Array) =>
         linearMinimizationOracle(Array.from(grad), constraints);
@@ -437,7 +439,7 @@ describe('FrankWolfe', () => {
       }
 
       // All calls should succeed
-      expect(results.every(r => r.iterations > 0)).toBe(true);
+      expect(results.every((r) => r.iterations > 0)).toBe(true);
     });
   });
 
@@ -474,7 +476,9 @@ describe('FrankWolfe', () => {
       };
       const gradientFn = (mu: number[], eps: number) => {
         const epsilon = 1e-10;
-        const klGrad = mu.map((m, i) => Math.log(Math.max(m, epsilon) / Math.max(theta[i]!, epsilon)) + 1);
+        const klGrad = mu.map(
+          (m, i) => Math.log(Math.max(m, epsilon) / Math.max(theta[i]!, epsilon)) + 1
+        );
         const barrierGrad = mu.map((m) => eps / (m + eps));
         return klGrad.map((g, i) => g - barrierGrad[i]!);
       };
@@ -556,7 +560,9 @@ describe('FrankWolfe', () => {
       };
       const gradientFn = (mu: number[], eps: number) => {
         const epsilon = 1e-10;
-        const klGrad = mu.map((m, i) => Math.log(Math.max(m, epsilon) / Math.max(theta[i]!, epsilon)) + 1);
+        const klGrad = mu.map(
+          (m, i) => Math.log(Math.max(m, epsilon) / Math.max(theta[i]!, epsilon)) + 1
+        );
         const barrierGrad = mu.map((m) => eps / (m + eps));
         return klGrad.map((g, i) => g - barrierGrad[i]!);
       };
@@ -594,7 +600,9 @@ describe('FrankWolfe', () => {
       };
       const gradientFn = (mu: number[], eps: number) => {
         const epsilon = 1e-10;
-        const klGrad = mu.map((m, i) => Math.log(Math.max(m, epsilon) / Math.max(theta[i]!, epsilon)) + 1);
+        const klGrad = mu.map(
+          (m, i) => Math.log(Math.max(m, epsilon) / Math.max(theta[i]!, epsilon)) + 1
+        );
         const barrierGrad = mu.map((m) => eps / (m + eps));
         return klGrad.map((g, i) => g - barrierGrad[i]!);
       };
@@ -633,7 +641,9 @@ describe('FrankWolfe', () => {
       };
       const gradientFn = (mu: number[], eps: number) => {
         const epsilon = 1e-10;
-        const klGrad = mu.map((m, i) => Math.log(Math.max(m, epsilon) / Math.max(theta[i]!, epsilon)) + 1);
+        const klGrad = mu.map(
+          (m, i) => Math.log(Math.max(m, epsilon) / Math.max(theta[i]!, epsilon)) + 1
+        );
         const barrierGrad = mu.map((m) => eps / (m + eps));
         return klGrad.map((g, i) => g - barrierGrad[i]!);
       };
@@ -714,7 +724,7 @@ describe('FrankWolfe', () => {
       const trade = computeTradeRecommendation(result, prices);
 
       // Trade = projection - prices
-      expect(trade[0]).toBeCloseTo(0.1, 5);  // Buy YES
+      expect(trade[0]).toBeCloseTo(0.1, 5); // Buy YES
       expect(trade[1]).toBeCloseTo(-0.1, 5); // Sell NO
     });
   });

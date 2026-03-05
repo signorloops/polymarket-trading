@@ -100,7 +100,10 @@ const WalletConfigSchema = z.object({
     .optional(),
 
   /** Wallet address */
-  WALLET_ADDRESS: z.string().regex(/^0x[a-fA-F0-9]{40}$/).optional(),
+  WALLET_ADDRESS: z
+    .string()
+    .regex(/^0x[a-fA-F0-9]{40}$/)
+    .optional(),
 });
 
 /**
@@ -203,7 +206,8 @@ export function parseConfigFromEnv(): AppConfig {
       WALLET_ADDRESS: process.env.WALLET_ADDRESS,
     }),
     logging: LogConfigSchema.parse({
-      LOG_LEVEL: (process.env.LOG_LEVEL as 'debug' | 'info' | 'warn' | 'error' | undefined) ?? 'info',
+      LOG_LEVEL:
+        (process.env.LOG_LEVEL as 'debug' | 'info' | 'warn' | 'error' | undefined) ?? 'info',
       SILENT: process.env.SILENT === 'true',
       STRUCTURED_LOGGING: process.env.STRUCTURED_LOGGING === 'true',
     }),

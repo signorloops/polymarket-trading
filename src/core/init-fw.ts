@@ -71,12 +71,7 @@ export function initFW(
   const uniformQuality = objectiveFn(uniformInit);
 
   // Run a few iterations of conditional gradient from uniform
-  const gradientInit = conditionalGradientInit(
-    dimension,
-    gradientFn,
-    objectiveFn,
-    initIterations
-  );
+  const gradientInit = conditionalGradientInit(dimension, gradientFn, objectiveFn, initIterations);
   const gradientQuality = objectiveFn(gradientInit);
 
   // Select the best initialization
@@ -112,10 +107,7 @@ export function initFW(
 /**
  * Vertex initialization: select the vertex with minimum gradient
  */
-function vertexInitialization(
-  dimension: number,
-  gradientFn: (mu: number[]) => number[]
-): number[] {
+function vertexInitialization(dimension: number, gradientFn: (mu: number[]) => number[]): number[] {
   // Start from uniform to get a representative gradient
   const uniform = vectorScale(ones(dimension), 1 / dimension);
   const gradient = gradientFn(uniform);
@@ -252,10 +244,7 @@ function createBarrierInitialPoint(dimension: number, epsilon: number): number[]
 /**
  * Find the vertex that minimizes the gradient
  */
-function findMinGradientVertex(
-  gradient: number[],
-  dimension: number
-): number[] {
+function findMinGradientVertex(gradient: number[], dimension: number): number[] {
   let minIdx = 0;
   let minValue = gradient[0] ?? 0;
 
@@ -312,13 +301,7 @@ export function initFWBarrier(
   const normalized = createBarrierInitialPoint(dimension, epsilon);
   const iterations = options.initIterations ?? BARRIER_DEFAULT_ITERATIONS;
 
-  const mu = runBarrierConditionalGradient(
-    normalized,
-    dimension,
-    gradientFn,
-    iterations,
-    epsilon
-  );
+  const mu = runBarrierConditionalGradient(normalized, dimension, gradientFn, iterations, epsilon);
 
   const quality = objectiveFn(mu, epsilon);
 

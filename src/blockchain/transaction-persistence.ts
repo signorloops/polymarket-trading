@@ -50,7 +50,11 @@ export const MAX_RETRY_ATTEMPTS = 5;
 export const RETRY_BASE_DELAY_MS = 1000;
 export const POLL_INTERVAL_MS = 2000;
 export const TRANSACTION_TIMEOUT_MS = 300000; // 5 minutes
-export const DEFAULT_STATE_FILE_PATH = path.join(process.cwd(), '.state', 'transaction-tracker.json');
+export const DEFAULT_STATE_FILE_PATH = path.join(
+  process.cwd(),
+  '.state',
+  'transaction-tracker.json'
+);
 export const DISABLE_PERSISTENCE_IN_TEST = process.env.NODE_ENV === 'test';
 
 interface PersistedState {

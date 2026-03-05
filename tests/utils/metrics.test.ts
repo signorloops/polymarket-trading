@@ -149,10 +149,23 @@ describe('Registry', () => {
 describe('recordTrade', () => {
   beforeEach(() => {
     // Reset metrics
-    TradingMetrics.ordersSubmitted = new Counter('trading_orders_submitted_total', 'Total number of orders submitted');
-    TradingMetrics.ordersFilled = new Counter('trading_orders_filled_total', 'Total number of orders filled');
-    TradingMetrics.ordersFailed = new Counter('trading_orders_failed_total', 'Total number of orders that failed');
-    TradingMetrics.orderExecutionTime = new Histogram('trading_order_execution_seconds', 'Order execution time in seconds', [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5]);
+    TradingMetrics.ordersSubmitted = new Counter(
+      'trading_orders_submitted_total',
+      'Total number of orders submitted'
+    );
+    TradingMetrics.ordersFilled = new Counter(
+      'trading_orders_filled_total',
+      'Total number of orders filled'
+    );
+    TradingMetrics.ordersFailed = new Counter(
+      'trading_orders_failed_total',
+      'Total number of orders that failed'
+    );
+    TradingMetrics.orderExecutionTime = new Histogram(
+      'trading_order_execution_seconds',
+      'Order execution time in seconds',
+      [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5]
+    );
   });
 
   it('should record successful trade', () => {
@@ -172,9 +185,18 @@ describe('recordTrade', () => {
 
 describe('recordArbitrage', () => {
   beforeEach(() => {
-    TradingMetrics.arbitrageOpportunitiesFound = new Counter('trading_arbitrage_opportunities_total', 'Total arbitrage opportunities detected');
-    TradingMetrics.arbitrageExecuted = new Counter('trading_arbitrage_executed_total', 'Successful arbitrage executions');
-    TradingMetrics.arbitrageProfit = new Counter('trading_arbitrage_profit_total', 'Total profit from arbitrage (USD)');
+    TradingMetrics.arbitrageOpportunitiesFound = new Counter(
+      'trading_arbitrage_opportunities_total',
+      'Total arbitrage opportunities detected'
+    );
+    TradingMetrics.arbitrageExecuted = new Counter(
+      'trading_arbitrage_executed_total',
+      'Successful arbitrage executions'
+    );
+    TradingMetrics.arbitrageProfit = new Counter(
+      'trading_arbitrage_profit_total',
+      'Total profit from arbitrage (USD)'
+    );
   });
 
   it('should record found opportunity', () => {

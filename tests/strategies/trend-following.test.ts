@@ -30,14 +30,20 @@ describe('TrendFollowingStrategy', () => {
     it('策略被禁用时返回 null', () => {
       strategy.updateConfig({ enabled: false });
 
-      const marketData = createMarketDataWithHistory('market-1', generatePriceHistory(20, 0.5, 0.02));
+      const marketData = createMarketDataWithHistory(
+        'market-1',
+        generatePriceHistory(20, 0.5, 0.02)
+      );
       const signal = strategy.analyze(marketData);
       expect(signal).toBeNull();
     });
 
     it('数据不足时返回 null', () => {
       // 只提供5个数据点，少于longPeriod(10)
-      const marketData = createMarketDataWithHistory('market-1', generatePriceHistory(5, 0.5, 0.01));
+      const marketData = createMarketDataWithHistory(
+        'market-1',
+        generatePriceHistory(5, 0.5, 0.01)
+      );
       const signal = strategy.analyze(marketData);
       expect(signal).toBeNull();
     });
@@ -55,9 +61,21 @@ describe('TrendFollowingStrategy', () => {
       //
       // 价格需要有波动来避免RSI饱和
       const prices: number[] = [
-        0.30, 0.32, 0.31, 0.33, 0.30,  // 5个价格，有上有下
-        0.35, 0.33, 0.36, 0.34, 0.37,  // 5个价格，继续上升但有回调
-        0.35, 0.40, 0.38, 0.42, 0.40,  // 5个价格，继续上升但有回调
+        0.3,
+        0.32,
+        0.31,
+        0.33,
+        0.3, // 5个价格，有上有下
+        0.35,
+        0.33,
+        0.36,
+        0.34,
+        0.37, // 5个价格，继续上升但有回调
+        0.35,
+        0.4,
+        0.38,
+        0.42,
+        0.4, // 5个价格，继续上升但有回调
       ];
 
       // 通过多次调用analyze来积累历史数据，并获取最后一次的信号
@@ -86,9 +104,21 @@ describe('TrendFollowingStrategy', () => {
       //
       // 价格需要有波动来避免RSI饱和
       const prices: number[] = [
-        0.70, 0.68, 0.69, 0.67, 0.70,  // 5个价格，有上有下
-        0.65, 0.67, 0.64, 0.66, 0.63,  // 5个价格，继续下降但有回调
-        0.65, 0.60, 0.62, 0.58, 0.60,  // 5个价格，继续下降但有回调
+        0.7,
+        0.68,
+        0.69,
+        0.67,
+        0.7, // 5个价格，有上有下
+        0.65,
+        0.67,
+        0.64,
+        0.66,
+        0.63, // 5个价格，继续下降但有回调
+        0.65,
+        0.6,
+        0.62,
+        0.58,
+        0.6, // 5个价格，继续下降但有回调
       ];
 
       // 通过多次调用analyze来积累历史数据，并获取最后一次的信号

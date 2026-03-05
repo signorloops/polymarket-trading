@@ -144,7 +144,10 @@ export class PagerDutyChannel implements NotificationChannel {
   /**
    * Build PagerDuty event payload
    */
-  private buildPayload(notification: AlertNotification, integrationKey: string): PagerDutyEventPayload {
+  private buildPayload(
+    notification: AlertNotification,
+    integrationKey: string
+  ): PagerDutyEventPayload {
     const dedupKey = notification.id ?? `${notification.title}-${notification.level}`;
 
     return {

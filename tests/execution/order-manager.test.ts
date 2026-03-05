@@ -743,13 +743,15 @@ describe('OrderManager', () => {
       }));
 
       // Add all orders
-      orders.forEach(order => orderManager.addPending(order));
+      orders.forEach((order) => orderManager.addPending(order));
       expect(orderManager.getPendingCount()).toBe(100);
 
       // Remove all even-indexed orders
-      orders.filter((_, i) => i % 2 === 0).forEach(order => {
-        orderManager.removePending(order.id);
-      });
+      orders
+        .filter((_, i) => i % 2 === 0)
+        .forEach((order) => {
+          orderManager.removePending(order.id);
+        });
 
       expect(orderManager.getPendingCount()).toBe(50);
     });
@@ -790,12 +792,7 @@ describe('OrderManager', () => {
 
     it('should handle status transitions correctly', () => {
       const orderId = 'order-1';
-      const timestamps = [
-        Date.now(),
-        Date.now() + 1000,
-        Date.now() + 2000,
-        Date.now() + 3000,
-      ];
+      const timestamps = [Date.now(), Date.now() + 1000, Date.now() + 2000, Date.now() + 3000];
 
       const statuses: OrderStatus[] = [
         {
@@ -832,7 +829,7 @@ describe('OrderManager', () => {
         },
       ];
 
-      statuses.forEach(status => {
+      statuses.forEach((status) => {
         orderManager.updateStatus(status);
       });
 
@@ -843,15 +840,58 @@ describe('OrderManager', () => {
 
     it('should handle multiple orders with different statuses', () => {
       const orders: OrderStatus[] = [
-        { orderId: 'order-1', status: 'pending', filledSize: 0, remainingSize: 100, avgPrice: 0, timestamp: Date.now() },
-        { orderId: 'order-2', status: 'open', filledSize: 0, remainingSize: 100, avgPrice: 0, timestamp: Date.now() },
-        { orderId: 'order-3', status: 'filled', filledSize: 100, remainingSize: 0, avgPrice: 0.5, timestamp: Date.now() },
-        { orderId: 'order-4', status: 'partial', filledSize: 50, remainingSize: 50, avgPrice: 0.5, timestamp: Date.now() },
-        { orderId: 'order-5', status: 'cancelled', filledSize: 0, remainingSize: 100, avgPrice: 0, timestamp: Date.now() },
-        { orderId: 'order-6', status: 'error', filledSize: 0, remainingSize: 100, avgPrice: 0, timestamp: Date.now(), error: 'Network error' },
+        {
+          orderId: 'order-1',
+          status: 'pending',
+          filledSize: 0,
+          remainingSize: 100,
+          avgPrice: 0,
+          timestamp: Date.now(),
+        },
+        {
+          orderId: 'order-2',
+          status: 'open',
+          filledSize: 0,
+          remainingSize: 100,
+          avgPrice: 0,
+          timestamp: Date.now(),
+        },
+        {
+          orderId: 'order-3',
+          status: 'filled',
+          filledSize: 100,
+          remainingSize: 0,
+          avgPrice: 0.5,
+          timestamp: Date.now(),
+        },
+        {
+          orderId: 'order-4',
+          status: 'partial',
+          filledSize: 50,
+          remainingSize: 50,
+          avgPrice: 0.5,
+          timestamp: Date.now(),
+        },
+        {
+          orderId: 'order-5',
+          status: 'cancelled',
+          filledSize: 0,
+          remainingSize: 100,
+          avgPrice: 0,
+          timestamp: Date.now(),
+        },
+        {
+          orderId: 'order-6',
+          status: 'error',
+          filledSize: 0,
+          remainingSize: 100,
+          avgPrice: 0,
+          timestamp: Date.now(),
+          error: 'Network error',
+        },
       ];
 
-      orders.forEach(order => orderManager.updateStatus(order));
+      orders.forEach((order) => orderManager.updateStatus(order));
 
       expect(orderManager.getStatusCount()).toBe(6);
       expect(orderManager.getStatus('order-1')?.status).toBe('pending');

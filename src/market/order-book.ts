@@ -14,7 +14,11 @@ import { TRADING_CONFIG } from '../utils/config.js';
 import { SkipList } from './skip-list.js';
 
 // Re-export OrderBookManager so existing imports keep working
-export { OrderBookManager, getOrderBookManager, resetOrderBookManager } from './order-book-manager.js';
+export {
+  OrderBookManager,
+  getOrderBookManager,
+  resetOrderBookManager,
+} from './order-book-manager.js';
 
 export interface PriceLevel {
   price: number;
@@ -217,9 +221,7 @@ export class OrderBook {
     }
 
     const vwap = vwapResult.vwap;
-    return side === 'buy'
-      ? (vwap - midPrice) / midPrice
-      : (midPrice - vwap) / midPrice;
+    return side === 'buy' ? (vwap - midPrice) / midPrice : (midPrice - vwap) / midPrice;
   }
 
   /**
@@ -283,14 +285,12 @@ export class OrderBook {
       const newTotalValue = totalValue + level.size * level.price;
       const vwap = newTotalValue / newTotalSize;
 
-      const slippage =
-        side === 'buy'
-          ? (vwap - midPrice) / midPrice
-          : (midPrice - vwap) / midPrice;
+      const slippage = side === 'buy' ? (vwap - midPrice) / midPrice : (midPrice - vwap) / midPrice;
 
       if (slippage > TRADING_CONFIG.SLIPPAGE_TOLERANCE) {
         // Calculate partial fill that stays within tolerance
-        const remainingSlippage = TRADING_CONFIG.SLIPPAGE_TOLERANCE -
+        const remainingSlippage =
+          TRADING_CONFIG.SLIPPAGE_TOLERANCE -
           this.calculateSlippageForValue(totalValue, totalSize, midPrice, side);
 
         if (remainingSlippage <= 0) {
@@ -357,9 +357,6 @@ export class OrderBook {
   ): number {
     if (totalSize <= 0) return 0;
     const vwap = totalValue / totalSize;
-    return side === 'buy'
-      ? (vwap - midPrice) / midPrice
-      : (midPrice - vwap) / midPrice;
+    return side === 'buy' ? (vwap - midPrice) / midPrice : (midPrice - vwap) / midPrice;
   }
 }
-

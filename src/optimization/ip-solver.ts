@@ -44,10 +44,7 @@ export { isIntegerFeasible } from './ip-solver-utils.js';
 /**
  * Solve an integer programming problem using branch and bound with LP relaxation.
  */
-export function solveIP(
-  problem: IPProblem,
-  options: IPSolverOptions = {}
-): IPSolution {
+export function solveIP(problem: IPProblem, options: IPSolverOptions = {}): IPSolution {
   const { nodeLimit = 1000 } = options;
 
   try {

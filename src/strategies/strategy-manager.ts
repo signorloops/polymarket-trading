@@ -6,7 +6,10 @@
 
 import { BaseStrategy, type StrategyMarketData, type TradeSignal } from './base.js';
 import { SimpleArbitrageStrategy, type SimpleArbitrageConfig } from './simple-arbitrage.js';
-import { CrossMarketArbitrageStrategy, type CrossMarketArbitrageConfig } from './cross-market-arbitrage.js';
+import {
+  CrossMarketArbitrageStrategy,
+  type CrossMarketArbitrageConfig,
+} from './cross-market-arbitrage.js';
 import { MarketMakingStrategy, type MarketMakingConfig } from './market-making.js';
 import { TrendFollowingStrategy, type TrendFollowingConfig } from './trend-following.js';
 import { getLogger } from '../utils/logger.js';
@@ -73,10 +76,7 @@ export class StrategyManager {
     }
 
     if (this.config.marketMaking) {
-      this.strategies.set(
-        'market-making',
-        new MarketMakingStrategy(this.config.marketMaking)
-      );
+      this.strategies.set('market-making', new MarketMakingStrategy(this.config.marketMaking));
       this.logger.info('Market making strategy initialized');
     }
 
@@ -128,9 +128,7 @@ export class StrategyManager {
   /**
    * Aggregate signals based on configured mode
    */
-  private aggregateSignals(
-    signals: SignalWithStrategy[]
-  ): AggregatedSignal | null {
+  private aggregateSignals(signals: SignalWithStrategy[]): AggregatedSignal | null {
     return aggregateSignals(
       signals,
       this.config.aggregationMode,

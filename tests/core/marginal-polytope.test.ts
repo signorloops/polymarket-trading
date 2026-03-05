@@ -74,7 +74,9 @@ describe('MarginalPolytope', () => {
     });
 
     it('should throw for non-existent market', () => {
-      expect(() => polytope.updateMarketPrice('non-existent', 0.5)).toThrow('Market non-existent not found');
+      expect(() => polytope.updateMarketPrice('non-existent', 0.5)).toThrow(
+        'Market non-existent not found'
+      );
     });
   });
 

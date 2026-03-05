@@ -5,14 +5,8 @@
  */
 
 import { StrategyManager } from '../../src/strategies/strategy-manager.js';
-import {
-  getExecutionEngine,
-  resetExecutionEngine,
-} from '../../src/execution/execution-engine.js';
-import {
-  getRiskManager,
-  resetRiskManager,
-} from '../../src/execution/risk-manager.js';
+import { getExecutionEngine, resetExecutionEngine } from '../../src/execution/execution-engine.js';
+import { getRiskManager, resetRiskManager } from '../../src/execution/risk-manager.js';
 import { getOrderBookManager, resetOrderBookManager } from '../../src/market/order-book.js';
 import type { StrategyMarketData } from '../../src/strategies/base.js';
 
@@ -45,17 +39,9 @@ describe('Strategy and Execution Integration', () => {
       const manager = getOrderBookManager();
 
       // Setup order books
-      manager.updateBook(
-        'event-yes',
-        [{ price: 0.55, size: 100 }],
-        [{ price: 0.56, size: 100 }]
-      );
+      manager.updateBook('event-yes', [{ price: 0.55, size: 100 }], [{ price: 0.56, size: 100 }]);
 
-      manager.updateBook(
-        'event-no',
-        [{ price: 0.4, size: 100 }],
-        [{ price: 0.41, size: 100 }]
-      );
+      manager.updateBook('event-no', [{ price: 0.4, size: 100 }], [{ price: 0.41, size: 100 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -160,11 +146,7 @@ describe('Strategy and Execution Integration', () => {
 
       const manager = getOrderBookManager();
 
-      manager.updateBook(
-        'market-1',
-        [{ price: 0.58, size: 1000 }],
-        [{ price: 0.62, size: 1000 }]
-      );
+      manager.updateBook('market-1', [{ price: 0.58, size: 1000 }], [{ price: 0.62, size: 1000 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -304,17 +286,9 @@ describe('Strategy and Execution Integration', () => {
       const manager = getOrderBookManager();
 
       // Setup market data
-      manager.updateBook(
-        'event-yes',
-        [{ price: 0.55, size: 1000 }],
-        [{ price: 0.56, size: 1000 }]
-      );
+      manager.updateBook('event-yes', [{ price: 0.55, size: 1000 }], [{ price: 0.56, size: 1000 }]);
 
-      manager.updateBook(
-        'event-no',
-        [{ price: 0.4, size: 1000 }],
-        [{ price: 0.41, size: 1000 }]
-      );
+      manager.updateBook('event-no', [{ price: 0.4, size: 1000 }], [{ price: 0.41, size: 1000 }]);
 
       // Step 1: Analyze markets
       const marketData: StrategyMarketData[] = [

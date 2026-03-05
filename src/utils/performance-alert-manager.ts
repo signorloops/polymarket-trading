@@ -234,4 +234,3 @@ export class PerformanceAlertManager {
     this.logger.warn(`Alert fired: ${config.title} (value: ${String(currentValue)})`);
   }
 }
-

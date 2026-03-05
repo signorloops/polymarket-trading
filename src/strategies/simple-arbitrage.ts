@@ -5,7 +5,12 @@
  * where YES + NO prices don't sum to $1
  */
 
-import { BaseStrategy, type StrategyMarketData, type TradeSignal, type StrategyConfig } from './base.js';
+import {
+  BaseStrategy,
+  type StrategyMarketData,
+  type TradeSignal,
+  type StrategyConfig,
+} from './base.js';
 
 export interface SimpleArbitrageConfig extends StrategyConfig {
   /** Minimum profit threshold ($) */
@@ -58,19 +63,23 @@ export class SimpleArbitrageStrategy extends BaseStrategy {
     const size = this.calculatePositionSize(opportunity);
     const isBuyPair = opportunity.tradeDirection === 'buy_pair';
     const marketId = isBuyPair
-      ? (opportunity.yesPrice <= opportunity.noPrice ? opportunity.yesMarketId : opportunity.noMarketId)
-      : (opportunity.yesPrice >= opportunity.noPrice ? opportunity.yesMarketId : opportunity.noMarketId);
+      ? opportunity.yesPrice <= opportunity.noPrice
+        ? opportunity.yesMarketId
+        : opportunity.noMarketId
+      : opportunity.yesPrice >= opportunity.noPrice
+        ? opportunity.yesMarketId
+        : opportunity.noMarketId;
 
     const pairedLegs = [
       {
         marketId: opportunity.yesMarketId,
-        side: isBuyPair ? 'buy' as const : 'sell' as const,
+        side: isBuyPair ? ('buy' as const) : ('sell' as const),
         size,
         price: opportunity.yesPrice,
       },
       {
         marketId: opportunity.noMarketId,
-        side: isBuyPair ? 'buy' as const : 'sell' as const,
+        side: isBuyPair ? ('buy' as const) : ('sell' as const),
         size,
         price: opportunity.noPrice,
       },
@@ -150,7 +159,9 @@ export class SimpleArbitrageStrategy extends BaseStrategy {
   /**
    * Group markets by event ID
    */
-  private groupByEvent(data: StrategyMarketData[]): Map<string, { yes?: StrategyMarketData; no?: StrategyMarketData }> {
+  private groupByEvent(
+    data: StrategyMarketData[]
+  ): Map<string, { yes?: StrategyMarketData; no?: StrategyMarketData }> {
     const pairs = new Map<string, { yes?: StrategyMarketData; no?: StrategyMarketData }>();
 
     for (const market of data) {

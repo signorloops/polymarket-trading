@@ -29,8 +29,8 @@ export class SkipList {
     this.head = {
       price: -Infinity,
       size: 0,
-      next: Array.from<(SkipListNode | null)>({ length: maxLevel }).fill(null),
-      prev: Array.from<(SkipListNode | null)>({ length: maxLevel }).fill(null),
+      next: Array.from<SkipListNode | null>({ length: maxLevel }).fill(null),
+      prev: Array.from<SkipListNode | null>({ length: maxLevel }).fill(null),
     };
   }
 
@@ -43,7 +43,9 @@ export class SkipList {
   }
 
   insert(price: number, size: number): void {
-    const update: (SkipListNode | null)[] = Array.from<(SkipListNode | null)>({ length: this.maxLevel }).fill(null);
+    const update: (SkipListNode | null)[] = Array.from<SkipListNode | null>({
+      length: this.maxLevel,
+    }).fill(null);
     let current: SkipListNode = this.head;
 
     for (let i = this.level; i >= 0; i--) {
@@ -70,8 +72,8 @@ export class SkipList {
       const newNode: SkipListNode = {
         price,
         size,
-        next: Array.from<(SkipListNode | null)>({ length: newLevel + 1 }).fill(null),
-        prev: Array.from<(SkipListNode | null)>({ length: newLevel + 1 }).fill(null),
+        next: Array.from<SkipListNode | null>({ length: newLevel + 1 }).fill(null),
+        prev: Array.from<SkipListNode | null>({ length: newLevel + 1 }).fill(null),
       };
 
       for (let i = 0; i <= newLevel; i++) {
@@ -96,7 +98,9 @@ export class SkipList {
   }
 
   delete(price: number): boolean {
-    const update: (SkipListNode | null)[] = Array.from<(SkipListNode | null)>({ length: this.maxLevel }).fill(null);
+    const update: (SkipListNode | null)[] = Array.from<SkipListNode | null>({
+      length: this.maxLevel,
+    }).fill(null);
     let current: SkipListNode = this.head;
 
     for (let i = this.level; i >= 0; i--) {

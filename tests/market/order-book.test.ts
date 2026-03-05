@@ -2,7 +2,12 @@
  * Unit tests for order book
  */
 
-import { OrderBook, OrderBookManager, getOrderBookManager, resetOrderBookManager } from '../../src/market/order-book.js';
+import {
+  OrderBook,
+  OrderBookManager,
+  getOrderBookManager,
+  resetOrderBookManager,
+} from '../../src/market/order-book.js';
 
 describe('OrderBook', () => {
   let book: OrderBook;
@@ -30,15 +35,9 @@ describe('OrderBook', () => {
     });
 
     it('should remove zero-size levels', () => {
-      book.update(
-        [{ price: 0.6, size: 100 }],
-        [{ price: 0.65, size: 150 }]
-      );
+      book.update([{ price: 0.6, size: 100 }], [{ price: 0.65, size: 150 }]);
 
-      book.update(
-        [{ price: 0.6, size: 0 }],
-        [{ price: 0.65, size: 150 }]
-      );
+      book.update([{ price: 0.6, size: 0 }], [{ price: 0.65, size: 150 }]);
 
       const snapshot = book.getSnapshot();
       expect(snapshot.bids).toHaveLength(0);
@@ -80,10 +79,7 @@ describe('OrderBook', () => {
 
   describe('getMidPrice', () => {
     it('should calculate mid price', () => {
-      book.update(
-        [{ price: 0.6, size: 100 }],
-        [{ price: 0.7, size: 150 }]
-      );
+      book.update([{ price: 0.6, size: 100 }], [{ price: 0.7, size: 150 }]);
 
       expect(book.getMidPrice()).toBeCloseTo(0.65, 10);
     });
@@ -95,10 +91,7 @@ describe('OrderBook', () => {
 
   describe('getSpread', () => {
     it('should calculate spread', () => {
-      book.update(
-        [{ price: 0.6, size: 100 }],
-        [{ price: 0.7, size: 150 }]
-      );
+      book.update([{ price: 0.6, size: 100 }], [{ price: 0.7, size: 150 }]);
 
       expect(book.getSpread()).toBeCloseTo(0.1, 10);
     });
@@ -123,10 +116,7 @@ describe('OrderBook', () => {
     });
 
     it('should handle insufficient liquidity', () => {
-      book.update(
-        [{ price: 0.6, size: 100 }],
-        [{ price: 0.7, size: 50 }]
-      );
+      book.update([{ price: 0.6, size: 100 }], [{ price: 0.7, size: 50 }]);
 
       const vwap = book.calculateVWAP(100, 'buy');
 
@@ -152,10 +142,7 @@ describe('OrderBook', () => {
     });
 
     it('should return Infinity for insufficient liquidity', () => {
-      book.update(
-        [{ price: 0.6, size: 100 }],
-        [{ price: 0.7, size: 50 }]
-      );
+      book.update([{ price: 0.6, size: 100 }], [{ price: 0.7, size: 50 }]);
 
       const slippage = book.calculateSlippage(100, 'buy');
       expect(slippage).toBe(Infinity);
@@ -189,11 +176,7 @@ describe('OrderBookManager', () => {
     it('should update existing book', () => {
       const manager = getOrderBookManager();
 
-      manager.updateBook(
-        'market-1',
-        [{ price: 0.6, size: 100 }],
-        [{ price: 0.7, size: 150 }]
-      );
+      manager.updateBook('market-1', [{ price: 0.6, size: 100 }], [{ price: 0.7, size: 150 }]);
 
       const book = manager.getBook('market-1');
       expect(book.getBestBid()).toEqual({ price: 0.6, size: 100 });

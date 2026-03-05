@@ -130,15 +130,19 @@ export class ExecutionEngine {
 
     // Execute all orders in parallel
     const results = await Promise.all(
-      orders.map((order) => this.executeOrder(order).catch((error: unknown): OrderStatus => ({
-        orderId: order.id,
-        status: 'error',
-        filledSize: 0,
-        remainingSize: order.size,
-        avgPrice: 0,
-        timestamp: Date.now(),
-        error: getErrorMessage(error),
-      })))
+      orders.map((order) =>
+        this.executeOrder(order).catch(
+          (error: unknown): OrderStatus => ({
+            orderId: order.id,
+            status: 'error',
+            filledSize: 0,
+            remainingSize: order.size,
+            avgPrice: 0,
+            timestamp: Date.now(),
+            error: getErrorMessage(error),
+          })
+        )
+      )
     );
 
     const executionTime = Date.now() - startTime;
@@ -354,10 +358,7 @@ export class ExecutionEngine {
     }
   }
 
-  private async handlePartialFills(
-    arbitrageId: string,
-    orders: OrderStatus[]
-  ): Promise<void> {
+  private async handlePartialFills(arbitrageId: string, orders: OrderStatus[]): Promise<void> {
     // Strategy: Cancel remaining orders and try to unwind filled positions
     this.logger.info(`Handling partial fills for ${arbitrageId}`);
 

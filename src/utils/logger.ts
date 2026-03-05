@@ -42,7 +42,12 @@ export class Logger {
    * Create a child logger with additional context
    */
   child(additionalContext: Record<string, unknown>): Logger {
-    return new Logger(this.level, this.silent, { ...this.context, ...additionalContext }, this.structured);
+    return new Logger(
+      this.level,
+      this.silent,
+      { ...this.context, ...additionalContext },
+      this.structured
+    );
   }
 
   /**
@@ -82,9 +87,7 @@ export class Logger {
     }
 
     // Human-readable format for development
-    const contextStr = entry.context
-      ? ' ' + JSON.stringify(entry.context)
-      : '';
+    const contextStr = entry.context ? ' ' + JSON.stringify(entry.context) : '';
     return `[${entry.timestamp}] ${entry.level.toUpperCase()}: ${entry.message}${contextStr}`;
   }
 

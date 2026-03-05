@@ -14,19 +14,9 @@ import {
   type TradingSystemConfig,
   resetTradingSystem,
 } from '../../src/index.js';
-import {
-  getRiskManager,
-  resetRiskManager,
-  RiskManager,
-} from '../../src/execution/risk-manager.js';
-import {
-  getExecutionEngine,
-  resetExecutionEngine,
-} from '../../src/execution/execution-engine.js';
-import {
-  getOrderBookManager,
-  resetOrderBookManager,
-} from '../../src/market/order-book.js';
+import { getRiskManager, resetRiskManager, RiskManager } from '../../src/execution/risk-manager.js';
+import { getExecutionEngine, resetExecutionEngine } from '../../src/execution/execution-engine.js';
+import { getOrderBookManager, resetOrderBookManager } from '../../src/market/order-book.js';
 import {
   ArbitrageDetector,
   getArbitrageDetector,
@@ -551,11 +541,7 @@ describe('Trading System Integration', () => {
     it('should update order books from market data', () => {
       const manager = getOrderBookManager();
 
-      manager.updateBook(
-        'test-market',
-        [{ price: 0.6, size: 100 }],
-        [{ price: 0.65, size: 100 }]
-      );
+      manager.updateBook('test-market', [{ price: 0.6, size: 100 }], [{ price: 0.65, size: 100 }]);
 
       const book = manager.getBook('test-market');
       const snapshot = book.getSnapshot();

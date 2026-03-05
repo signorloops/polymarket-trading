@@ -43,7 +43,9 @@ class MetricsRegistry {
 // Global registry instance
 const registrySingleton = createSingleton(() => {
   const registry = new MetricsRegistry();
-  Object.values(TradingMetrics).forEach((metric) => { registry.register(metric); });
+  Object.values(TradingMetrics).forEach((metric) => {
+    registry.register(metric);
+  });
   return registry;
 });
 
@@ -52,10 +54,16 @@ export const getRegistry = registrySingleton.get;
 // Pre-defined trading metrics
 export const TradingMetrics = {
   // Order execution metrics
-  ordersSubmitted: new Counter('trading_orders_submitted_total', 'Total number of orders submitted'),
+  ordersSubmitted: new Counter(
+    'trading_orders_submitted_total',
+    'Total number of orders submitted'
+  ),
   ordersFilled: new Counter('trading_orders_filled_total', 'Total number of orders filled'),
   ordersFailed: new Counter('trading_orders_failed_total', 'Total number of orders that failed'),
-  ordersCancelled: new Counter('trading_orders_cancelled_total', 'Total number of orders cancelled'),
+  ordersCancelled: new Counter(
+    'trading_orders_cancelled_total',
+    'Total number of orders cancelled'
+  ),
 
   // Position metrics
   positionSize: new Gauge('trading_position_size', 'Current position size'),
@@ -63,19 +71,46 @@ export const TradingMetrics = {
   totalExposure: new Gauge('trading_total_exposure', 'Total exposure across all positions'),
 
   // Arbitrage metrics
-  arbitrageOpportunitiesFound: new Counter('trading_arbitrage_opportunities_total', 'Total arbitrage opportunities detected'),
-  arbitrageExecuted: new Counter('trading_arbitrage_executed_total', 'Successful arbitrage executions'),
+  arbitrageOpportunitiesFound: new Counter(
+    'trading_arbitrage_opportunities_total',
+    'Total arbitrage opportunities detected'
+  ),
+  arbitrageExecuted: new Counter(
+    'trading_arbitrage_executed_total',
+    'Successful arbitrage executions'
+  ),
   arbitrageFailed: new Counter('trading_arbitrage_failed_total', 'Failed arbitrage attempts'),
-  arbitrageProfit: new Counter('trading_arbitrage_profit_total', 'Total profit from arbitrage (USD)'),
+  arbitrageProfit: new Counter(
+    'trading_arbitrage_profit_total',
+    'Total profit from arbitrage (USD)'
+  ),
 
   // Performance metrics
-  orderExecutionTime: new Histogram('trading_order_execution_seconds', 'Order execution time in seconds', [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5]),
-  frankWolfeIterations: new Histogram('trading_frank_wolfe_iterations', 'Number of Frank-Wolfe iterations', [10, 25, 50, 75, 100, 150, 200]),
-  frankWolfeGap: new Histogram('trading_frank_wolfe_gap', 'Frank-Wolfe optimality gap', [0.0001, 0.001, 0.01, 0.1, 1]),
+  orderExecutionTime: new Histogram(
+    'trading_order_execution_seconds',
+    'Order execution time in seconds',
+    [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5]
+  ),
+  frankWolfeIterations: new Histogram(
+    'trading_frank_wolfe_iterations',
+    'Number of Frank-Wolfe iterations',
+    [10, 25, 50, 75, 100, 150, 200]
+  ),
+  frankWolfeGap: new Histogram(
+    'trading_frank_wolfe_gap',
+    'Frank-Wolfe optimality gap',
+    [0.0001, 0.001, 0.01, 0.1, 1]
+  ),
 
   // Market data metrics
-  orderBookUpdates: new Counter('trading_orderbook_updates_total', 'Total order book updates received'),
-  websocketReconnects: new Counter('trading_websocket_reconnects_total', 'WebSocket reconnection count'),
+  orderBookUpdates: new Counter(
+    'trading_orderbook_updates_total',
+    'Total order book updates received'
+  ),
+  websocketReconnects: new Counter(
+    'trading_websocket_reconnects_total',
+    'WebSocket reconnection count'
+  ),
   websocketErrors: new Counter('trading_websocket_errors_total', 'WebSocket error count'),
 
   // Latency metrics (P50/P95/P99 tracking)
@@ -161,7 +196,12 @@ export function getMetricsForScraping(): string {
  * Get latency percentiles for a histogram metric
  */
 export function getLatencyPercentiles(
-  metricName: 'orderBookUpdateLatency' | 'arbitrageDetectionLatency' | 'wsMessageProcessingTime' | 'orderExecutionLatency' | 'riskCheckLatency'
+  metricName:
+    | 'orderBookUpdateLatency'
+    | 'arbitrageDetectionLatency'
+    | 'wsMessageProcessingTime'
+    | 'orderExecutionLatency'
+    | 'riskCheckLatency'
 ): { p50: number; p95: number; p99: number; count: number } {
   const metric = TradingMetrics[metricName];
 

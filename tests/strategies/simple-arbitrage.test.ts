@@ -57,7 +57,7 @@ describe('SimpleArbitrageStrategy', () => {
       yesBook.update([{ price: 0.65, size: 200 }], [{ price: 0.66, size: 200 }]);
 
       const noBook = new OrderBook('event-no');
-      noBook.update([{ price: 0.40, size: 200 }], [{ price: 0.41, size: 200 }]);
+      noBook.update([{ price: 0.4, size: 200 }], [{ price: 0.41, size: 200 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -69,7 +69,7 @@ describe('SimpleArbitrageStrategy', () => {
         {
           marketId: 'event-no',
           orderBook: noBook,
-          lastPrice: 0.40,
+          lastPrice: 0.4,
           timestamp: Date.now(),
         },
       ];
@@ -170,7 +170,7 @@ describe('SimpleArbitrageStrategy', () => {
 
       const noBook = new OrderBook('event-no');
       // Sum = 0.96, profit = 0.04 (below 0.05 threshold)
-      noBook.update([{ price: 0.40, size: 200 }], [{ price: 0.41, size: 200 }]);
+      noBook.update([{ price: 0.4, size: 200 }], [{ price: 0.41, size: 200 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -447,7 +447,7 @@ describe('SimpleArbitrageStrategy', () => {
       yesBook.update([{ price: 0.45, size: 200 }], [{ price: 0.46, size: 200 }]);
 
       const noBook = new OrderBook('event-no');
-      noBook.update([{ price: 0.50, size: 200 }], [{ price: 0.51, size: 200 }]);
+      noBook.update([{ price: 0.5, size: 200 }], [{ price: 0.51, size: 200 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -481,7 +481,7 @@ describe('SimpleArbitrageStrategy', () => {
 
       const noBook = new OrderBook('event-no');
       // NO ask is lower than YES ask
-      noBook.update([{ price: 0.40, size: 200 }], [{ price: 0.41, size: 200 }]);
+      noBook.update([{ price: 0.4, size: 200 }], [{ price: 0.41, size: 200 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -512,7 +512,7 @@ describe('SimpleArbitrageStrategy', () => {
 
       const yesBook = new OrderBook('event-yes');
       // YES bid is higher
-      yesBook.update([{ price: 0.70, size: 200 }], [{ price: 0.71, size: 200 }]);
+      yesBook.update([{ price: 0.7, size: 200 }], [{ price: 0.71, size: 200 }]);
 
       const noBook = new OrderBook('event-no');
       noBook.update([{ price: 0.35, size: 200 }], [{ price: 0.36, size: 200 }]);
@@ -521,7 +521,7 @@ describe('SimpleArbitrageStrategy', () => {
         {
           marketId: 'event-yes',
           orderBook: yesBook,
-          lastPrice: 0.70,
+          lastPrice: 0.7,
           timestamp: Date.now(),
         },
         {
@@ -536,7 +536,7 @@ describe('SimpleArbitrageStrategy', () => {
       expect(signal).not.toBeNull();
       expect(signal?.type).toBe('sell');
       expect(signal?.marketId).toBe('event-yes'); // Higher price selected for sell
-      expect(signal?.price).toBe(0.70);
+      expect(signal?.price).toBe(0.7);
     });
 
     it('should select correct market ID for sell pair when NO bid is higher', () => {
@@ -550,7 +550,7 @@ describe('SimpleArbitrageStrategy', () => {
 
       const noBook = new OrderBook('event-no');
       // NO bid is higher
-      noBook.update([{ price: 0.70, size: 200 }], [{ price: 0.71, size: 200 }]);
+      noBook.update([{ price: 0.7, size: 200 }], [{ price: 0.71, size: 200 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -562,7 +562,7 @@ describe('SimpleArbitrageStrategy', () => {
         {
           marketId: 'event-no',
           orderBook: noBook,
-          lastPrice: 0.70,
+          lastPrice: 0.7,
           timestamp: Date.now(),
         },
       ];
@@ -571,7 +571,7 @@ describe('SimpleArbitrageStrategy', () => {
       expect(signal).not.toBeNull();
       expect(signal?.type).toBe('sell');
       expect(signal?.marketId).toBe('event-no'); // Higher price selected for sell
-      expect(signal?.price).toBe(0.70);
+      expect(signal?.price).toBe(0.7);
     });
 
     it('should return null when no arbitrage opportunity exists', () => {
@@ -582,10 +582,10 @@ describe('SimpleArbitrageStrategy', () => {
 
       const yesBook = new OrderBook('event-yes');
       // Prices sum to ~1.0 (no arbitrage)
-      yesBook.update([{ price: 0.60, size: 200 }], [{ price: 0.61, size: 200 }]);
+      yesBook.update([{ price: 0.6, size: 200 }], [{ price: 0.61, size: 200 }]);
 
       const noBook = new OrderBook('event-no');
-      noBook.update([{ price: 0.40, size: 200 }], [{ price: 0.41, size: 200 }]);
+      noBook.update([{ price: 0.4, size: 200 }], [{ price: 0.41, size: 200 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -651,7 +651,7 @@ describe('SimpleArbitrageStrategy', () => {
 
       const noBook = new OrderBook('event-no');
       // High bid that would trigger sell_pair if yes had bids
-      noBook.update([{ price: 0.70, size: 200 }], [{ price: 0.71, size: 200 }]);
+      noBook.update([{ price: 0.7, size: 200 }], [{ price: 0.71, size: 200 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -663,7 +663,7 @@ describe('SimpleArbitrageStrategy', () => {
         {
           marketId: 'event-no',
           orderBook: noBook,
-          lastPrice: 0.70,
+          lastPrice: 0.7,
           timestamp: Date.now(),
         },
       ];
@@ -683,7 +683,7 @@ describe('SimpleArbitrageStrategy', () => {
 
       const yesBook = new OrderBook('event-yes');
       // High bid that would trigger sell_pair if no had bids
-      yesBook.update([{ price: 0.70, size: 200 }], [{ price: 0.71, size: 200 }]);
+      yesBook.update([{ price: 0.7, size: 200 }], [{ price: 0.71, size: 200 }]);
 
       const noBook = new OrderBook('event-no');
       // No bids in noBook
@@ -693,7 +693,7 @@ describe('SimpleArbitrageStrategy', () => {
         {
           marketId: 'event-yes',
           orderBook: yesBook,
-          lastPrice: 0.70,
+          lastPrice: 0.7,
           timestamp: Date.now(),
         },
         {
@@ -720,7 +720,7 @@ describe('SimpleArbitrageStrategy', () => {
 
       // Update config to require higher profit
       strategy.updateArbitrageConfig({
-        minProfitThreshold: 0.10,
+        minProfitThreshold: 0.1,
       });
 
       const yesBook = new OrderBook('event-yes');
@@ -758,7 +758,7 @@ describe('SimpleArbitrageStrategy', () => {
 
       const noBook = new OrderBook('event-no');
       // Sum = 0.87, profit = 0.13 > 0.02 threshold, confidence = 1.3 > 0.5
-      noBook.update([{ price: 0.30, size: 200 }], [{ price: 0.31, size: 200 }]);
+      noBook.update([{ price: 0.3, size: 200 }], [{ price: 0.31, size: 200 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -826,7 +826,7 @@ describe('SimpleArbitrageStrategy', () => {
 
       const yesBook = new OrderBook('event-yes');
       // High profit to generate large position size
-      yesBook.update([{ price: 0.40, size: 200 }], [{ price: 0.41, size: 200 }]);
+      yesBook.update([{ price: 0.4, size: 200 }], [{ price: 0.41, size: 200 }]);
 
       const noBook = new OrderBook('event-no');
       noBook.update([{ price: 0.35, size: 200 }], [{ price: 0.36, size: 200 }]);
@@ -864,7 +864,7 @@ describe('SimpleArbitrageStrategy', () => {
 
       const noBook = new OrderBook('event-no');
       // High profit (sum = 0.87, profit = 0.13)
-      noBook.update([{ price: 0.40, size: 200 }], [{ price: 0.41, size: 200 }]);
+      noBook.update([{ price: 0.4, size: 200 }], [{ price: 0.41, size: 200 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -898,7 +898,7 @@ describe('SimpleArbitrageStrategy', () => {
       yesBook.update([{ price: 0.55, size: 200 }], [{ price: 0.56, size: 200 }]);
 
       const noBook = new OrderBook('event-no');
-      noBook.update([{ price: 0.40, size: 200 }], [{ price: 0.41, size: 200 }]);
+      noBook.update([{ price: 0.4, size: 200 }], [{ price: 0.41, size: 200 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -942,7 +942,7 @@ describe('SimpleArbitrageStrategy', () => {
       });
 
       const yesBook = new OrderBook('event-yes');
-      yesBook.update([{ price: 0.60, size: 200 }], [{ price: 0.61, size: 200 }]);
+      yesBook.update([{ price: 0.6, size: 200 }], [{ price: 0.61, size: 200 }]);
 
       const noBook = new OrderBook('event-no');
       noBook.update([{ price: 0.35, size: 200 }], [{ price: 0.36, size: 200 }]);
@@ -982,10 +982,10 @@ describe('SimpleArbitrageStrategy', () => {
       yesBook1.update([{ price: 0.55, size: 200 }], [{ price: 0.56, size: 200 }]);
 
       const noBook1 = new OrderBook('event1-no');
-      noBook1.update([{ price: 0.40, size: 200 }], [{ price: 0.41, size: 200 }]);
+      noBook1.update([{ price: 0.4, size: 200 }], [{ price: 0.41, size: 200 }]);
 
       const yesBook2 = new OrderBook('event2-yes');
-      yesBook2.update([{ price: 0.60, size: 200 }], [{ price: 0.61, size: 200 }]);
+      yesBook2.update([{ price: 0.6, size: 200 }], [{ price: 0.61, size: 200 }]);
 
       const noBook2 = new OrderBook('event2-no');
       noBook2.update([{ price: 0.45, size: 200 }], [{ price: 0.46, size: 200 }]);
@@ -1021,9 +1021,7 @@ describe('SimpleArbitrageStrategy', () => {
       expect(signal).not.toBeNull();
       // Should find event1 first (lower profit but first in map iteration)
       // Or event2 depending on Map iteration order
-      expect(['event1-yes', 'event1-no', 'event2-yes', 'event2-no']).toContain(
-        signal?.marketId
-      );
+      expect(['event1-yes', 'event1-no', 'event2-yes', 'event2-no']).toContain(signal?.marketId);
     });
   });
 });

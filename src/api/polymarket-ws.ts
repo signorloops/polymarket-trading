@@ -50,7 +50,10 @@ export class PolymarketWebSocketClient {
   }
 
   connect(): void {
-    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+    if (
+      this.ws &&
+      (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)
+    ) {
       this.logger.warn('WebSocket already connected');
       return;
     }
@@ -139,7 +142,10 @@ export class PolymarketWebSocketClient {
         this.handleMessage(message);
       } catch (error) {
         const dataStr = this.webSocketDataToString(data);
-        this.logger.error('Failed to parse message', { error: getErrorMessage(error), data: dataStr });
+        this.logger.error('Failed to parse message', {
+          error: getErrorMessage(error),
+          data: dataStr,
+        });
       }
     });
 
@@ -186,7 +192,10 @@ export class PolymarketWebSocketClient {
         this.emit({ type: 'orderbook', data: msg.data as WsOrderBookUpdate });
         break;
       case 'price':
-        this.emit({ type: 'price', data: msg.data as { marketId: string; price: string; timestamp: string } });
+        this.emit({
+          type: 'price',
+          data: msg.data as { marketId: string; price: string; timestamp: string },
+        });
         break;
       default:
         this.logger.debug('Unknown message type', { type: msg.type });
@@ -299,7 +308,10 @@ export class PolymarketWebSocketClient {
 // Singleton instance
 const polymarketWsSingleton = createSingleton(() => new PolymarketWebSocketClient());
 
-export function getPolymarketWebSocketClient(_url?: string, _apiKey?: string): PolymarketWebSocketClient {
+export function getPolymarketWebSocketClient(
+  _url?: string,
+  _apiKey?: string
+): PolymarketWebSocketClient {
   return polymarketWsSingleton.get();
 }
 

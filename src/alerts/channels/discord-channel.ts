@@ -59,7 +59,9 @@ export class DiscordChannel implements NotificationChannel {
       });
 
       if (!response.ok) {
-        throw new Error(`Discord webhook failed: ${String(response.status)} ${response.statusText}`);
+        throw new Error(
+          `Discord webhook failed: ${String(response.status)} ${response.statusText}`
+        );
       }
 
       return true;

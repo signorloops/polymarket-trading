@@ -142,7 +142,8 @@ export class ArbitrageDetector {
       initialPoint,
       (mu) => generalizedKLDivergence(Array.from(mu), prices),
       (mu) => this.computeGradient(Array.from(mu), prices),
-      (grad: number[] | Float64Array) => this.linearMinimizationOracle([...Array.from(grad)], constraints),
+      (grad: number[] | Float64Array) =>
+        this.linearMinimizationOracle([...Array.from(grad)], constraints),
       {
         maxIterations: ALGORITHM_CONFIG.MAX_ITERATIONS,
         tolerance: ALGORITHM_CONFIG.CONVERGENCE_THRESHOLD,

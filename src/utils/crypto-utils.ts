@@ -21,7 +21,7 @@ function getMasterKey(): Buffer {
   if (!envKey) {
     throw new Error(
       'CONFIG_ENCRYPTION_KEY not set. ' +
-      'Generate a key with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'
+        "Generate a key with: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\""
     );
   }
   return crypto.createHash('sha256').update(envKey).digest();
@@ -88,7 +88,9 @@ export function decryptValue(encryptedValue: string): string {
   } catch (error) {
     const cause = error instanceof Error ? error : new Error(String(error));
     logger.error('Failed to decrypt value', { error: cause.message });
-    const wrappedError = new Error('Decryption failed - invalid key or corrupted data') as Error & { cause?: Error };
+    const wrappedError = new Error('Decryption failed - invalid key or corrupted data') as Error & {
+      cause?: Error;
+    };
     wrappedError.cause = cause;
     throw wrappedError;
   }

@@ -25,7 +25,11 @@ import {
 } from './transaction-persistence.js';
 
 // Re-export types so existing imports from this file still work
-export type { Transaction, TransactionUpdate, TransactionHandler } from './transaction-persistence.js';
+export type {
+  Transaction,
+  TransactionUpdate,
+  TransactionHandler,
+} from './transaction-persistence.js';
 export type { TransactionStatus } from './transaction-persistence.js';
 
 /**
@@ -41,18 +45,21 @@ export class TransactionTracker {
   private persistence: TransactionPersistence;
 
   constructor(rpcUrl: string = NETWORK_CONFIG.RPC_URL ?? '', stateFilePath?: string) {
-    this.rpcClient = rpcUrl ? new RpcClient({
-      rpcUrl,
-      network: 'mainnet',
-      chainId: 137,
-      confirmationBlocks: 12,
-      finalizationBlocks: 128,
-    }) : null;
+    this.rpcClient = rpcUrl
+      ? new RpcClient({
+          rpcUrl,
+          network: 'mainnet',
+          chainId: 137,
+          confirmationBlocks: 12,
+          finalizationBlocks: 128,
+        })
+      : null;
     this.useRealBlockchain = !!this.rpcClient;
 
-    const resolvedPath = DISABLE_PERSISTENCE_IN_TEST && !stateFilePath
-      ? ''
-      : (stateFilePath ?? process.env.TX_TRACKER_STATE_PATH ?? DEFAULT_STATE_FILE_PATH);
+    const resolvedPath =
+      DISABLE_PERSISTENCE_IN_TEST && !stateFilePath
+        ? ''
+        : (stateFilePath ?? process.env.TX_TRACKER_STATE_PATH ?? DEFAULT_STATE_FILE_PATH);
     this.persistence = new TransactionPersistence(resolvedPath);
 
     const loaded = this.persistence.loadState();
@@ -163,7 +170,10 @@ export class TransactionTracker {
     }
 
     if (tx.retryCount >= MAX_RETRY_ATTEMPTS) {
-      this.logger.error('Max retry attempts reached for transaction', { hash, retryCount: tx.retryCount });
+      this.logger.error('Max retry attempts reached for transaction', {
+        hash,
+        retryCount: tx.retryCount,
+      });
       tx.status = 'expired';
       this.emit(tx);
       return false;
@@ -191,26 +201,56 @@ export class TransactionTracker {
     return new Promise((resolve, reject) => {
       const checkStatus = () => {
         const tx = this.transactions.get(hash);
-        if (!tx) { reject(new Error(`Transaction ${hash} not found`)); return; }
-        if (Date.now() - startTime > timeoutMs) { reject(new Error(`Transaction ${hash} confirmation timeout`)); return; }
-        if (tx.status === 'confirmed' && tx.confirmations >= confirmations) { resolve(tx); return; }
-        if (tx.status === 'finalized') { resolve(tx); return; }
-        if (tx.status === 'failed' || tx.status === 'expired') { reject(new Error(`Transaction ${hash} failed: ${tx.lastError ?? 'Unknown error'}`)); return; }
+        if (!tx) {
+          reject(new Error(`Transaction ${hash} not found`));
+          return;
+        }
+        if (Date.now() - startTime > timeoutMs) {
+          reject(new Error(`Transaction ${hash} confirmation timeout`));
+          return;
+        }
+        if (tx.status === 'confirmed' && tx.confirmations >= confirmations) {
+          resolve(tx);
+          return;
+        }
+        if (tx.status === 'finalized') {
+          resolve(tx);
+          return;
+        }
+        if (tx.status === 'failed' || tx.status === 'expired') {
+          reject(new Error(`Transaction ${hash} failed: ${tx.lastError ?? 'Unknown error'}`));
+          return;
+        }
         setTimeout(checkStatus, POLL_INTERVAL_MS);
       };
       checkStatus();
     });
   }
 
-  async waitForFinalization(hash: string, timeoutMs: number = TRANSACTION_TIMEOUT_MS * 2): Promise<Transaction> {
+  async waitForFinalization(
+    hash: string,
+    timeoutMs: number = TRANSACTION_TIMEOUT_MS * 2
+  ): Promise<Transaction> {
     const startTime = Date.now();
     return new Promise((resolve, reject) => {
       const checkStatus = () => {
         const tx = this.transactions.get(hash);
-        if (!tx) { reject(new Error(`Transaction ${hash} not found`)); return; }
-        if (Date.now() - startTime > timeoutMs) { reject(new Error(`Transaction ${hash} finalization timeout`)); return; }
-        if (tx.status === 'finalized') { resolve(tx); return; }
-        if (tx.status === 'failed' || tx.status === 'expired') { reject(new Error(`Transaction ${hash} failed: ${tx.lastError ?? 'Unknown error'}`)); return; }
+        if (!tx) {
+          reject(new Error(`Transaction ${hash} not found`));
+          return;
+        }
+        if (Date.now() - startTime > timeoutMs) {
+          reject(new Error(`Transaction ${hash} finalization timeout`));
+          return;
+        }
+        if (tx.status === 'finalized') {
+          resolve(tx);
+          return;
+        }
+        if (tx.status === 'failed' || tx.status === 'expired') {
+          reject(new Error(`Transaction ${hash} failed: ${tx.lastError ?? 'Unknown error'}`));
+          return;
+        }
         setTimeout(checkStatus, POLL_INTERVAL_MS);
       };
       checkStatus();
@@ -231,7 +271,8 @@ export class TransactionTracker {
     let removed = 0;
 
     for (const [hash, tx] of this.transactions.entries()) {
-      const isComplete = tx.status === 'finalized' || tx.status === 'failed' || tx.status === 'expired';
+      const isComplete =
+        tx.status === 'finalized' || tx.status === 'failed' || tx.status === 'expired';
       if (isComplete) {
         const lastUpdate = tx.finalizedAt ?? tx.failedAt ?? tx.confirmedAt ?? tx.createdAt;
         if (now - lastUpdate > maxAgeMs) {
@@ -258,18 +299,43 @@ export class TransactionTracker {
   }
 
   getStats(): {
-    total: number; pending: number; submitted: number;
-    confirmed: number; finalized: number; failed: number; expired: number;
+    total: number;
+    pending: number;
+    submitted: number;
+    confirmed: number;
+    finalized: number;
+    failed: number;
+    expired: number;
   } {
-    const stats = { total: this.transactions.size, pending: 0, submitted: 0, confirmed: 0, finalized: 0, failed: 0, expired: 0 };
+    const stats = {
+      total: this.transactions.size,
+      pending: 0,
+      submitted: 0,
+      confirmed: 0,
+      finalized: 0,
+      failed: 0,
+      expired: 0,
+    };
     for (const tx of this.transactions.values()) {
       switch (tx.status) {
-        case 'pending': stats.pending++; break;
-        case 'submitted': stats.submitted++; break;
-        case 'confirmed': stats.confirmed++; break;
-        case 'finalized': stats.finalized++; break;
-        case 'failed': stats.failed++; break;
-        case 'expired': stats.expired++; break;
+        case 'pending':
+          stats.pending++;
+          break;
+        case 'submitted':
+          stats.submitted++;
+          break;
+        case 'confirmed':
+          stats.confirmed++;
+          break;
+        case 'finalized':
+          stats.finalized++;
+          break;
+        case 'failed':
+          stats.failed++;
+          break;
+        case 'expired':
+          stats.expired++;
+          break;
       }
     }
     return stats;
@@ -277,7 +343,9 @@ export class TransactionTracker {
 
   private startPolling(): void {
     if (this.pollInterval) return;
-    this.pollInterval = setInterval(() => { void this.pollTransactions(); }, POLL_INTERVAL_MS);
+    this.pollInterval = setInterval(() => {
+      void this.pollTransactions();
+    }, POLL_INTERVAL_MS);
     this.pollInterval.unref();
   }
 
@@ -307,11 +375,18 @@ export class TransactionTracker {
     for (const tx of this.transactions.values()) {
       if (tx.status === 'pending' && now - tx.createdAt > TRANSACTION_TIMEOUT_MS) {
         if (tx.retryCount < MAX_RETRY_ATTEMPTS) {
-          this.logger.warn('Transaction pending timeout, triggering retry', { hash: tx.hash, pendingTime: now - tx.createdAt });
+          this.logger.warn('Transaction pending timeout, triggering retry', {
+            hash: tx.hash,
+            pendingTime: now - tx.createdAt,
+          });
           await this.retryTransaction(tx.hash);
         } else {
           this.logger.error('Transaction pending timeout, max retries reached', { hash: tx.hash });
-          this.updateTransaction({ hash: tx.hash, status: 'expired', error: 'Transaction timeout - max retries reached' });
+          this.updateTransaction({
+            hash: tx.hash,
+            status: 'expired',
+            error: 'Transaction timeout - max retries reached',
+          });
         }
       }
     }
@@ -328,7 +403,9 @@ export class TransactionTracker {
   }
 
   private scheduleCleanup(hash: string): void {
-    setTimeout(() => { this.removeTransaction(hash); }, 3600000).unref();
+    setTimeout(() => {
+      this.removeTransaction(hash);
+    }, 3600000).unref();
   }
 
   loadState(transactions: Transaction[]): void {

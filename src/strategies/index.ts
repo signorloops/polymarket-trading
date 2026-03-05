@@ -23,11 +23,7 @@ export {
   type CrossMarketOpportunity,
 } from './cross-market-arbitrage.js';
 
-export {
-  MarketMakingStrategy,
-  type MarketMakingConfig,
-  type QuoteLevel,
-} from './market-making.js';
+export { MarketMakingStrategy, type MarketMakingConfig, type QuoteLevel } from './market-making.js';
 
 export {
   TrendFollowingStrategy,

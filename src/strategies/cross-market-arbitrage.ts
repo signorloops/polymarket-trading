@@ -5,7 +5,12 @@
  * using marginal polytope constraints
  */
 
-import { BaseStrategy, type StrategyMarketData, type TradeSignal, type StrategyConfig } from './base.js';
+import {
+  BaseStrategy,
+  type StrategyMarketData,
+  type TradeSignal,
+  type StrategyConfig,
+} from './base.js';
 import { MarketDependencyGraph } from '../market/dependency-graph.js';
 import {
   frankWolfe,
@@ -70,9 +75,10 @@ export class CrossMarketArbitrageStrategy extends BaseStrategy {
     this.recordTrade();
 
     // Return primary trade (largest position)
-    const maxIdx = opportunity.tradeVector
-      .map((x, i) => ({ val: Math.abs(x), idx: i }))
-      .sort((a, b) => b.val - a.val)[0]?.idx ?? 0;
+    const maxIdx =
+      opportunity.tradeVector
+        .map((x, i) => ({ val: Math.abs(x), idx: i }))
+        .sort((a, b) => b.val - a.val)[0]?.idx ?? 0;
 
     const primaryMarket = data[maxIdx];
     if (!primaryMarket) return null;
@@ -185,12 +191,8 @@ export class CrossMarketArbitrageStrategy extends BaseStrategy {
     });
 
     // Confidence based on convergence and profit
-    const convergenceConfidence =
-      divergence / (divergence + Math.max(result.gap, 0) + 1e-10);
-    const confidence = Math.min(
-      0.5 + 0.5 * convergenceConfidence * this.crossConfig.alpha,
-      1.0
-    );
+    const convergenceConfidence = divergence / (divergence + Math.max(result.gap, 0) + 1e-10);
+    const confidence = Math.min(0.5 + 0.5 * convergenceConfidence * this.crossConfig.alpha, 1.0);
 
     return {
       markets: data.map((m) => m.marketId),

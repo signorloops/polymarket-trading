@@ -18,10 +18,7 @@ import { solveLMO as solveLPOBasedLMO } from '../optimization/lp-solver.js';
  * @param constraints Polytope constraints
  * @returns Vertex minimizing ⟨gradient, v⟩
  */
-export function linearMinimizationOracle(
-  gradient: number[],
-  constraints: Constraint[]
-): number[] {
+export function linearMinimizationOracle(gradient: number[], constraints: Constraint[]): number[] {
   const n = gradient.length;
   if (n === 0) {
     throw new Error('Empty gradient array');
@@ -51,9 +48,7 @@ export function linearMinimizationOracle(
       constraint.coefficients.some((c) => c > 0)
   );
   const inequalityConstraints = constraints.filter(
-    (constraint) =>
-      constraint.type === 'inequality' &&
-      constraint.coefficients.length === n
+    (constraint) => constraint.type === 'inequality' && constraint.coefficients.length === n
   );
 
   if (equalityConstraints.length === 0 && inequalityConstraints.length === 0) {

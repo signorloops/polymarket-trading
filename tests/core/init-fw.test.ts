@@ -21,8 +21,7 @@ describe('InitFW', () => {
       const dimension = 3;
       const theta = [0.5, 0.3, 0.2];
 
-      const gradientFn = (mu: number[]) =>
-        mu.map((m, i) => Math.log(m / theta[i]!) + 1);
+      const gradientFn = (mu: number[]) => mu.map((m, i) => Math.log(m / theta[i]!) + 1);
       const objectiveFn = (mu: number[]) => klDivergence(mu, theta);
 
       const result = initFW(dimension, gradientFn, objectiveFn);

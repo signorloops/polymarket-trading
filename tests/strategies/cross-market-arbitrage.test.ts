@@ -390,7 +390,8 @@ describe('CrossMarketArbitrageStrategy', () => {
       const signal = strategy.analyze(marketData);
       expect(signal).not.toBeNull();
 
-      const tradeVector = (signal?.metadata as { tradeVector?: number[] } | undefined)?.tradeVector ?? [];
+      const tradeVector =
+        (signal?.metadata as { tradeVector?: number[] } | undefined)?.tradeVector ?? [];
       const maxAbs = tradeVector.reduce((max, v) => Math.max(max, Math.abs(v)), 0);
       expect(maxAbs).toBeLessThanOrEqual(1);
     });

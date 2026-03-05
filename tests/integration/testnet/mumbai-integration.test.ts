@@ -11,11 +11,7 @@
  */
 
 import { jest } from '@jest/globals';
-import {
-  RpcClient,
-  NETWORKS,
-  type NetworkType,
-} from '../../../src/blockchain/rpc-client.js';
+import { RpcClient, NETWORKS, type NetworkType } from '../../../src/blockchain/rpc-client.js';
 import {
   TransactionTracker,
   resetTransactionTracker,
@@ -126,7 +122,7 @@ describe('Mumbai Testnet Integration', () => {
       tracker.trackTransaction(knownTxHash, 'order-test', 'market-test');
 
       // Wait a bit for polling
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       const tx = tracker.getTransaction(knownTxHash);
       expect(tx).toBeDefined();

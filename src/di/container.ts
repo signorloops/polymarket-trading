@@ -141,4 +141,3 @@ export function createContainer(config?: AppConfig): Container {
 
   return container;
 }
-

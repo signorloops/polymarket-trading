@@ -4,12 +4,7 @@
 
 import nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
-import type {
-  AlertLevel,
-  AlertNotification,
-  EmailConfig,
-  NotificationChannel,
-} from '../types.js';
+import type { AlertLevel, AlertNotification, EmailConfig, NotificationChannel } from '../types.js';
 
 /**
  * Email notification channel
@@ -122,14 +117,18 @@ export class EmailChannel implements NotificationChannel {
       <p style="margin: 0; white-space: pre-wrap;">${this.escapeHtml(notification.message)}</p>
     </div>
 
-    ${metadataRows ? `
+    ${
+      metadataRows
+        ? `
     <div style="margin-top: 20px;">
       <h3 style="margin-bottom: 10px;">Additional Details</h3>
       <table style="width: 100%; border-collapse: collapse;">
         ${metadataRows}
       </table>
     </div>
-    ` : ''}
+    `
+        : ''
+    }
 
     <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666;">
       <p>Source: ${notification.source ?? 'unknown'}</p>

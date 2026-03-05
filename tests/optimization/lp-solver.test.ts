@@ -106,9 +106,7 @@ describe('LPSolver', () => {
   describe('solveLMO', () => {
     it('对简单梯度返回正确的顶点', () => {
       const gradient = [1, 2, 3];
-      const constraints = [
-        { coefficients: [1, 1, 1], rhs: 1, type: 'equality' as const },
-      ];
+      const constraints = [{ coefficients: [1, 1, 1], rhs: 1, type: 'equality' as const }];
 
       const vertex = solveLMO(gradient, constraints);
 
@@ -118,7 +116,11 @@ describe('LPSolver', () => {
 
     it('处理负梯度', () => {
       const gradient = [-5, -2, -3];
-      const constraints: { coefficients: number[]; rhs: number; type: 'equality' | 'inequality' }[] = [];
+      const constraints: {
+        coefficients: number[];
+        rhs: number;
+        type: 'equality' | 'inequality';
+      }[] = [];
 
       const vertex = solveLMO(gradient, constraints);
 
@@ -128,7 +130,11 @@ describe('LPSolver', () => {
 
     it('处理空梯度', () => {
       const gradient: number[] = [];
-      const constraints: { coefficients: number[]; rhs: number; type: 'equality' | 'inequality' }[] = [];
+      const constraints: {
+        coefficients: number[];
+        rhs: number;
+        type: 'equality' | 'inequality';
+      }[] = [];
 
       const vertex = solveLMO(gradient, constraints);
 
@@ -138,7 +144,11 @@ describe('LPSolver', () => {
 
     it('处理单元素梯度', () => {
       const gradient = [5];
-      const constraints: { coefficients: number[]; rhs: number; type: 'equality' | 'inequality' }[] = [];
+      const constraints: {
+        coefficients: number[];
+        rhs: number;
+        type: 'equality' | 'inequality';
+      }[] = [];
 
       const vertex = solveLMO(gradient, constraints);
 
@@ -147,7 +157,11 @@ describe('LPSolver', () => {
 
     it('处理相等梯度值', () => {
       const gradient = [1, 1, 1];
-      const constraints: { coefficients: number[]; rhs: number; type: 'equality' | 'inequality' }[] = [];
+      const constraints: {
+        coefficients: number[];
+        rhs: number;
+        type: 'equality' | 'inequality';
+      }[] = [];
 
       const vertex = solveLMO(gradient, constraints);
 
@@ -478,8 +492,10 @@ describe('LPSolver', () => {
 
       expect(solution.status).toBe('optimal');
       // 验证资源约束
-      const resourceA = 2 * solution.solution[0] + 4 * solution.solution[1] + 3 * solution.solution[2];
-      const resourceB = 3 * solution.solution[0] + 2 * solution.solution[1] + 5 * solution.solution[2];
+      const resourceA =
+        2 * solution.solution[0] + 4 * solution.solution[1] + 3 * solution.solution[2];
+      const resourceB =
+        3 * solution.solution[0] + 2 * solution.solution[1] + 5 * solution.solution[2];
 
       expect(resourceA).toBeLessThanOrEqual(100 + 1e-6);
       expect(resourceB).toBeLessThanOrEqual(120 + 1e-6);

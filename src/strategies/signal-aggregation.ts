@@ -27,9 +27,7 @@ export interface SignalWithStrategy {
  * @param signals - Array of signals with strategy names
  * @returns Aggregated signal or null if no signals
  */
-export function priorityAggregation(
-  signals: SignalWithStrategy[]
-): AggregatedSignal | null {
+export function priorityAggregation(signals: SignalWithStrategy[]): AggregatedSignal | null {
   if (signals.length === 0) return null;
 
   // Sort by confidence descending
@@ -51,9 +49,7 @@ export function priorityAggregation(
  * @param signals - Array of signals with strategy names
  * @returns Aggregated signal or null if no signals
  */
-export function weightedAggregation(
-  signals: SignalWithStrategy[]
-): AggregatedSignal | null {
+export function weightedAggregation(signals: SignalWithStrategy[]): AggregatedSignal | null {
   if (signals.length === 0) return null;
 
   // Group by market
@@ -80,14 +76,16 @@ export function weightedAggregation(
   const safeWeight = totalWeight > 0 ? totalWeight : marketSignals.length;
 
   // Confidence-weighted aggregation of execution parameters.
-  const avgPrice = marketSignals.reduce(
-    (sum, s) => sum + s.signal.price * (totalWeight > 0 ? Math.max(s.signal.confidence, 0) : 1),
-    0
-  ) / safeWeight;
-  const avgSize = marketSignals.reduce(
-    (sum, s) => sum + s.signal.size * (totalWeight > 0 ? Math.max(s.signal.confidence, 0) : 1),
-    0
-  ) / safeWeight;
+  const avgPrice =
+    marketSignals.reduce(
+      (sum, s) => sum + s.signal.price * (totalWeight > 0 ? Math.max(s.signal.confidence, 0) : 1),
+      0
+    ) / safeWeight;
+  const avgSize =
+    marketSignals.reduce(
+      (sum, s) => sum + s.signal.size * (totalWeight > 0 ? Math.max(s.signal.confidence, 0) : 1),
+      0
+    ) / safeWeight;
   const avgConfidence =
     marketSignals.reduce((sum, s) => sum + s.signal.confidence, 0) / marketSignals.length;
 
@@ -170,11 +168,9 @@ export function consensusAggregation(
   // Use weighted average of best group
   const totalConfidence = bestSignals.reduce((sum, s) => sum + s.signal.confidence, 0);
   const avgPrice =
-    bestSignals.reduce((sum, s) => sum + s.signal.price * s.signal.confidence, 0) /
-    totalConfidence;
+    bestSignals.reduce((sum, s) => sum + s.signal.price * s.signal.confidence, 0) / totalConfidence;
   const avgSize =
-    bestSignals.reduce((sum, s) => sum + s.signal.size * s.signal.confidence, 0) /
-    totalConfidence;
+    bestSignals.reduce((sum, s) => sum + s.signal.size * s.signal.confidence, 0) / totalConfidence;
 
   const firstSignal = bestSignals[0];
   if (!firstSignal) return null;
@@ -204,9 +200,7 @@ export function consensusAggregation(
 /**
  * Group signals by market ID
  */
-function groupByMarket(
-  signals: SignalWithStrategy[]
-): Map<string, SignalWithStrategy[]> {
+function groupByMarket(signals: SignalWithStrategy[]): Map<string, SignalWithStrategy[]> {
   const grouped = new Map<string, SignalWithStrategy[]>();
 
   for (const item of signals) {

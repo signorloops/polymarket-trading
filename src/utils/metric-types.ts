@@ -135,7 +135,11 @@ export class Histogram extends Metric {
   private sums: Map<string, number> = new Map();
   private counts_total: Map<string, number> = new Map();
 
-  constructor(name: string, description: string, buckets: readonly number[] = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]) {
+  constructor(
+    name: string,
+    description: string,
+    buckets: readonly number[] = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
+  ) {
     super(name, description);
     this.buckets = [...buckets].sort((a, b) => a - b);
   }
@@ -187,7 +191,9 @@ export class Histogram extends Metric {
         lines.push(`${this.name}_bucket{${labels}} ${String(bucketCount)}`);
       }
 
-      const infLabels = [...labelEntries, ['le', '+Inf'] as [string, string]].map(([k, v]) => `${k}="${v}"`).join(',');
+      const infLabels = [...labelEntries, ['le', '+Inf'] as [string, string]]
+        .map(([k, v]) => `${k}="${v}"`)
+        .join(',');
       const totalCount = this.counts_total.get(key);
       if (totalCount !== undefined) {
         lines.push(`${this.name}_bucket{${infLabels}} ${String(totalCount)}`);

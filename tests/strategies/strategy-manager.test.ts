@@ -15,10 +15,7 @@ describe('StrategyManager', () => {
   // Helper to create order book
   const createOrderBook = (marketId: string, bidPrice: number, askPrice: number): OrderBook => {
     const book = new OrderBook(marketId);
-    book.update(
-      [{ price: bidPrice, size: 100 }],
-      [{ price: askPrice, size: 100 }]
-    );
+    book.update([{ price: bidPrice, size: 100 }], [{ price: askPrice, size: 100 }]);
     return book;
   };
 
@@ -124,8 +121,23 @@ describe('StrategyManager', () => {
       const manager = new StrategyManager({
         simpleArbitrage: { minProfitThreshold: 0.02, maxSlippage: 0.01 },
         crossMarketArbitrage: { minProfitThreshold: 0.05, maxIterations: 100, alpha: 0.9 },
-        marketMaking: { targetSpread: 0.02, maxInventory: 100, inventorySkew: 0.5, orderSize: 10, quoteLevels: 3, sizeIncrement: 1.5 },
-        trendFollowing: { shortPeriod: 5, longPeriod: 10, rsiPeriod: 7, rsiOverbought: 70, rsiOversold: 30, minTrendStrength: 0.2, volumeThreshold: 1.2 },
+        marketMaking: {
+          targetSpread: 0.02,
+          maxInventory: 100,
+          inventorySkew: 0.5,
+          orderSize: 10,
+          quoteLevels: 3,
+          sizeIncrement: 1.5,
+        },
+        trendFollowing: {
+          shortPeriod: 5,
+          longPeriod: 10,
+          rsiPeriod: 7,
+          rsiOverbought: 70,
+          rsiOversold: 30,
+          minTrendStrength: 0.2,
+          volumeThreshold: 1.2,
+        },
         aggregationMode: 'consensus',
         minConsensus: 0.5,
       });
@@ -138,7 +150,15 @@ describe('StrategyManager', () => {
     it('should get all strategies', () => {
       const manager = new StrategyManager({
         simpleArbitrage: { minProfitThreshold: 0.02, maxSlippage: 0.01 },
-        trendFollowing: { shortPeriod: 5, longPeriod: 10, rsiPeriod: 7, rsiOverbought: 70, rsiOversold: 30, minTrendStrength: 0.2, volumeThreshold: 1.2 },
+        trendFollowing: {
+          shortPeriod: 5,
+          longPeriod: 10,
+          rsiPeriod: 7,
+          rsiOverbought: 70,
+          rsiOversold: 30,
+          minTrendStrength: 0.2,
+          volumeThreshold: 1.2,
+        },
         aggregationMode: 'priority',
         minConsensus: 0.5,
       });
@@ -233,9 +253,7 @@ describe('StrategyManager', () => {
     it('should return null when no strategies are configured', () => {
       const manager = new StrategyManager();
 
-      const marketData: StrategyMarketData[] = [
-        createMarketData('event-yes', 0.55, 0.56, 0.555),
-      ];
+      const marketData: StrategyMarketData[] = [createMarketData('event-yes', 0.55, 0.56, 0.555)];
 
       const result = manager.analyze(marketData);
 
@@ -300,9 +318,7 @@ describe('StrategyManager', () => {
       });
 
       // Wide spread to trigger market making
-      const marketData: StrategyMarketData[] = [
-        createMarketData('market-1', 0.55, 0.65, 0.6),
-      ];
+      const marketData: StrategyMarketData[] = [createMarketData('market-1', 0.55, 0.65, 0.6)];
 
       const result = manager.analyze(marketData);
 
@@ -373,7 +389,14 @@ describe('StrategyManager', () => {
     it('should aggregate signals with priority mode', () => {
       const manager = new StrategyManager({
         simpleArbitrage: { minProfitThreshold: 0.01, maxSlippage: 0.01, minConfidence: 0.1 },
-        marketMaking: { targetSpread: 0.01, maxInventory: 100, inventorySkew: 0.5, orderSize: 10, quoteLevels: 3, sizeIncrement: 1.5 },
+        marketMaking: {
+          targetSpread: 0.01,
+          maxInventory: 100,
+          inventorySkew: 0.5,
+          orderSize: 10,
+          quoteLevels: 3,
+          sizeIncrement: 1.5,
+        },
         aggregationMode: 'priority',
         minConsensus: 0.5,
       });
@@ -396,7 +419,14 @@ describe('StrategyManager', () => {
     it('should aggregate signals with weighted mode', () => {
       const manager = new StrategyManager({
         simpleArbitrage: { minProfitThreshold: 0.01, maxSlippage: 0.01, minConfidence: 0.1 },
-        marketMaking: { targetSpread: 0.01, maxInventory: 100, inventorySkew: 0.5, orderSize: 10, quoteLevels: 3, sizeIncrement: 1.5 },
+        marketMaking: {
+          targetSpread: 0.01,
+          maxInventory: 100,
+          inventorySkew: 0.5,
+          orderSize: 10,
+          quoteLevels: 3,
+          sizeIncrement: 1.5,
+        },
         aggregationMode: 'weighted',
         minConsensus: 0.5,
       });
@@ -415,8 +445,23 @@ describe('StrategyManager', () => {
     it('should aggregate signals with consensus mode', () => {
       const manager = new StrategyManager({
         simpleArbitrage: { minProfitThreshold: 0.01, maxSlippage: 0.01, minConfidence: 0.1 },
-        marketMaking: { targetSpread: 0.01, maxInventory: 100, inventorySkew: 0.5, orderSize: 10, quoteLevels: 3, sizeIncrement: 1.5 },
-        trendFollowing: { shortPeriod: 2, longPeriod: 4, rsiPeriod: 3, rsiOverbought: 70, rsiOversold: 30, minTrendStrength: 0.1, volumeThreshold: 1.2 },
+        marketMaking: {
+          targetSpread: 0.01,
+          maxInventory: 100,
+          inventorySkew: 0.5,
+          orderSize: 10,
+          quoteLevels: 3,
+          sizeIncrement: 1.5,
+        },
+        trendFollowing: {
+          shortPeriod: 2,
+          longPeriod: 4,
+          rsiPeriod: 3,
+          rsiOverbought: 70,
+          rsiOversold: 30,
+          minTrendStrength: 0.1,
+          volumeThreshold: 1.2,
+        },
         aggregationMode: 'consensus',
         minConsensus: 0.3,
       });
@@ -508,7 +553,14 @@ describe('StrategyManager', () => {
     it('should continue with other strategies when one fails', () => {
       const manager = new StrategyManager({
         simpleArbitrage: { minProfitThreshold: 0.02, maxSlippage: 0.01 },
-        marketMaking: { targetSpread: 0.01, maxInventory: 100, inventorySkew: 0.5, orderSize: 10, quoteLevels: 3, sizeIncrement: 1.5 },
+        marketMaking: {
+          targetSpread: 0.01,
+          maxInventory: 100,
+          inventorySkew: 0.5,
+          orderSize: 10,
+          quoteLevels: 3,
+          sizeIncrement: 1.5,
+        },
         aggregationMode: 'priority',
         minConsensus: 0.5,
       });
@@ -638,7 +690,12 @@ describe('StrategyManager', () => {
 
     it('should limit history size to maxHistorySize', () => {
       const manager = new StrategyManager({
-        simpleArbitrage: { minProfitThreshold: 0.01, maxSlippage: 0.01, minConfidence: 0.1, cooldownMs: 0 },
+        simpleArbitrage: {
+          minProfitThreshold: 0.01,
+          maxSlippage: 0.01,
+          minConfidence: 0.1,
+          cooldownMs: 0,
+        },
         aggregationMode: 'priority',
         minConsensus: 0.5,
       });
@@ -678,9 +735,7 @@ describe('StrategyManager', () => {
         minConsensus: 0.5,
       });
 
-      const marketData: StrategyMarketData[] = [
-        createMarketData('market-1', 0.55, 0.56, 0.555),
-      ];
+      const marketData: StrategyMarketData[] = [createMarketData('market-1', 0.55, 0.56, 0.555)];
 
       const result = manager.analyze(marketData);
 
@@ -760,8 +815,23 @@ describe('StrategyManager', () => {
       it(`should work with ${mode} aggregation mode`, () => {
         const manager = new StrategyManager({
           simpleArbitrage: { minProfitThreshold: 0.01, maxSlippage: 0.01, minConfidence: 0.1 },
-          marketMaking: { targetSpread: 0.01, maxInventory: 100, inventorySkew: 0.5, orderSize: 10, quoteLevels: 3, sizeIncrement: 1.5 },
-          trendFollowing: { shortPeriod: 2, longPeriod: 4, rsiPeriod: 3, rsiOverbought: 70, rsiOversold: 30, minTrendStrength: 0.1, volumeThreshold: 1.2 },
+          marketMaking: {
+            targetSpread: 0.01,
+            maxInventory: 100,
+            inventorySkew: 0.5,
+            orderSize: 10,
+            quoteLevels: 3,
+            sizeIncrement: 1.5,
+          },
+          trendFollowing: {
+            shortPeriod: 2,
+            longPeriod: 4,
+            rsiPeriod: 3,
+            rsiOverbought: 70,
+            rsiOversold: 30,
+            minTrendStrength: 0.1,
+            volumeThreshold: 1.2,
+          },
           crossMarketArbitrage: { minProfitThreshold: 0.01, maxIterations: 50, alpha: 0.9 },
           aggregationMode: mode,
           minConsensus: mode === 'consensus' ? 0.2 : 0.5,
@@ -789,8 +859,23 @@ describe('StrategyManager', () => {
     it('should respect minConsensus threshold', () => {
       const manager = new StrategyManager({
         simpleArbitrage: { minProfitThreshold: 0.01, maxSlippage: 0.01, minConfidence: 0.1 },
-        marketMaking: { targetSpread: 0.01, maxInventory: 100, inventorySkew: 0.5, orderSize: 10, quoteLevels: 3, sizeIncrement: 1.5 },
-        trendFollowing: { shortPeriod: 2, longPeriod: 4, rsiPeriod: 3, rsiOverbought: 70, rsiOversold: 30, minTrendStrength: 0.1, volumeThreshold: 1.2 },
+        marketMaking: {
+          targetSpread: 0.01,
+          maxInventory: 100,
+          inventorySkew: 0.5,
+          orderSize: 10,
+          quoteLevels: 3,
+          sizeIncrement: 1.5,
+        },
+        trendFollowing: {
+          shortPeriod: 2,
+          longPeriod: 4,
+          rsiPeriod: 3,
+          rsiOverbought: 70,
+          rsiOversold: 30,
+          minTrendStrength: 0.1,
+          volumeThreshold: 1.2,
+        },
         aggregationMode: 'consensus',
         minConsensus: 0.9, // Very high threshold
       });

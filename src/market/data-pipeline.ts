@@ -59,7 +59,10 @@ export class DataPipeline {
    * Connect to the WebSocket
    */
   connect(): void {
-    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+    if (
+      this.ws &&
+      (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)
+    ) {
       this.logger.warn('Already connected');
       return;
     }
@@ -213,14 +216,21 @@ export class DataPipeline {
   }
 
   private isValidMessage(msg: unknown): msg is { event_type: string } & Record<string, unknown> {
-    return typeof msg === 'object' && msg !== null && 'event_type' in msg && typeof (msg as Record<string, unknown>).event_type === 'string';
+    return (
+      typeof msg === 'object' &&
+      msg !== null &&
+      'event_type' in msg &&
+      typeof (msg as Record<string, unknown>).event_type === 'string'
+    );
   }
 
   private handleTradeMessage(msg: Record<string, unknown>): void {
     const rawMarketId = msg.market_id;
     const rawEventId = msg.event_id;
-    const marketId = typeof rawMarketId === 'string' || typeof rawMarketId === 'number' ? String(rawMarketId) : '';
-    const eventId = typeof rawEventId === 'string' || typeof rawEventId === 'number' ? String(rawEventId) : '';
+    const marketId =
+      typeof rawMarketId === 'string' || typeof rawMarketId === 'number' ? String(rawMarketId) : '';
+    const eventId =
+      typeof rawEventId === 'string' || typeof rawEventId === 'number' ? String(rawEventId) : '';
     const data: MarketData = {
       marketId,
       eventId,
@@ -253,7 +263,8 @@ export class DataPipeline {
       : [];
 
     const rawMarketId = msg.market_id;
-    const marketId = typeof rawMarketId === 'string' || typeof rawMarketId === 'number' ? String(rawMarketId) : '';
+    const marketId =
+      typeof rawMarketId === 'string' || typeof rawMarketId === 'number' ? String(rawMarketId) : '';
     const data: OrderBookUpdate = {
       marketId,
       bids,
@@ -275,8 +286,10 @@ export class DataPipeline {
     // Convert price change to trade-like event for processing
     const rawMarketId = msg.market_id;
     const rawEventId = msg.event_id;
-    const marketId = typeof rawMarketId === 'string' || typeof rawMarketId === 'number' ? String(rawMarketId) : '';
-    const eventId = typeof rawEventId === 'string' || typeof rawEventId === 'number' ? String(rawEventId) : '';
+    const marketId =
+      typeof rawMarketId === 'string' || typeof rawMarketId === 'number' ? String(rawMarketId) : '';
+    const eventId =
+      typeof rawEventId === 'string' || typeof rawEventId === 'number' ? String(rawEventId) : '';
     const data: MarketData = {
       marketId,
       eventId,

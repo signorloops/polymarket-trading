@@ -109,10 +109,7 @@ export function calculateHistogramPercentiles(
 
       if (cumulativeCount >= targetCount) {
         // Linear interpolation within the bucket
-        const bucketProgress =
-          bucket.count > 0
-            ? (targetCount - prevCumulative) / bucket.count
-            : 0;
+        const bucketProgress = bucket.count > 0 ? (targetCount - prevCumulative) / bucket.count : 0;
 
         const prevValue = i > 0 ? (sortedBuckets[i - 1]?.value ?? 0) : 0;
         result[resultKey] = prevValue + (bucket.value - prevValue) * bucketProgress;

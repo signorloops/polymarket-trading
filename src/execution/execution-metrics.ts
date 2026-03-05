@@ -63,7 +63,7 @@ export async function alertPartialFills(context: {
     'critical',
     'Arbitrage Partial Fill - Manual Intervention Required',
     `Arbitrage ${arbitrageId} has partial fills that may require manual intervention. ` +
-    `Total filled: ${String(totalFilled)}. Partial orders: ${String(partialFills.length)}`,
+      `Total filled: ${String(totalFilled)}. Partial orders: ${String(partialFills.length)}`,
     {
       arbitrageId,
       partialFills,

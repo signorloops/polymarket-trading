@@ -9,10 +9,7 @@
  * where μ̂ is the projection and θ is the price vector
  */
 
-import {
-  vectorDot,
-  klDivergence,
-} from '../utils/math.js';
+import { vectorDot, klDivergence } from '../utils/math.js';
 import { getLogger } from '../utils/logger.js';
 import { ALGORITHM_CONFIG } from '../utils/config.js';
 import type { Constraint } from './frank-wolfe-types.js';
@@ -42,10 +39,7 @@ interface SparseConstraint {
  * Preprocess constraints to extract sparse structure
  * Only stores indices where coefficient > 0
  */
-function preprocessConstraints(
-  constraints: Constraint[],
-  n: number
-): SparseConstraint[] {
+function preprocessConstraints(constraints: Constraint[], n: number): SparseConstraint[] {
   const sparse: SparseConstraint[] = [];
 
   for (const constraint of constraints) {
@@ -77,10 +71,7 @@ function preprocessConstraints(
 /**
  * Compute dot product only over sparse indices
  */
-function sparseDot(
-  constraint: SparseConstraint,
-  mu: number[]
-): number {
+function sparseDot(constraint: SparseConstraint, mu: number[]): number {
   let sum = 0;
   for (let j = 0; j < constraint.indices.length; j++) {
     const idx = constraint.indices[j];
@@ -98,11 +89,7 @@ function sparseDot(
 /**
  * In-place multiplicative update for a constraint
  */
-function applyConstraintUpdate(
-  mu: number[],
-  constraint: SparseConstraint,
-  ratio: number
-): void {
+function applyConstraintUpdate(mu: number[], constraint: SparseConstraint, ratio: number): void {
   for (let j = 0; j < constraint.indices.length; j++) {
     const idx = constraint.indices[j];
     const coef = constraint.coefficients[j];
@@ -304,10 +291,7 @@ export function estimateProfit(trade: number[], prices: number[]): number {
  * Compute the optimal trade direction
  * Returns the direction that maximizes expected profit
  */
-export function computeTradeDirection(
-  projection: number[],
-  prices: number[]
-): number[] {
+export function computeTradeDirection(projection: number[], prices: number[]): number[] {
   // Trade direction: buy when projection > price, sell when projection < price
   const result: number[] = new Array<number>(projection.length);
   for (let i = 0; i < projection.length; i++) {

@@ -22,7 +22,6 @@ export interface Event {
   outcomes: string[]; // Possible outcomes for this event
 }
 
-
 /**
  * MarginalPolytope represents the feasible region for arbitrage trades
  *
@@ -113,7 +112,7 @@ export class MarginalPolytope {
       const coefficients = Array.from<number>({ length: n }).fill(0);
 
       for (const market of event.markets) {
-        const idx = marketList.findIndex(m => m.id === market.id);
+        const idx = marketList.findIndex((m) => m.id === market.id);
         if (idx >= 0) {
           coefficients[idx] = 1;
         }
@@ -150,7 +149,9 @@ export class MarginalPolytope {
       });
     }
 
-    this.logger.debug(`Rebuilt ${String(this.constraints.length)} constraints for ${String(n)} markets`);
+    this.logger.debug(
+      `Rebuilt ${String(this.constraints.length)} constraints for ${String(n)} markets`
+    );
   }
 
   /**
@@ -194,7 +195,7 @@ export class MarginalPolytope {
       const indices: number[] = [];
 
       for (const market of event.markets) {
-        const idx = marketList.findIndex(m => m.id === market.id);
+        const idx = marketList.findIndex((m) => m.id === market.id);
         if (idx >= 0) {
           sum += result[idx] ?? 0;
           indices.push(idx);
@@ -211,14 +212,14 @@ export class MarginalPolytope {
     }
 
     // Clip to [0, 1]
-    return result.map(x => Math.max(0, Math.min(1, x)));
+    return result.map((x) => Math.max(0, Math.min(1, x)));
   }
 
   /**
    * Get the current price vector
    */
   getPriceVector(): number[] {
-    return this.getMarkets().map(m => m.price);
+    return this.getMarkets().map((m) => m.price);
   }
 
   /**
@@ -239,8 +240,8 @@ export class MarginalPolytope {
 
     for (const event of this.events.values()) {
       if (event.markets.length === 2) {
-        const yesMarket = event.markets.find(m => m.outcome === 'YES');
-        const noMarket = event.markets.find(m => m.outcome === 'NO');
+        const yesMarket = event.markets.find((m) => m.outcome === 'YES');
+        const noMarket = event.markets.find((m) => m.outcome === 'NO');
 
         if (yesMarket && noMarket) {
           const sum = yesMarket.price + noMarket.price;

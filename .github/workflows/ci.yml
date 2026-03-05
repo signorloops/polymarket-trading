@@ -32,6 +32,12 @@ jobs:
       - name: Run linter
         run: npm run lint
 
+      - name: Check code formatting
+        run: npm run format:check
+
+      - name: Check for dead code (knip)
+        run: npx knip
+
       - name: Run tests
         run: npm test -- --coverage
         env:

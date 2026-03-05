@@ -43,16 +43,26 @@ export function validateProblem(problem: LPProblem): void {
     }
   }
 
-  if (problem.inequalityMatrix && problem.inequalityRhs && problem.inequalityMatrix.length !== problem.inequalityRhs.length) {
+  if (
+    problem.inequalityMatrix &&
+    problem.inequalityRhs &&
+    problem.inequalityMatrix.length !== problem.inequalityRhs.length
+  ) {
     throw new Error('Inequality RHS dimension mismatch');
   }
 
-  if (problem.equalityMatrix && problem.equalityRhs && problem.equalityMatrix.length !== problem.equalityRhs.length) {
+  if (
+    problem.equalityMatrix &&
+    problem.equalityRhs &&
+    problem.equalityMatrix.length !== problem.equalityRhs.length
+  ) {
     throw new Error('Equality RHS dimension mismatch');
   }
 
-  if (problem.lowerBounds && problem.lowerBounds.length !== n) throw new Error('Lower bounds dimension mismatch');
-  if (problem.upperBounds && problem.upperBounds.length !== n) throw new Error('Upper bounds dimension mismatch');
+  if (problem.lowerBounds && problem.lowerBounds.length !== n)
+    throw new Error('Lower bounds dimension mismatch');
+  if (problem.upperBounds && problem.upperBounds.length !== n)
+    throw new Error('Upper bounds dimension mismatch');
 }
 
 function addConstraint(

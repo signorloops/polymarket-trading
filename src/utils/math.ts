@@ -117,7 +117,9 @@ export function vectorExp(a: number[]): number[] {
  */
 export function klDivergence(p: number[], q: number[], epsilon = 1e-10): number {
   if (p.length !== q.length) {
-    throw new Error(`Distribution length mismatch: ${p.length.toString()} vs ${q.length.toString()}`);
+    throw new Error(
+      `Distribution length mismatch: ${p.length.toString()} vs ${q.length.toString()}`
+    );
   }
 
   let divergence = 0;
@@ -148,13 +150,11 @@ export function klDivergence(p: number[], q: number[], epsilon = 1e-10): number 
  * This is always non-negative for p_i, q_i >= 0 and equals standard KL
  * when p and q are both normalized probability distributions.
  */
-export function generalizedKLDivergence(
-  p: number[],
-  q: number[],
-  epsilon = 1e-10
-): number {
+export function generalizedKLDivergence(p: number[], q: number[], epsilon = 1e-10): number {
   if (p.length !== q.length) {
-    throw new Error(`Distribution length mismatch: ${p.length.toString()} vs ${q.length.toString()}`);
+    throw new Error(
+      `Distribution length mismatch: ${p.length.toString()} vs ${q.length.toString()}`
+    );
   }
 
   let divergence = 0;

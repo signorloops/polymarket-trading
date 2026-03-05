@@ -42,10 +42,7 @@ describe('MarketMakingStrategy', () => {
   describe('analyze', () => {
     it('should return null when strategy is disabled', () => {
       strategy.updateConfig({ enabled: false });
-      orderBook.update(
-        [{ price: 0.5, size: 100 }],
-        [{ price: 0.51, size: 100 }]
-      );
+      orderBook.update([{ price: 0.5, size: 100 }], [{ price: 0.51, size: 100 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -62,10 +59,7 @@ describe('MarketMakingStrategy', () => {
 
     it('should return null when in cooldown period', () => {
       strategy.updateConfig({ cooldownMs: 10000 });
-      orderBook.update(
-        [{ price: 0.5, size: 100 }],
-        [{ price: 0.51, size: 100 }]
-      );
+      orderBook.update([{ price: 0.5, size: 100 }], [{ price: 0.51, size: 100 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -136,7 +130,7 @@ describe('MarketMakingStrategy', () => {
       // The math shows that with targetSpread=0.02, it's very hard to cross
       // Let's use a much larger targetSpread
       const wideSpreadStrategy = new MarketMakingStrategy({
-        targetSpread: 0.20, // 20% spread
+        targetSpread: 0.2, // 20% spread
         maxInventory: 100,
         inventorySkew: 0.5,
         orderSize: 10,
@@ -170,10 +164,7 @@ describe('MarketMakingStrategy', () => {
       // The fundamental issue: with normal market data, quotes don't cross
       // We need to directly test findBestQuote with constructed quotes
       // For this test, let's just verify the method runs without error
-      orderBook.update(
-        [{ price: 0.50, size: 100 }],
-        [{ price: 0.51, size: 100 }]
-      );
+      orderBook.update([{ price: 0.5, size: 100 }], [{ price: 0.51, size: 100 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -199,17 +190,11 @@ describe('MarketMakingStrategy', () => {
       const orderBook2 = new OrderBook('market-2');
 
       // First market - no crossing quotes (wide spread)
-      orderBook.update(
-        [{ price: 0.5, size: 100 }],
-        [{ price: 0.55, size: 100 }]
-      );
+      orderBook.update([{ price: 0.5, size: 100 }], [{ price: 0.55, size: 100 }]);
 
       // Second market - also no crossing (normal spread)
       // The test verifies that we iterate through markets correctly
-      orderBook2.update(
-        [{ price: 0.50, size: 100 }],
-        [{ price: 0.51, size: 100 }]
-      );
+      orderBook2.update([{ price: 0.5, size: 100 }], [{ price: 0.51, size: 100 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -234,10 +219,7 @@ describe('MarketMakingStrategy', () => {
     });
 
     it('should return null when no markets produce valid signal', () => {
-      orderBook.update(
-        [{ price: 0.5, size: 100 }],
-        [{ price: 0.52, size: 100 }]
-      );
+      orderBook.update([{ price: 0.5, size: 100 }], [{ price: 0.52, size: 100 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -258,10 +240,7 @@ describe('MarketMakingStrategy', () => {
       // Build up inventory
       strategy.updateInventory(marketId, 150, 'buy');
 
-      orderBook.update(
-        [{ price: 0.5, size: 100 }],
-        [{ price: 0.51, size: 100 }]
-      );
+      orderBook.update([{ price: 0.5, size: 100 }], [{ price: 0.51, size: 100 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -283,10 +262,7 @@ describe('MarketMakingStrategy', () => {
       // Build up short inventory
       strategy.updateInventory(marketId, 150, 'sell');
 
-      orderBook.update(
-        [{ price: 0.5, size: 100 }],
-        [{ price: 0.51, size: 100 }]
-      );
+      orderBook.update([{ price: 0.5, size: 100 }], [{ price: 0.51, size: 100 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -351,10 +327,7 @@ describe('MarketMakingStrategy', () => {
       strategy.updateConfig({ maxPositionSize: 50 });
       strategy.updateInventory(marketId, 200, 'buy');
 
-      orderBook.update(
-        [{ price: 0.5, size: 1000 }],
-        [{ price: 0.51, size: 1000 }]
-      );
+      orderBook.update([{ price: 0.5, size: 1000 }], [{ price: 0.51, size: 1000 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -372,10 +345,7 @@ describe('MarketMakingStrategy', () => {
     it('should calculate reduction size as 50% of inventory', () => {
       strategy.updateInventory(marketId, 120, 'buy');
 
-      orderBook.update(
-        [{ price: 0.5, size: 1000 }],
-        [{ price: 0.51, size: 1000 }]
-      );
+      orderBook.update([{ price: 0.5, size: 1000 }], [{ price: 0.51, size: 1000 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -444,10 +414,7 @@ describe('MarketMakingStrategy', () => {
       strategy.updateConfig({ maxPositionSize: undefined });
       strategy.updateInventory(marketId, 3000, 'buy');
 
-      orderBook.update(
-        [{ price: 0.5, size: 1000 }],
-        [{ price: 0.51, size: 1000 }]
-      );
+      orderBook.update([{ price: 0.5, size: 1000 }], [{ price: 0.51, size: 1000 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -525,10 +492,7 @@ describe('MarketMakingStrategy', () => {
 
     it('should use stored fair value when order book is empty', () => {
       // First call with valid order book to set fair value
-      orderBook.update(
-        [{ price: 0.5, size: 100 }],
-        [{ price: 0.52, size: 100 }]
-      );
+      orderBook.update([{ price: 0.5, size: 100 }], [{ price: 0.52, size: 100 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -550,10 +514,7 @@ describe('MarketMakingStrategy', () => {
 
     it('should apply smoothing to fair value updates', () => {
       // First update
-      orderBook.update(
-        [{ price: 0.5, size: 100 }],
-        [{ price: 0.52, size: 100 }]
-      );
+      orderBook.update([{ price: 0.5, size: 100 }], [{ price: 0.52, size: 100 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -567,10 +528,7 @@ describe('MarketMakingStrategy', () => {
       strategy.analyze(marketData);
 
       // Second update with different prices
-      orderBook.update(
-        [{ price: 0.6, size: 100 }],
-        [{ price: 0.62, size: 100 }]
-      );
+      orderBook.update([{ price: 0.6, size: 100 }], [{ price: 0.62, size: 100 }]);
 
       strategy.analyze(marketData);
       // Fair value should be smoothed (30% new, 70% old)
@@ -579,52 +537,84 @@ describe('MarketMakingStrategy', () => {
 
   describe('quote generation', () => {
     it('should generate correct number of quote levels', () => {
-      const quotes = (strategy as unknown as { generateQuotes(fairValue: number, inventory: number): QuoteLevel[] }).generateQuotes(0.5, 0);
+      const quotes = (
+        strategy as unknown as {
+          generateQuotes(fairValue: number, inventory: number): QuoteLevel[];
+        }
+      ).generateQuotes(0.5, 0);
       expect(quotes).toHaveLength(6); // 3 levels * 2 sides
     });
 
     it('should sort quotes by price ascending', () => {
-      const quotes = (strategy as unknown as { generateQuotes(fairValue: number, inventory: number): QuoteLevel[] }).generateQuotes(0.5, 0);
+      const quotes = (
+        strategy as unknown as {
+          generateQuotes(fairValue: number, inventory: number): QuoteLevel[];
+        }
+      ).generateQuotes(0.5, 0);
       for (let i = 1; i < quotes.length; i++) {
         expect(quotes[i].price).toBeGreaterThanOrEqual(quotes[i - 1].price);
       }
     });
 
     it('should apply positive skew when long inventory', () => {
-      const quotesLong = (strategy as unknown as { generateQuotes(fairValue: number, inventory: number): QuoteLevel[] }).generateQuotes(0.5, 50);
-      const quotesNeutral = (strategy as unknown as { generateQuotes(fairValue: number, inventory: number): QuoteLevel[] }).generateQuotes(0.5, 0);
+      const quotesLong = (
+        strategy as unknown as {
+          generateQuotes(fairValue: number, inventory: number): QuoteLevel[];
+        }
+      ).generateQuotes(0.5, 50);
+      const quotesNeutral = (
+        strategy as unknown as {
+          generateQuotes(fairValue: number, inventory: number): QuoteLevel[];
+        }
+      ).generateQuotes(0.5, 0);
 
       // When long, positive skew moves quotes DOWN (to sell more aggressively)
       // skew = 50/100 = 0.5, skewOffset = 0.5 * 0.5 * 0.01 = 0.0025
       // So long bids = 0.5 * (1 - 0.01 + 0.0025) = 0.49625
       // Neutral bids = 0.5 * (1 - 0.01) = 0.495
       // Actually with positive skew, bids go UP (less aggressive buying)
-      const longBid = quotesLong.find(q => q.side === 'buy')?.price ?? 0;
-      const neutralBid = quotesNeutral.find(q => q.side === 'buy')?.price ?? 0;
+      const longBid = quotesLong.find((q) => q.side === 'buy')?.price ?? 0;
+      const neutralBid = quotesNeutral.find((q) => q.side === 'buy')?.price ?? 0;
       // Positive skew increases bid prices (less aggressive buying when long)
       expect(longBid).toBeGreaterThanOrEqual(neutralBid);
     });
 
     it('should apply negative skew when short inventory', () => {
-      const quotesShort = (strategy as unknown as { generateQuotes(fairValue: number, inventory: number): QuoteLevel[] }).generateQuotes(0.5, -50);
-      const quotesNeutral = (strategy as unknown as { generateQuotes(fairValue: number, inventory: number): QuoteLevel[] }).generateQuotes(0.5, 0);
+      const quotesShort = (
+        strategy as unknown as {
+          generateQuotes(fairValue: number, inventory: number): QuoteLevel[];
+        }
+      ).generateQuotes(0.5, -50);
+      const quotesNeutral = (
+        strategy as unknown as {
+          generateQuotes(fairValue: number, inventory: number): QuoteLevel[];
+        }
+      ).generateQuotes(0.5, 0);
 
       // When short, asks should be lower (more aggressive buying)
-      const shortAsk = quotesShort.find(q => q.side === 'sell')?.price ?? 1;
-      const neutralAsk = quotesNeutral.find(q => q.side === 'sell')?.price ?? 1;
+      const shortAsk = quotesShort.find((q) => q.side === 'sell')?.price ?? 1;
+      const neutralAsk = quotesNeutral.find((q) => q.side === 'sell')?.price ?? 1;
       expect(shortAsk).toBeLessThanOrEqual(neutralAsk);
     });
 
     it('should clamp skew between -1 and 1', () => {
       // Very large inventory should still produce valid quotes
-      const quotes = (strategy as unknown as { generateQuotes(fairValue: number, inventory: number): QuoteLevel[] }).generateQuotes(0.5, 10000);
+      const quotes = (
+        strategy as unknown as {
+          generateQuotes(fairValue: number, inventory: number): QuoteLevel[];
+        }
+      ).generateQuotes(0.5, 10000);
       expect(quotes).toHaveLength(6);
-      expect(quotes.every(q => q.price >= 0.01 && q.price <= 0.99)).toBe(true);
+      expect(quotes.every((q) => q.price >= 0.01 && q.price <= 0.99)).toBe(true);
     });
 
     it('should increase size per level', () => {
-      const quotes = (strategy as unknown as { generateQuotes(fairValue: number, inventory: number): QuoteLevel[] }).generateQuotes(0.5, 0);
-      const buyQuotes = quotes.filter(q => q.side === 'buy');
+      const quotes = (
+        strategy as unknown as {
+          generateQuotes(fairValue: number, inventory: number): QuoteLevel[];
+        }
+      ).generateQuotes(0.5, 0);
+      const buyQuotes = quotes.filter((q) => q.side === 'buy');
       // Sort by price descending to get levels in order (higher price = closer to fair value = level 0)
       buyQuotes.sort((a, b) => b.price - a.price);
       // Size increases with each level (level 0 = 10, level 1 = 10 * 1.5 = 15, level 2 = 10 * 1.5^2 = 22.5)
@@ -636,8 +626,12 @@ describe('MarketMakingStrategy', () => {
     });
 
     it('should clamp prices to valid range [0.01, 0.99]', () => {
-      const quotes = (strategy as unknown as { generateQuotes(fairValue: number, inventory: number): QuoteLevel[] }).generateQuotes(0.99, -100);
-      expect(quotes.every(q => q.price >= 0.01 && q.price <= 0.99)).toBe(true);
+      const quotes = (
+        strategy as unknown as {
+          generateQuotes(fairValue: number, inventory: number): QuoteLevel[];
+        }
+      ).generateQuotes(0.99, -100);
+      expect(quotes.every((q) => q.price >= 0.01 && q.price <= 0.99)).toBe(true);
     });
   });
 
@@ -657,7 +651,11 @@ describe('MarketMakingStrategy', () => {
         timestamp: Date.now(),
       };
 
-      const bestQuote = (strategy as unknown as { findBestQuote(market: StrategyMarketData, quotes: QuoteLevel[]): QuoteLevel | null }).findBestQuote(marketData, quotes);
+      const bestQuote = (
+        strategy as unknown as {
+          findBestQuote(market: StrategyMarketData, quotes: QuoteLevel[]): QuoteLevel | null;
+        }
+      ).findBestQuote(marketData, quotes);
       expect(bestQuote).toBeNull();
     });
 
@@ -668,10 +666,7 @@ describe('MarketMakingStrategy', () => {
         { price: 0.55, size: 10, side: 'sell' },
       ];
 
-      orderBook.update(
-        [{ price: 0.5, size: 100 }],
-        [{ price: 0.51, size: 100 }]
-      );
+      orderBook.update([{ price: 0.5, size: 100 }], [{ price: 0.51, size: 100 }]);
 
       const marketData: StrategyMarketData = {
         marketId,
@@ -680,7 +675,11 @@ describe('MarketMakingStrategy', () => {
         timestamp: Date.now(),
       };
 
-      const bestQuote = (strategy as unknown as { findBestQuote(market: StrategyMarketData, quotes: QuoteLevel[]): QuoteLevel | null }).findBestQuote(marketData, quotes);
+      const bestQuote = (
+        strategy as unknown as {
+          findBestQuote(market: StrategyMarketData, quotes: QuoteLevel[]): QuoteLevel | null;
+        }
+      ).findBestQuote(marketData, quotes);
       expect(bestQuote).not.toBeNull();
       expect(bestQuote?.side).toBe('buy');
       expect(bestQuote?.price).toBe(0.51); // best ask price
@@ -693,10 +692,7 @@ describe('MarketMakingStrategy', () => {
         { price: 0.52, size: 10, side: 'sell' },
       ];
 
-      orderBook.update(
-        [{ price: 0.5, size: 100 }],
-        [{ price: 0.51, size: 100 }]
-      );
+      orderBook.update([{ price: 0.5, size: 100 }], [{ price: 0.51, size: 100 }]);
 
       const marketData: StrategyMarketData = {
         marketId,
@@ -705,7 +701,11 @@ describe('MarketMakingStrategy', () => {
         timestamp: Date.now(),
       };
 
-      const bestQuote = (strategy as unknown as { findBestQuote(market: StrategyMarketData, quotes: QuoteLevel[]): QuoteLevel | null }).findBestQuote(marketData, quotes);
+      const bestQuote = (
+        strategy as unknown as {
+          findBestQuote(market: StrategyMarketData, quotes: QuoteLevel[]): QuoteLevel | null;
+        }
+      ).findBestQuote(marketData, quotes);
       expect(bestQuote).not.toBeNull();
       expect(bestQuote?.side).toBe('sell');
       expect(bestQuote?.price).toBe(0.5); // best bid price
@@ -717,10 +717,7 @@ describe('MarketMakingStrategy', () => {
         { price: 0.53, size: 10, side: 'sell' }, // too high
       ];
 
-      orderBook.update(
-        [{ price: 0.5, size: 100 }],
-        [{ price: 0.51, size: 100 }]
-      );
+      orderBook.update([{ price: 0.5, size: 100 }], [{ price: 0.51, size: 100 }]);
 
       const marketData: StrategyMarketData = {
         marketId,
@@ -729,7 +726,11 @@ describe('MarketMakingStrategy', () => {
         timestamp: Date.now(),
       };
 
-      const bestQuote = (strategy as unknown as { findBestQuote(market: StrategyMarketData, quotes: QuoteLevel[]): QuoteLevel | null }).findBestQuote(marketData, quotes);
+      const bestQuote = (
+        strategy as unknown as {
+          findBestQuote(market: StrategyMarketData, quotes: QuoteLevel[]): QuoteLevel | null;
+        }
+      ).findBestQuote(marketData, quotes);
       expect(bestQuote).toBeNull();
     });
 
@@ -739,10 +740,7 @@ describe('MarketMakingStrategy', () => {
         { price: 0.50949, size: 10, side: 'buy' }, // 0.50949 >= 0.51 * 0.999 = 0.50949
       ];
 
-      orderBook.update(
-        [{ price: 0.5, size: 100 }],
-        [{ price: 0.51, size: 100 }]
-      );
+      orderBook.update([{ price: 0.5, size: 100 }], [{ price: 0.51, size: 100 }]);
 
       const marketData: StrategyMarketData = {
         marketId,
@@ -751,21 +749,27 @@ describe('MarketMakingStrategy', () => {
         timestamp: Date.now(),
       };
 
-      const bestQuote = (strategy as unknown as { findBestQuote(market: StrategyMarketData, quotes: QuoteLevel[]): QuoteLevel | null }).findBestQuote(marketData, quotes);
+      const bestQuote = (
+        strategy as unknown as {
+          findBestQuote(market: StrategyMarketData, quotes: QuoteLevel[]): QuoteLevel | null;
+        }
+      ).findBestQuote(marketData, quotes);
       expect(bestQuote).not.toBeNull();
     });
   });
 
   describe('calculateQuoteConfidence', () => {
     it('should return higher confidence when closer to fair value', () => {
-      const confidenceNear = (strategy as unknown as { calculateQuoteConfidence(quote: QuoteLevel, fairValue: number): number }).calculateQuoteConfidence(
-        { price: 0.51, size: 10, side: 'buy' },
-        0.5
-      );
-      const confidenceFar = (strategy as unknown as { calculateQuoteConfidence(quote: QuoteLevel, fairValue: number): number }).calculateQuoteConfidence(
-        { price: 0.6, size: 10, side: 'buy' },
-        0.5
-      );
+      const confidenceNear = (
+        strategy as unknown as {
+          calculateQuoteConfidence(quote: QuoteLevel, fairValue: number): number;
+        }
+      ).calculateQuoteConfidence({ price: 0.51, size: 10, side: 'buy' }, 0.5);
+      const confidenceFar = (
+        strategy as unknown as {
+          calculateQuoteConfidence(quote: QuoteLevel, fairValue: number): number;
+        }
+      ).calculateQuoteConfidence({ price: 0.6, size: 10, side: 'buy' }, 0.5);
       expect(confidenceNear).toBeGreaterThan(confidenceFar);
     });
 
@@ -778,10 +782,11 @@ describe('MarketMakingStrategy', () => {
       // => 0.01 - distance = 0.045
       // => distance = -0.035 (impossible since distance is absolute)
       // So we can only verify the formula works correctly
-      const confidence = (strategy as unknown as { calculateQuoteConfidence(quote: QuoteLevel, fairValue: number): number }).calculateQuoteConfidence(
-        { price: 0.5, size: 10, side: 'buy' },
-        0.5
-      );
+      const confidence = (
+        strategy as unknown as {
+          calculateQuoteConfidence(quote: QuoteLevel, fairValue: number): number;
+        }
+      ).calculateQuoteConfidence({ price: 0.5, size: 10, side: 'buy' }, 0.5);
       expect(confidence).toBe(0.6); // 0.5 + (0.01 - 0) * 10
     });
 
@@ -789,10 +794,11 @@ describe('MarketMakingStrategy', () => {
       // With targetSpread 0.02, half spread is 0.01
       // At fair value 0.5, distance is 0
       // Confidence = 0.5 + (0.01 - 0) * 10 = 0.6
-      const confidence = (strategy as unknown as { calculateQuoteConfidence(quote: QuoteLevel, fairValue: number): number }).calculateQuoteConfidence(
-        { price: 0.5, size: 10, side: 'buy' },
-        0.5
-      );
+      const confidence = (
+        strategy as unknown as {
+          calculateQuoteConfidence(quote: QuoteLevel, fairValue: number): number;
+        }
+      ).calculateQuoteConfidence({ price: 0.5, size: 10, side: 'buy' }, 0.5);
       expect(confidence).toBe(0.6);
     });
 
@@ -804,10 +810,11 @@ describe('MarketMakingStrategy', () => {
       // => 0.01 - distance > 0.045
       // => distance < -0.035 (impossible)
       // So we test with a very small distance that gives high but not capped confidence
-      const confidence = (strategy as unknown as { calculateQuoteConfidence(quote: QuoteLevel, fairValue: number): number }).calculateQuoteConfidence(
-        { price: 0.501, size: 10, side: 'buy' },
-        0.5
-      );
+      const confidence = (
+        strategy as unknown as {
+          calculateQuoteConfidence(quote: QuoteLevel, fairValue: number): number;
+        }
+      ).calculateQuoteConfidence({ price: 0.501, size: 10, side: 'buy' }, 0.5);
       // distance = 0.001 / 0.5 = 0.002
       // confidence = 0.5 + (0.01 - 0.002) * 10 = 0.5 + 0.08 = 0.58
       expect(confidence).toBeLessThan(0.95);
@@ -876,10 +883,7 @@ describe('MarketMakingStrategy', () => {
       // Use inventory reduction path to get a signal (more reliable than quote crossing)
       strategy.updateInventory(marketId, 150, 'buy'); // Trigger inventory reduction
 
-      orderBook.update(
-        [{ price: 0.50, size: 100 }],
-        [{ price: 0.51, size: 100 }]
-      );
+      orderBook.update([{ price: 0.5, size: 100 }], [{ price: 0.51, size: 100 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -902,10 +906,7 @@ describe('MarketMakingStrategy', () => {
     it('should include correct metadata in inventory reduction signal', () => {
       strategy.updateInventory(marketId, 150, 'buy');
 
-      orderBook.update(
-        [{ price: 0.6, size: 100 }],
-        [{ price: 0.61, size: 100 }]
-      );
+      orderBook.update([{ price: 0.6, size: 100 }], [{ price: 0.61, size: 100 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -932,10 +933,7 @@ describe('MarketMakingStrategy', () => {
     });
 
     it('should handle very small fair values', () => {
-      orderBook.update(
-        [{ price: 0.01, size: 100 }],
-        [{ price: 0.02, size: 100 }]
-      );
+      orderBook.update([{ price: 0.01, size: 100 }], [{ price: 0.02, size: 100 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -953,10 +951,7 @@ describe('MarketMakingStrategy', () => {
     it('should handle inventory exactly at maxInventory boundary', () => {
       strategy.updateInventory(marketId, 100, 'buy'); // exactly at max
 
-      orderBook.update(
-        [{ price: 0.5, size: 100 }],
-        [{ price: 0.51, size: 100 }]
-      );
+      orderBook.update([{ price: 0.5, size: 100 }], [{ price: 0.51, size: 100 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -979,10 +974,7 @@ describe('MarketMakingStrategy', () => {
         cooldownMs: 0,
       });
 
-      orderBook.update(
-        [{ price: 0.6, size: 100 }],
-        [{ price: 0.61, size: 100 }]
-      );
+      orderBook.update([{ price: 0.6, size: 100 }], [{ price: 0.61, size: 100 }]);
 
       const marketData: StrategyMarketData[] = [
         {
@@ -1000,9 +992,13 @@ describe('MarketMakingStrategy', () => {
 
     it('should handle single-sided quote generation', () => {
       // Test that generateQuotes works with various inventory levels
-      const quotes = (strategy as unknown as { generateQuotes(fairValue: number, inventory: number): QuoteLevel[] }).generateQuotes(0.5, 0);
-      const buyQuotes = quotes.filter(q => q.side === 'buy');
-      const sellQuotes = quotes.filter(q => q.side === 'sell');
+      const quotes = (
+        strategy as unknown as {
+          generateQuotes(fairValue: number, inventory: number): QuoteLevel[];
+        }
+      ).generateQuotes(0.5, 0);
+      const buyQuotes = quotes.filter((q) => q.side === 'buy');
+      const sellQuotes = quotes.filter((q) => q.side === 'sell');
       expect(buyQuotes.length).toBeGreaterThan(0);
       expect(sellQuotes.length).toBeGreaterThan(0);
     });

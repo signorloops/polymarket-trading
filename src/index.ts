@@ -6,10 +6,7 @@
  */
 
 import { DataPipeline, DataPipelineEvent } from './market/data-pipeline.js';
-import {
-  getOrderBookManager,
-  resetOrderBookManager,
-} from './market/order-book.js';
+import { getOrderBookManager, resetOrderBookManager } from './market/order-book.js';
 import {
   ArbitrageDetector,
   ArbitrageOpportunity,
@@ -19,12 +16,7 @@ import { resetExecutionEngine } from './execution/execution-engine.js';
 import { getRiskManager, resetRiskManager } from './execution/risk-manager.js';
 import { resetTransactionTracker } from './blockchain/transaction-tracker.js';
 import { initLogger, getLogger } from './utils/logger.js';
-import {
-  validateConfig,
-  printConfigSummary,
-  LOG_CONFIG,
-  NETWORK_CONFIG,
-} from './utils/config.js';
+import { validateConfig, printConfigSummary, LOG_CONFIG, NETWORK_CONFIG } from './utils/config.js';
 import { getErrorMessage } from './utils/errors.js';
 
 // Trading system constants
@@ -219,12 +211,7 @@ export class PolymarketTradingSystem {
 
     // Per-leg checks catch concentration and single-market risks.
     for (const leg of legs) {
-      const riskCheck = riskManager.checkTrade(
-        leg.marketId,
-        leg.size,
-        leg.side,
-        leg.notional
-      );
+      const riskCheck = riskManager.checkTrade(leg.marketId, leg.size, leg.side, leg.notional);
       if (!riskCheck.allowed) {
         this.logger.warn('Trade rejected by per-leg risk check', {
           reason: riskCheck.reason,

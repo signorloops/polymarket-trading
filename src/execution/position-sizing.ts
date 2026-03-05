@@ -145,9 +145,10 @@ export function calculatePositionSize(input: PositionSizingInput): PositionSizin
   }
 
   // Calculate expected value
-  const expectedValue = side === 'buy'
-    ? size * (probability * (1 - price) - (1 - probability) * price)
-    : size * ((1 - probability) * price - probability * (1 - price));
+  const expectedValue =
+    side === 'buy'
+      ? size * (probability * (1 - price) - (1 - probability) * price)
+      : size * ((1 - probability) * price - probability * (1 - price));
 
   // Calculate risk-adjusted return (simplified Sharpe-like ratio)
   const variance = probability * (1 - probability);
@@ -207,7 +208,9 @@ export function calculateMultiLegPositionSize(
 
   // Normalize sizes to ensure balanced exposure
   const totalSize = sizes.reduce((sum, s) => sum + s, 0);
-  const normalizedSizes = sizes.map((s) => (totalSize > 0 ? (s / totalSize) * capital * KELLY_CONFIG.MAX_BET_FRACTION : 0));
+  const normalizedSizes = sizes.map((s) =>
+    totalSize > 0 ? (s / totalSize) * capital * KELLY_CONFIG.MAX_BET_FRACTION : 0
+  );
 
   // Calculate risk metrics
   let maxLoss = 0;
@@ -226,9 +229,10 @@ export function calculateMultiLegPositionSize(
     maxLoss += size;
 
     // Expected profit
-    const profit = p > price
-      ? size * (p * (1 - price) - (1 - p) * price)
-      : size * ((1 - p) * price - p * (1 - price));
+    const profit =
+      p > price
+        ? size * (p * (1 - price) - (1 - p) * price)
+        : size * ((1 - p) * price - p * (1 - price));
     expectedProfit += profit;
   }
 
@@ -281,7 +285,7 @@ export function calculateSingleMarketArbitrageSize(
   const maxSize = Math.min(yesLiquidity, noLiquidity) * TRADING_CONFIG.MAX_POSITION_PCT;
 
   // Also limited by capital
-  const capitalConstrainedSize = capital * KELLY_CONFIG.MAX_BET_FRACTION / (yesPrice + noPrice);
+  const capitalConstrainedSize = (capital * KELLY_CONFIG.MAX_BET_FRACTION) / (yesPrice + noPrice);
 
   const size = Math.min(maxSize, capitalConstrainedSize);
 

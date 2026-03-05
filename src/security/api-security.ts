@@ -137,9 +137,7 @@ export class RequestSigner {
     const payloadStr = JSON.stringify(payload);
     const dataToSign = `${timestamp.toString()}.${payloadStr}`;
 
-    const signature = createHmac('sha256', this.apiSecret)
-      .update(dataToSign)
-      .digest('hex');
+    const signature = createHmac('sha256', this.apiSecret).update(dataToSign).digest('hex');
 
     return {
       timestamp,
@@ -160,9 +158,7 @@ export class RequestSigner {
     }
 
     const dataToSign = `${timestamp.toString()}.${payload}`;
-    const expectedSignature = createHmac('sha256', this.apiSecret)
-      .update(dataToSign)
-      .digest('hex');
+    const expectedSignature = createHmac('sha256', this.apiSecret).update(dataToSign).digest('hex');
 
     return signature === expectedSignature;
   }
@@ -308,8 +304,5 @@ export function generateNonce(): string {
  */
 export function hashSensitive(data: string): string {
   const salt = process.env.HASH_SALT ?? randomBytes(32).toString('hex');
-  return createHmac('sha256', salt)
-    .update(data)
-    .digest('hex')
-    .substring(0, 16);
+  return createHmac('sha256', salt).update(data).digest('hex').substring(0, 16);
 }

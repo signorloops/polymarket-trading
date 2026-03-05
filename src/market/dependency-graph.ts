@@ -12,7 +12,10 @@
 
 import { getLogger } from '../utils/logger.js';
 import { createSingleton } from '../utils/singleton.js';
-import { buildConstraintMatrix as buildConstraintMatrixImpl, type ConstraintMatrix } from './constraint-builder.js';
+import {
+  buildConstraintMatrix as buildConstraintMatrixImpl,
+  type ConstraintMatrix,
+} from './constraint-builder.js';
 
 export interface MarketNode {
   id: string;
@@ -70,10 +73,7 @@ export class MarketDependencyGraph {
       if (!existingEvent.outcomes.includes(market.outcome)) {
         existingEvent.outcomes.push(market.outcome);
       }
-      if (
-        existingEvent.type === 'binary' &&
-        existingEvent.outcomes.length > 2
-      ) {
+      if (existingEvent.type === 'binary' && existingEvent.outcomes.length > 2) {
         existingEvent.type = 'categorical';
       }
     } else {

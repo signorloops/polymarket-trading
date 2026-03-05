@@ -5,7 +5,12 @@
  * Suitable for prediction markets with momentum
  */
 
-import { BaseStrategy, type StrategyMarketData, type TradeSignal, type StrategyConfig } from './base.js';
+import {
+  BaseStrategy,
+  type StrategyMarketData,
+  type TradeSignal,
+  type StrategyConfig,
+} from './base.js';
 
 export interface TrendFollowingConfig extends StrategyConfig {
   /** Short moving average period */
@@ -136,10 +141,7 @@ export class TrendFollowingStrategy extends BaseStrategy {
     prices.push(market.lastPrice);
 
     // Keep only necessary history
-    const maxPeriod = Math.max(
-      this.trendConfig.longPeriod,
-      this.trendConfig.rsiPeriod * 2
-    );
+    const maxPeriod = Math.max(this.trendConfig.longPeriod, this.trendConfig.rsiPeriod * 2);
     if (prices.length > maxPeriod * 2) {
       prices.shift();
     }
@@ -181,7 +183,10 @@ export class TrendFollowingStrategy extends BaseStrategy {
 
     // Volume signal
     const volumes = this.volumeHistory.get(market.marketId) ?? [];
-    const avgVolume = this.calculateSMA(volumes.slice(-this.trendConfig.shortPeriod), this.trendConfig.shortPeriod);
+    const avgVolume = this.calculateSMA(
+      volumes.slice(-this.trendConfig.shortPeriod),
+      this.trendConfig.shortPeriod
+    );
     const currentVolume = volumes[volumes.length - 1] ?? 0;
     let volumeSignal: 'high' | 'normal' | 'low' = 'normal';
     if (currentVolume > avgVolume * this.trendConfig.volumeThreshold) {
@@ -259,7 +264,7 @@ export class TrendFollowingStrategy extends BaseStrategy {
     if (avgLoss === 0) return 100;
 
     const rs = avgGain / avgLoss;
-    return 100 - (100 / (1 + rs));
+    return 100 - 100 / (1 + rs);
   }
 
   /**

@@ -50,10 +50,7 @@ export function lineSearchObjective(
   }
 
   const n = mu.length;
-  const candidate =
-    candidateBuffer?.length === n
-      ? candidateBuffer
-      : new Float64Array(n);
+  const candidate = candidateBuffer?.length === n ? candidateBuffer : new Float64Array(n);
 
   const evaluateAtGamma = (gamma: number): number => {
     for (let i = 0; i < n; i++) {

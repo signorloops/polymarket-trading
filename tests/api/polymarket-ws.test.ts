@@ -3,11 +3,7 @@
  */
 
 import { jest } from '@jest/globals';
-import type {
-  WsMessage,
-  WsTrade,
-  WsOrderBookUpdate,
-} from '../../src/api/polymarket-ws.js';
+import type { WsMessage, WsTrade, WsOrderBookUpdate } from '../../src/api/polymarket-ws.js';
 
 // Mock WebSocket class
 class MockWebSocket {
@@ -81,11 +77,8 @@ jest.unstable_mockModule('../../src/utils/logger.js', () => ({
 }));
 
 // Import after mocks
-const {
-  PolymarketWebSocketClient,
-  getPolymarketWebSocketClient,
-  resetPolymarketWebSocketClient,
-} = await import('../../src/api/polymarket-ws.js');
+const { PolymarketWebSocketClient, getPolymarketWebSocketClient, resetPolymarketWebSocketClient } =
+  await import('../../src/api/polymarket-ws.js');
 const { NETWORK_CONFIG } = await import('../../src/utils/config.js');
 
 describe('PolymarketWebSocketClient', () => {
@@ -158,9 +151,8 @@ describe('PolymarketWebSocketClient', () => {
       }));
 
       // Re-import to get the throwing mock
-      const { PolymarketWebSocketClient: WsClient } = await import(
-        '../../src/api/polymarket-ws.js'
-      );
+      const { PolymarketWebSocketClient: WsClient } =
+        await import('../../src/api/polymarket-ws.js');
       const testClient = new WsClient('wss://ws.polymarket.com', 'test-api-key');
 
       testClient.connect();
@@ -318,7 +310,13 @@ describe('PolymarketWebSocketClient', () => {
 
         const message = JSON.stringify({
           type: 'trade',
-          data: { marketId: 'market-1', price: '0.6', size: '100', side: 'buy', timestamp: '2024-01-01T00:00:00Z' },
+          data: {
+            marketId: 'market-1',
+            price: '0.6',
+            size: '100',
+            side: 'buy',
+            timestamp: '2024-01-01T00:00:00Z',
+          },
         });
 
         getMockWs()?.emit('message', message);
@@ -332,7 +330,13 @@ describe('PolymarketWebSocketClient', () => {
 
         const message = JSON.stringify({
           type: 'trade',
-          data: { marketId: 'market-1', price: '0.6', size: '100', side: 'buy', timestamp: '2024-01-01T00:00:00Z' },
+          data: {
+            marketId: 'market-1',
+            price: '0.6',
+            size: '100',
+            side: 'buy',
+            timestamp: '2024-01-01T00:00:00Z',
+          },
         });
         const buffer = new ArrayBuffer(message.length);
         const view = new Uint8Array(buffer);
@@ -410,7 +414,13 @@ describe('PolymarketWebSocketClient', () => {
 
         const message = JSON.stringify({
           type: 'trade',
-          data: { marketId: 'market-1', price: '0.6', size: '100', side: 'buy', timestamp: '2024-01-01T00:00:00Z' },
+          data: {
+            marketId: 'market-1',
+            price: '0.6',
+            size: '100',
+            side: 'buy',
+            timestamp: '2024-01-01T00:00:00Z',
+          },
         });
 
         // Split message into fragments

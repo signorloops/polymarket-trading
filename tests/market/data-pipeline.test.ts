@@ -7,7 +7,11 @@
  */
 
 import { jest } from '@jest/globals';
-import type { MarketData, OrderBookUpdate, DataPipelineEvent } from '../../src/market/data-pipeline.js';
+import type {
+  MarketData,
+  OrderBookUpdate,
+  DataPipelineEvent,
+} from '../../src/market/data-pipeline.js';
 
 // Define mock state - must be defined before any imports
 const mockState: {
@@ -86,7 +90,8 @@ jest.unstable_mockModule('ws', () => ({
 }));
 
 // Import after mocks
-const { DataPipeline, getDataPipeline, resetDataPipeline } = await import('../../src/market/data-pipeline.js');
+const { DataPipeline, getDataPipeline, resetDataPipeline } =
+  await import('../../src/market/data-pipeline.js');
 
 describe('DataPipeline', () => {
   let pipeline: InstanceType<typeof DataPipeline>;
@@ -368,8 +373,14 @@ describe('DataPipeline', () => {
       const orderbookMessage = {
         event_type: 'orderbook',
         market_id: 'market-1',
-        bids: [{ price: 0.4, size: 100 }, { price: 0.45, size: 200 }],
-        asks: [{ price: 0.6, size: 100 }, { price: 0.65, size: 200 }],
+        bids: [
+          { price: 0.4, size: 100 },
+          { price: 0.45, size: 200 },
+        ],
+        asks: [
+          { price: 0.6, size: 100 },
+          { price: 0.65, size: 200 },
+        ],
         timestamp: 1234567890,
       };
 
@@ -379,8 +390,14 @@ describe('DataPipeline', () => {
         type: 'orderbook',
         data: {
           marketId: 'market-1',
-          bids: [{ price: 0.4, size: 100 }, { price: 0.45, size: 200 }],
-          asks: [{ price: 0.6, size: 100 }, { price: 0.65, size: 200 }],
+          bids: [
+            { price: 0.4, size: 100 },
+            { price: 0.45, size: 200 },
+          ],
+          asks: [
+            { price: 0.6, size: 100 },
+            { price: 0.65, size: 200 },
+          ],
           timestamp: 1234567890,
         },
       });
@@ -485,10 +502,10 @@ describe('DataPipeline', () => {
 
       // Should only receive connected event from open handler, not unknown message
       const tradeCalls = handler.mock.calls.filter(
-        (call) => (call[0] as {type: string}).type === 'trade'
+        (call) => (call[0] as { type: string }).type === 'trade'
       );
       const orderbookCalls = handler.mock.calls.filter(
-        (call) => (call[0] as {type: string}).type === 'orderbook'
+        (call) => (call[0] as { type: string }).type === 'orderbook'
       );
 
       expect(tradeCalls).toHaveLength(0);
@@ -620,10 +637,7 @@ describe('DataPipeline', () => {
     it('should handle null message', () => {
       mockState.wsInstance?.eventHandlers['message']?.(JSON.stringify(null));
 
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        'Invalid message received',
-        expect.any(Object)
-      );
+      expect(mockLogger.warn).toHaveBeenCalledWith('Invalid message received', expect.any(Object));
     });
 
     it('should handle message with non-string event_type', () => {
@@ -634,10 +648,7 @@ describe('DataPipeline', () => {
 
       mockState.wsInstance?.eventHandlers['message']?.(JSON.stringify(invalidMessage));
 
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        'Invalid message received',
-        expect.any(Object)
-      );
+      expect(mockLogger.warn).toHaveBeenCalledWith('Invalid message received', expect.any(Object));
     });
   });
 
@@ -912,7 +923,14 @@ describe('DataPipeline', () => {
 
   describe('data types', () => {
     it('should export MarketData type', () => {
-      const marketData: {marketId: string, eventId: string, price: number, size: number, side: 'buy' | 'sell', timestamp: number} = {
+      const marketData: {
+        marketId: string;
+        eventId: string;
+        price: number;
+        size: number;
+        side: 'buy' | 'sell';
+        timestamp: number;
+      } = {
         marketId: 'test',
         eventId: 'event-1',
         price: 0.5,
@@ -926,7 +944,12 @@ describe('DataPipeline', () => {
     });
 
     it('should export OrderBookUpdate type', () => {
-      const orderBook: {marketId: string, bids: {price: number, size: number}[], asks: {price: number, size: number}[], timestamp: number} = {
+      const orderBook: {
+        marketId: string;
+        bids: { price: number; size: number }[];
+        asks: { price: number; size: number }[];
+        timestamp: number;
+      } = {
         marketId: 'test',
         bids: [{ price: 0.4, size: 100 }],
         asks: [{ price: 0.6, size: 100 }],
@@ -939,10 +962,13 @@ describe('DataPipeline', () => {
     });
 
     it('should export DataPipelineEvent type', () => {
-      const connectedEvent: {type: string} = { type: 'connected' };
-      const disconnectedEvent: {type: string} = { type: 'disconnected' };
-      const errorEvent: {type: string, error: Error} = { type: 'error', error: new Error('test') };
-      const tradeEvent: {type: string, data: unknown} = {
+      const connectedEvent: { type: string } = { type: 'connected' };
+      const disconnectedEvent: { type: string } = { type: 'disconnected' };
+      const errorEvent: { type: string; error: Error } = {
+        type: 'error',
+        error: new Error('test'),
+      };
+      const tradeEvent: { type: string; data: unknown } = {
         type: 'trade',
         data: {
           marketId: 'test',
@@ -953,7 +979,7 @@ describe('DataPipeline', () => {
           timestamp: Date.now(),
         },
       };
-      const orderbookEvent: {type: string, data: unknown} = {
+      const orderbookEvent: { type: string; data: unknown } = {
         type: 'orderbook',
         data: {
           marketId: 'test',

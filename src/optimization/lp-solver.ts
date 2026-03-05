@@ -57,10 +57,7 @@ export { checkFeasibilityImpl as checkFeasibility };
 /**
  * Solve a linear programming problem via javascript-lp-solver backend.
  */
-export function solveLP(
-  problem: LPProblem,
-  options: LPSolverOptions = {}
-): LPSolution {
+export function solveLP(problem: LPProblem, options: LPSolverOptions = {}): LPSolution {
   const { tolerance = 1e-6 } = options;
   const n = problem.objective.length;
 

@@ -30,11 +30,7 @@ export function isProfitableArbitrage(
  * @param prices Current market prices
  * @returns Recommended trade vector (positive = buy, negative = sell)
  */
-export function computeTradeRecommendation(
-  result: FrankWolfeResult,
-  prices: number[]
-): number[] {
+export function computeTradeRecommendation(result: FrankWolfeResult, prices: number[]): number[] {
   // Trade = projection - prices (positive = buy, negative = sell)
   return result.mu.map((mu_i, i) => mu_i - (prices[i] ?? 0));
 }
-

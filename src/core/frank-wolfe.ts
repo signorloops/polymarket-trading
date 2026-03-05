@@ -172,13 +172,7 @@ export function frankWolfe(
       // Compute step size
       let gamma: number;
       if (stepSize === 'line-search') {
-        gamma = lineSearchObjective(
-          mu,
-          s,
-          objectiveFn,
-          40,
-          lineSearchCandidate
-        );
+        gamma = lineSearchObjective(mu, s, objectiveFn, 40, lineSearchCandidate);
       } else if (stepSize === 'adaptive') {
         gamma = adaptiveStepSize(iter);
       } else {

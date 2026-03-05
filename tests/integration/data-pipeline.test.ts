@@ -5,14 +5,8 @@
  */
 
 import { DataPipeline } from '../../src/market/data-pipeline.js';
-import {
-  getOrderBookManager,
-  resetOrderBookManager,
-} from '../../src/market/order-book.js';
-import {
-  ArbitrageDetector,
-  resetArbitrageDetector,
-} from '../../src/market/arbitrage-detector.js';
+import { getOrderBookManager, resetOrderBookManager } from '../../src/market/order-book.js';
+import { ArbitrageDetector, resetArbitrageDetector } from '../../src/market/arbitrage-detector.js';
 import { getDependencyGraph, resetDependencyGraph } from '../../src/market/dependency-graph.js';
 
 describe('Data Pipeline Integration', () => {
@@ -231,7 +225,11 @@ describe('Data Pipeline Integration', () => {
       });
 
       // Simulate incoming data
-      manager.updateBook('yes-market', [{ price: 0.55, size: 1000 }], [{ price: 0.56, size: 1000 }]);
+      manager.updateBook(
+        'yes-market',
+        [{ price: 0.55, size: 1000 }],
+        [{ price: 0.56, size: 1000 }]
+      );
 
       manager.updateBook('no-market', [{ price: 0.4, size: 1000 }], [{ price: 0.41, size: 1000 }]);
 
@@ -291,11 +289,7 @@ describe('Data Pipeline Integration', () => {
     it('should calculate slippage correctly', () => {
       const manager = getOrderBookManager();
 
-      manager.updateBook(
-        'market-1',
-        [{ price: 0.6, size: 1000 }],
-        [{ price: 0.61, size: 1000 }]
-      );
+      manager.updateBook('market-1', [{ price: 0.6, size: 1000 }], [{ price: 0.61, size: 1000 }]);
 
       const book = manager.getBook('market-1');
 
