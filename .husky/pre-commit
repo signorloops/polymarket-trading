@@ -3,6 +3,10 @@
 
 echo "🔍 Running pre-commit checks..."
 
+# Run lint-staged (ESLint on staged .ts files)
+echo "🔵 Linting staged files..."
+npx lint-staged || exit 1
+
 # Run type check
 echo "🔵 Type checking..."
 npm run typecheck || exit 1

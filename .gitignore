@@ -40,5 +40,8 @@ Thumbs.db
 tmp/
 temp/
 
+# Plans and drafts
+docs/plans/
+
 # Codex snapshots
 .codex-snapshots/

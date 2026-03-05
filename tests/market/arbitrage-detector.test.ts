@@ -822,7 +822,7 @@ describe('ArbitrageDetector', () => {
 
       // Access private method
       const getEventsFromPolytope = (detector as unknown as {
-        getEventsFromPolytope(): Array<{ id: string; markets: unknown[]; outcomes: string[] }>;
+        getEventsFromPolytope(): { id: string; markets: unknown[]; outcomes: string[] }[];
       }).getEventsFromPolytope.bind(detector);
 
       const events = getEventsFromPolytope();
@@ -853,7 +853,7 @@ describe('ArbitrageDetector', () => {
       });
 
       const getEventsFromPolytope = (detector as unknown as {
-        getEventsFromPolytope(): Array<{ id: string; markets: unknown[] }>;
+        getEventsFromPolytope(): { id: string; markets: unknown[] }[];
       }).getEventsFromPolytope.bind(detector);
 
       const events = getEventsFromPolytope();

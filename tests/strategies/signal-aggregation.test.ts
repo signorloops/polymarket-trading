@@ -197,8 +197,8 @@ function createSignal(
   marketId: string,
   type: 'buy' | 'sell',
   confidence: number,
-  size: number = 100,
-  price: number = 0.5
+  size = 100,
+  price = 0.5
 ): TradeSignal {
   return {
     type,

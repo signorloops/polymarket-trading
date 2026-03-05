@@ -179,7 +179,7 @@ describe('TrendFollowingStrategy', () => {
       const signal = strategy.analyze(marketData);
 
       // 如果RSI超买，不应该有买入信号
-      if (signal && signal.type === 'buy') {
+      if (signal?.type === 'buy') {
         const indicators = signal.metadata['indicators'] as TrendIndicators;
         expect(indicators.rsi).toBeLessThan(70); // 应该低于超买阈值
       }
@@ -197,7 +197,7 @@ describe('TrendFollowingStrategy', () => {
       const signal = strategy.analyze(marketData);
 
       // 如果RSI超卖，不应该有卖出信号
-      if (signal && signal.type === 'sell') {
+      if (signal?.type === 'sell') {
         const indicators = signal.metadata['indicators'] as TrendIndicators;
         expect(indicators.rsi).toBeGreaterThan(30); // 应该高于超卖阈值
       }

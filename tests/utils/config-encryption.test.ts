@@ -235,8 +235,8 @@ POLYMARKET_API_KEY=my-api-key
 
       const encrypted = encryptObjectFields(obj, ['apiKey', 'password']);
 
-      expect(isEncrypted(encrypted.apiKey as string)).toBe(true);
-      expect(isEncrypted(encrypted.password as string)).toBe(true);
+      expect(isEncrypted(encrypted.apiKey)).toBe(true);
+      expect(isEncrypted(encrypted.password)).toBe(true);
       expect(encrypted.publicField).toBe('visible');
       expect(encrypted.name).toBe('Test Config');
     });

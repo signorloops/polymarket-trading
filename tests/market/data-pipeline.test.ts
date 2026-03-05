@@ -12,7 +12,7 @@ import type { MarketData, OrderBookUpdate, DataPipelineEvent } from '../../src/m
 // Define mock state - must be defined before any imports
 const mockState: {
   wsInstance: MockWsInstance | null;
-  constructorCalls: Array<{ url: string; options: unknown }>;
+  constructorCalls: { url: string; options: unknown }[];
 } = {
   wsInstance: null,
   constructorCalls: [],
@@ -926,7 +926,7 @@ describe('DataPipeline', () => {
     });
 
     it('should export OrderBookUpdate type', () => {
-      const orderBook: {marketId: string, bids: Array<{price: number, size: number}>, asks: Array<{price: number, size: number}>, timestamp: number} = {
+      const orderBook: {marketId: string, bids: {price: number, size: number}[], asks: {price: number, size: number}[], timestamp: number} = {
         marketId: 'test',
         bids: [{ price: 0.4, size: 100 }],
         asks: [{ price: 0.6, size: 100 }],

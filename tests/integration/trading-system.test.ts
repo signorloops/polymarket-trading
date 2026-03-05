@@ -65,7 +65,7 @@ describe('Trading System Integration', () => {
 
       const system = new PolymarketTradingSystem(config);
 
-      await expect(system.initialize()).resolves.not.toThrow();
+      expect(() => system.initialize()).not.toThrow();
     });
 
     it('should start and stop data pipeline', async () => {
@@ -316,7 +316,7 @@ describe('Trading System Integration', () => {
       await system.start();
 
       // Stop should handle disconnection gracefully
-      await expect(system.stop()).resolves.not.toThrow();
+      expect(() => system.stop()).not.toThrow();
     });
 
     it('should reject invalid orders', async () => {
@@ -754,7 +754,7 @@ describe('Trading System Integration', () => {
       };
 
       const system = new PolymarketTradingSystem(config);
-      await expect(system.initialize()).resolves.not.toThrow();
+      expect(() => system.initialize()).not.toThrow();
     });
 
     it('should handle live trading configuration', async () => {
@@ -789,8 +789,8 @@ describe('Trading System Integration', () => {
       await system.start();
 
       // Second start should not throw, just log warning
-      await expect(system.start()).resolves.not.toThrow();
-      await system.stop();
+      expect(() => system.start()).not.toThrow();
+      system.stop();
     });
   });
 

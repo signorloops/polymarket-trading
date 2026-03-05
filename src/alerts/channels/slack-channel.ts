@@ -137,7 +137,7 @@ export class SlackChannel implements NotificationChannel {
    */
   private buildFields(
     metadata: Record<string, unknown> | undefined
-  ): Array<{ title: string; value: string; short: boolean }> {
+  ): { title: string; value: string; short: boolean }[] {
     if (!metadata) return [];
 
     return Object.entries(metadata).map(([key, value]) => ({
@@ -170,6 +170,6 @@ export class SlackChannel implements NotificationChannel {
     if (typeof value === 'object') {
       return '```' + JSON.stringify(value, null, 2).slice(0, 100) + '```';
     }
-    return String(value);
+    return typeof value === 'string' ? value : String(value as number | boolean);
   }
 }

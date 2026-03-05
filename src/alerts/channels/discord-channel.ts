@@ -59,7 +59,7 @@ export class DiscordChannel implements NotificationChannel {
       });
 
       if (!response.ok) {
-        throw new Error(`Discord webhook failed: ${response.status} ${response.statusText}`);
+        throw new Error(`Discord webhook failed: ${String(response.status)} ${response.statusText}`);
       }
 
       return true;
@@ -122,7 +122,7 @@ export class DiscordChannel implements NotificationChannel {
    */
   private buildFields(
     metadata: Record<string, unknown> | undefined
-  ): Array<{ name: string; value: string; inline: boolean }> {
+  ): { name: string; value: string; inline: boolean }[] {
     if (!metadata) return [];
 
     return Object.entries(metadata).map(([key, value]) => ({
@@ -155,6 +155,6 @@ export class DiscordChannel implements NotificationChannel {
     if (typeof value === 'object') {
       return '```json\n' + JSON.stringify(value, null, 2).slice(0, 1000) + '\n```';
     }
-    return String(value);
+    return typeof value === 'string' ? value : String(value as number | boolean);
   }
 }

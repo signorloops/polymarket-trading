@@ -191,7 +191,7 @@ describe('Bregman Projection', () => {
 
     it('should handle empty constraints', () => {
       const priceVector = [0.6, 0.4];
-      const constraints: Array<{ coefficients: number[]; rhs: number; type: 'equality' }> = [];
+      const constraints: { coefficients: number[]; rhs: number; type: 'equality' }[] = [];
 
       const result = bregmanProjection(priceVector, constraints);
 
@@ -279,7 +279,7 @@ describe('Bregman Projection', () => {
     it('should handle empty constraints array', () => {
       const mu = [0.5, 0.5];
       const theta = [0.6, 0.4];
-      const constraints: Array<{ coefficients: number[]; rhs: number; type: 'equality' }> = [];
+      const constraints: { coefficients: number[]; rhs: number; type: 'equality' }[] = [];
 
       const dualValue = dualFunctionValue(mu, theta, constraints);
       const divergence = klDivergence(mu, theta);

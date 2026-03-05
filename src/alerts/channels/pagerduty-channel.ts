@@ -74,7 +74,7 @@ export class PagerDutyChannel implements NotificationChannel {
     }
 
     try {
-      const payload = this.buildPayload(notification);
+      const payload = this.buildPayload(notification, this.integrationKey);
 
       const response = await fetch('https://events.pagerduty.com/v2/enqueue', {
         method: 'POST',
@@ -86,7 +86,7 @@ export class PagerDutyChannel implements NotificationChannel {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`PagerDuty API failed: ${response.status} ${errorText}`);
+        throw new Error(`PagerDuty API failed: ${String(response.status)} ${errorText}`);
       }
 
       const result: unknown = await response.json();
@@ -144,11 +144,11 @@ export class PagerDutyChannel implements NotificationChannel {
   /**
    * Build PagerDuty event payload
    */
-  private buildPayload(notification: AlertNotification): PagerDutyEventPayload {
+  private buildPayload(notification: AlertNotification, integrationKey: string): PagerDutyEventPayload {
     const dedupKey = notification.id ?? `${notification.title}-${notification.level}`;
 
     return {
-      routing_key: this.integrationKey!,
+      routing_key: integrationKey,
       event_action: 'trigger',
       dedup_key: dedupKey,
       payload: {

@@ -20,6 +20,9 @@
     "benchmark:orderbook": "npm run build && node dist/benchmarks/orderbook.bench.js",
     "prepare": "husky install"
   },
+  "lint-staged": {
+    "*.ts": "eslint"
+  },
   "keywords": [
     "polymarket",
     "arbitrage",

@@ -13,23 +13,17 @@ import {
 import {
   ArbitrageDetector,
   ArbitrageOpportunity,
-  getArbitrageDetector,
   resetArbitrageDetector,
 } from './market/arbitrage-detector.js';
-import { getExecutionEngine, resetExecutionEngine } from './execution/execution-engine.js';
+import { resetExecutionEngine } from './execution/execution-engine.js';
 import { getRiskManager, resetRiskManager } from './execution/risk-manager.js';
 import { resetTransactionTracker } from './blockchain/transaction-tracker.js';
-import {
-  calculateMultiLegPositionSize,
-  calculateSingleMarketArbitrageSize,
-} from './execution/position-sizing.js';
 import { initLogger, getLogger } from './utils/logger.js';
 import {
   validateConfig,
   printConfigSummary,
   LOG_CONFIG,
   NETWORK_CONFIG,
-  RISK_CONFIG,
 } from './utils/config.js';
 import { getErrorMessage } from './utils/errors.js';
 
@@ -46,10 +40,10 @@ export interface TradingSystemConfig {
   /** Markets to monitor */
   markets: string[];
   /** Events to track */
-  events: Array<{
+  events: {
     id: string;
-    markets: Array<{ id: string; outcome: 'YES' | 'NO'; price: number }>;
-  }>;
+    markets: { id: string; outcome: 'YES' | 'NO'; price: number }[];
+  }[];
 }
 
 export class PolymarketTradingSystem {
@@ -70,7 +64,7 @@ export class PolymarketTradingSystem {
   /**
    * Initialize the trading system
    */
-  async initialize(): Promise<void> {
+  initialize(): void {
     this.logger.info('Initializing Polymarket Trading System');
 
     // Validate configuration
@@ -109,7 +103,7 @@ export class PolymarketTradingSystem {
   /**
    * Start the trading system
    */
-  async start(): Promise<void> {
+  start(): void {
     if (this.isRunning) {
       this.logger.warn('Trading system already running');
       return;
@@ -122,13 +116,13 @@ export class PolymarketTradingSystem {
     this.pipeline.connect();
 
     // Start main loop
-    this.runMainLoop();
+    void this.runMainLoop();
   }
 
   /**
    * Stop the trading system
    */
-  async stop(): Promise<void> {
+  stop(): void {
     this.logger.info('Stopping trading system');
     this.isRunning = false;
 
@@ -146,12 +140,12 @@ export class PolymarketTradingSystem {
   /**
    * Run a single arbitrage detection cycle
    */
-  async runDetectionCycle(): Promise<ArbitrageOpportunity[]> {
+  runDetectionCycle(): ArbitrageOpportunity[] {
     // Find all opportunities
     const opportunities = this.detector.findAllOpportunities();
 
     if (opportunities.length > 0) {
-      this.logger.info(`Found ${opportunities.length} arbitrage opportunities`);
+      this.logger.info(`Found ${String(opportunities.length)} arbitrage opportunities`);
 
       // Log top opportunities
       for (const opp of opportunities.slice(0, TOP_OPPORTUNITIES_TO_LOG)) {
@@ -170,16 +164,16 @@ export class PolymarketTradingSystem {
   /**
    * Execute an arbitrage opportunity
    */
-  async executeOpportunity(opportunity: ArbitrageOpportunity): Promise<boolean> {
+  executeOpportunity(opportunity: ArbitrageOpportunity): boolean {
     const riskManager = getRiskManager();
 
     // Build executable legs with per-leg notional estimates.
-    const legs: Array<{
+    const legs: {
       marketId: string;
       side: 'buy' | 'sell';
       size: number;
       notional: number;
-    }> = [];
+    }[] = [];
 
     for (let i = 0; i < opportunity.markets.length; i++) {
       const marketId = opportunity.markets[i];
@@ -249,7 +243,6 @@ export class PolymarketTradingSystem {
 
     // Execute trades
     if (this.config.liveTrading) {
-      const engine = getExecutionEngine();
       // Actual execution would go here
       this.logger.info('Live trading execution would happen here');
     } else {
@@ -276,11 +269,12 @@ export class PolymarketTradingSystem {
         }
         break;
 
-      case 'orderbook':
+      case 'orderbook': {
         // Update order book
         const manager = getOrderBookManager();
         manager.updateBook(event.data.marketId, event.data.bids, event.data.asks);
         break;
+      }
 
       case 'connected':
         this.logger.info('Data pipeline connected');
@@ -304,18 +298,18 @@ export class PolymarketTradingSystem {
         // Check emergency stop
         if (riskManager.checkEmergencyStop()) {
           this.logger.error('Emergency stop triggered, halting trading');
-          await this.stop();
+          this.stop();
           break;
         }
 
         // Run detection cycle
-        const opportunities = await this.runDetectionCycle();
+        const opportunities = this.runDetectionCycle();
 
         // Execute profitable opportunities
         for (const opp of opportunities) {
           if (opp.guaranteedProfit > MIN_PROFIT_THRESHOLD) {
             // Minimum $0.05 profit
-            await this.executeOpportunity(opp);
+            this.executeOpportunity(opp);
           }
         }
 
@@ -369,7 +363,7 @@ export function resetTradingSystem(): void {
 /**
  * Main entry point
  */
-async function main(): Promise<void> {
+function main(): void {
   const config: TradingSystemConfig = {
     liveTrading: false, // Start with paper trading
     markets: [],
@@ -387,29 +381,31 @@ async function main(): Promise<void> {
   const system = new PolymarketTradingSystem(config);
 
   // Handle shutdown gracefully
-  process.on('SIGINT', async () => {
+  process.on('SIGINT', () => {
     console.log('\nReceived SIGINT, shutting down...');
-    await system.stop();
+    system.stop();
     process.exit(0);
   });
 
-  process.on('SIGTERM', async () => {
+  process.on('SIGTERM', () => {
     console.log('\nReceived SIGTERM, shutting down...');
-    await system.stop();
+    system.stop();
     process.exit(0);
   });
 
   // Initialize and start
-  await system.initialize();
-  await system.start();
+  system.initialize();
+  system.start();
 }
 
 // Run if this file is executed directly
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((error) => {
+if (import.meta.url === `file://${process.argv[1] ?? ''}`) {
+  try {
+    main();
+  } catch (error: unknown) {
     console.error('Fatal error:', error);
     process.exit(1);
-  });
+  }
 }
 
 // Re-exports for library usage

@@ -116,25 +116,6 @@ function applyConstraintUpdate(
 }
 
 /**
- * In-place vector normalization
- */
-function normalizeInPlace(mu: number[]): void {
-  let sum = 0;
-  for (const val of mu) {
-    sum += val;
-  }
-  if (sum > 0) {
-    const invSum = 1 / sum;
-    for (let i = 0; i < mu.length; i++) {
-      const val = mu[i];
-      if (val !== undefined) {
-        mu[i] = val * invSum;
-      }
-    }
-  }
-}
-
-/**
  * Compute change between two vectors (L2 norm of difference)
  */
 function computeChange(mu: number[], prevMu: number[]): number {

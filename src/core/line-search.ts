@@ -51,7 +51,7 @@ export function lineSearchObjective(
 
   const n = mu.length;
   const candidate =
-    candidateBuffer !== undefined && candidateBuffer.length === n
+    candidateBuffer?.length === n
       ? candidateBuffer
       : new Float64Array(n);
 

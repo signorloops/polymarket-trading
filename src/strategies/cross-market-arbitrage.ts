@@ -206,8 +206,8 @@ export class CrossMarketArbitrageStrategy extends BaseStrategy {
    */
   private extractEventId(marketId: string): string {
     const normalized = marketId.trim();
-    const match = normalized.match(/^(.*?)(?:[-_](yes|no))$/i);
-    if (match && match[1]) {
+    const match = /^(.*?)(?:[-_](yes|no))$/i.exec(normalized);
+    if (match?.[1]) {
       return match[1];
     }
     return normalized;

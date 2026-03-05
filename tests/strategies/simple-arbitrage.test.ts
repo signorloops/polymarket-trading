@@ -36,7 +36,7 @@ describe('SimpleArbitrageStrategy', () => {
       expect(signal).not.toBeNull();
 
       const pairedLegs = signal?.metadata?.['pairedLegs'] as
-        | Array<{ marketId: string; side: 'buy' | 'sell'; size: number; price: number }>
+        | { marketId: string; side: 'buy' | 'sell'; size: number; price: number }[]
         | undefined;
 
       expect(pairedLegs).toBeDefined();
@@ -80,7 +80,7 @@ describe('SimpleArbitrageStrategy', () => {
       expect(signal?.reason).toContain('sell_pair');
 
       const pairedLegs = signal?.metadata?.['pairedLegs'] as
-        | Array<{ marketId: string; side: 'buy' | 'sell'; size: number; price: number }>
+        | { marketId: string; side: 'buy' | 'sell'; size: number; price: number }[]
         | undefined;
 
       expect(pairedLegs).toBeDefined();
@@ -928,7 +928,7 @@ describe('SimpleArbitrageStrategy', () => {
 
       // Check paired legs
       const pairedLegs = signal?.metadata?.['pairedLegs'] as
-        | Array<{ marketId: string; side: 'buy' | 'sell'; size: number; price: number }>
+        | { marketId: string; side: 'buy' | 'sell'; size: number; price: number }[]
         | undefined;
       expect(pairedLegs).toHaveLength(2);
       expect(pairedLegs?.[0].marketId).toBe('event-yes');

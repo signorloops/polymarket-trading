@@ -372,12 +372,7 @@ export async function sendAlert(
   title: string,
   message: string,
   metadata?: Record<string, unknown>
-): Promise<AlertHistoryEntry | null> {
+): Promise<AlertHistoryEntry> {
   const service = notificationServiceOverride ?? notificationServiceSingleton.get();
-  if (!service) {
-    console.warn('[AlertNotificationService] No global service initialized');
-    return null;
-  }
-
   return service.alert(level, title, message, metadata);
 }
