@@ -92,7 +92,7 @@ export type NetworkConfig = z.infer<typeof NetworkConfigSchema>;
  * Wallet configuration schema
  * Trading wallet settings (sensitive)
  */
-export const WalletConfigSchema = z.object({
+const WalletConfigSchema = z.object({
   /** Private key (hex string with or without 0x prefix) */
   PRIVATE_KEY: z
     .string()
@@ -102,8 +102,6 @@ export const WalletConfigSchema = z.object({
   /** Wallet address */
   WALLET_ADDRESS: z.string().regex(/^0x[a-fA-F0-9]{40}$/).optional(),
 });
-
-export type WalletConfig = z.infer<typeof WalletConfigSchema>;
 
 /**
  * Logging configuration schema
@@ -125,7 +123,7 @@ export type LogConfig = z.infer<typeof LogConfigSchema>;
  * Kelly criterion configuration schema
  * Position sizing parameters
  */
-export const KellyConfigSchema = z.object({
+const KellyConfigSchema = z.object({
   /** Kelly fraction multiplier (conservative: 0.25, aggressive: 0.5) */
   KELLY_FRACTION: z.number().min(0).max(1).default(0.25),
 
@@ -135,8 +133,6 @@ export const KellyConfigSchema = z.object({
   /** Maximum bet size as fraction of capital */
   MAX_BET_FRACTION: z.number().min(0).max(1).default(0.1),
 });
-
-export type KellyConfig = z.infer<typeof KellyConfigSchema>;
 
 /**
  * Risk management configuration schema

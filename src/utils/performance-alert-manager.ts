@@ -9,7 +9,6 @@ import {
   type MetricAlert,
 } from '../alerts/index.js';
 import { getErrorMessage } from './errors.js';
-import { createSingleton } from './singleton.js';
 import { Counter, Gauge } from './metric-types.js';
 import { TradingMetrics, getLatencyPercentiles } from './metric-registry.js';
 
@@ -236,65 +235,3 @@ export class PerformanceAlertManager {
   }
 }
 
-// Global instance
-const alertManagerSingleton = createSingleton(() => new PerformanceAlertManager());
-let alertManagerInitialized = false;
-
-export function initPerformanceAlertManager(
-  notificationService?: AlertNotificationService
-): PerformanceAlertManager {
-  alertManagerSingleton.reset();
-  const manager = alertManagerSingleton.get();
-  if (notificationService) {
-    manager.setNotificationService(notificationService);
-  }
-  alertManagerInitialized = true;
-  return manager;
-}
-
-export function getPerformanceAlertManager(): PerformanceAlertManager | null {
-  if (!alertManagerInitialized) return null;
-  return alertManagerSingleton.get();
-}
-
-export function setupDefaultAlerts(manager: PerformanceAlertManager): void {
-  manager.addAlert({
-    metricName: 'orderExecutionLatency',
-    threshold: 5000,
-    operator: 'gt',
-    level: 'warning',
-    duration: 60,
-    title: 'High Order Execution Latency',
-    message: 'Order execution p95 latency ({{value}}ms) exceeds 5000ms threshold',
-  });
-
-  manager.addAlert({
-    metricName: 'arbitrageDetectionLatency',
-    threshold: 500,
-    operator: 'gt',
-    level: 'warning',
-    duration: 30,
-    title: 'High Arbitrage Detection Latency',
-    message: 'Arbitrage detection p95 latency ({{value}}ms) exceeds 500ms threshold',
-  });
-
-  manager.addAlert({
-    metricName: 'websocketErrors',
-    threshold: 10,
-    operator: 'gt',
-    level: 'critical',
-    duration: 0,
-    title: 'High WebSocket Error Rate',
-    message: 'WebSocket error count ({{value}}) exceeds threshold',
-  });
-
-  manager.addAlert({
-    metricName: 'riskCheckLatency',
-    threshold: 100,
-    operator: 'gt',
-    level: 'warning',
-    duration: 60,
-    title: 'High Risk Check Latency',
-    message: 'Risk check p95 latency ({{value}}ms) exceeds 100ms threshold',
-  });
-}

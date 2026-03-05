@@ -16,7 +16,7 @@ const SALT_LENGTH = 32;
 const ENCRYPTED_PREFIX = 'ENC:';
 const FORMAT_VERSION = 'v1';
 
-export function getMasterKey(): Buffer {
+function getMasterKey(): Buffer {
   const envKey = process.env.CONFIG_ENCRYPTION_KEY;
   if (!envKey) {
     throw new Error(

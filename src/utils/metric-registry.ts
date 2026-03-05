@@ -48,7 +48,6 @@ const registrySingleton = createSingleton(() => {
 });
 
 export const getRegistry = registrySingleton.get;
-export const resetRegistry = registrySingleton.reset;
 
 // Pre-defined trading metrics
 export const TradingMetrics = {

@@ -136,7 +136,7 @@ export class TransactionPersistence {
   }
 }
 
-export function isValidTransaction(value: unknown): value is Transaction {
+function isValidTransaction(value: unknown): value is Transaction {
   if (typeof value !== 'object' || value === null) return false;
 
   const tx = value as Partial<Transaction>;
@@ -152,7 +152,7 @@ export function isValidTransaction(value: unknown): value is Transaction {
   );
 }
 
-export function isTransactionStatus(status: string): status is TransactionStatus {
+function isTransactionStatus(status: string): status is TransactionStatus {
   return (
     status === 'pending' ||
     status === 'submitted' ||

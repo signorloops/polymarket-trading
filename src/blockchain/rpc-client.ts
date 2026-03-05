@@ -12,7 +12,6 @@
 
 import { getLogger } from '../utils/logger.js';
 import { getErrorMessage } from '../utils/errors.js';
-import { createSingleton } from '../utils/singleton.js';
 
 export type NetworkType = 'mainnet' | 'mumbai';
 
@@ -347,20 +346,3 @@ export class RpcClient {
   }
 }
 
-// Singleton instance
-const rpcClientSingleton = createSingleton<RpcClient | null>(() => RpcClient.fromEnv());
-
-let rpcClientOverride: RpcClient | null = null;
-
-export function getRpcClient(): RpcClient | null {
-  return rpcClientOverride ?? rpcClientSingleton.get();
-}
-
-export function resetRpcClient(): void {
-  rpcClientOverride = null;
-  rpcClientSingleton.reset();
-}
-
-export function setRpcClient(client: RpcClient): void {
-  rpcClientOverride = client;
-}

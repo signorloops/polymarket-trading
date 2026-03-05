@@ -9,8 +9,6 @@ import {
   isEncrypted,
   encryptValue,
   decryptValue,
-  verifyEncryptionKey,
-  generateKey,
 } from './crypto-utils.js';
 
 // Re-export primitives so existing imports keep working
@@ -182,79 +180,3 @@ export async function decryptEnvFile(filePath: string): Promise<{
   }
 }
 
-export async function runCli(args: string[]): Promise<void> {
-  const command = args[0];
-  switch (command) {
-    case 'encrypt': {
-      const value = args[1];
-      if (!value) { console.error('Usage: config-encryption encrypt <value>'); process.exit(1); }
-      console.log(encryptValue(value));
-      break;
-    }
-    case 'decrypt': {
-      const value = args[1];
-      if (!value) { console.error('Usage: config-encryption decrypt <value>'); process.exit(1); }
-      console.log(decryptValue(value));
-      break;
-    }
-    case 'encrypt-file': {
-      const filePath = args[1] ?? '.env';
-      const result = await encryptEnvFile(filePath);
-      console.log(`Encrypted ${String(result.encrypted)} values, skipped ${String(result.skipped)}`);
-      break;
-    }
-    case 'decrypt-file': {
-      const filePath = args[1] ?? '.env';
-      const result = await decryptEnvFile(filePath);
-      console.log(`Decrypted ${String(result.decrypted)} values, skipped ${String(result.skipped)}`);
-      break;
-    }
-    case 'check': {
-      const filePath = args[1] ?? '.env';
-      const { isSecure, mode, issues } = await checkFilePermissions(filePath);
-      console.log(`File: ${filePath}`);
-      console.log(`Permissions: ${mode.toString(8)}`);
-      console.log(`Secure: ${isSecure ? 'Yes' : 'No'}`);
-      if (issues.length > 0) { console.log('Issues:'); issues.forEach((issue) => { console.log(`  - ${issue}`); }); }
-      break;
-    }
-    case 'fix-permissions': {
-      const filePath = args[1] ?? '.env';
-      await setSecurePermissions(filePath);
-      console.log(`Set secure permissions for ${filePath}`);
-      break;
-    }
-    case 'verify': {
-      const result = verifyEncryptionKey();
-      if (result.valid) { console.log('Encryption key is valid'); }
-      else { console.error(`Encryption key verification failed: ${result.error ?? 'unknown error'}`); process.exit(1); }
-      break;
-    }
-    case 'generate-key': { console.log(generateKey()); break; }
-    default:
-      console.log(`
-Usage: config-encryption <command> [options]
-
-Commands:
-  encrypt <value>              Encrypt a single value
-  decrypt <value>              Decrypt a single value
-  encrypt-file [file]          Encrypt .env file (default: .env)
-  decrypt-file [file]          Decrypt .env file (default: .env)
-  check [file]                 Check file permissions
-  fix-permissions [file]       Set secure file permissions
-  verify                       Verify encryption key is configured correctly
-  generate-key                 Generate a new encryption key
-
-Environment:
-  CONFIG_ENCRYPTION_KEY        Master encryption key (hex string, 64 characters)
-`);
-  }
-}
-
-const scriptPath = process.argv[1];
-if (scriptPath && import.meta.url === `file://${scriptPath}`) {
-  runCli(process.argv.slice(2)).catch((error: unknown) => {
-    console.error(error);
-    process.exit(1);
-  });
-}

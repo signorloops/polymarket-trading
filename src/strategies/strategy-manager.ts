@@ -13,15 +13,12 @@ import { getLogger } from '../utils/logger.js';
 import { getErrorMessage } from '../utils/errors.js';
 import {
   aggregateSignals,
-  priorityAggregation,
-  weightedAggregation,
-  consensusAggregation,
   type AggregationMode,
   type AggregatedSignal,
   type SignalWithStrategy,
 } from './signal-aggregation.js';
 
-export { priorityAggregation, weightedAggregation, consensusAggregation, type AggregatedSignal, type AggregationMode };
+export type { AggregatedSignal, AggregationMode };
 
 export interface StrategyManagerConfig {
   /** Enable simple arbitrage */

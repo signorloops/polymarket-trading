@@ -8,7 +8,6 @@
 import { getLogger, Logger } from '../utils/logger.js';
 import type { AppConfig } from '../utils/config-schema.js';
 import { createDefaultConfig } from '../utils/config-schema.js';
-import { createSingleton } from '../utils/singleton.js';
 
 type Factory<T> = (container: Container) => T;
 
@@ -143,8 +142,3 @@ export function createContainer(config?: AppConfig): Container {
   return container;
 }
 
-// Global container instance
-const containerSingleton = createSingleton(() => createContainer());
-
-export const getContainer = containerSingleton.get;
-export const resetContainer = containerSingleton.reset;
