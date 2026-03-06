@@ -15,6 +15,7 @@ import {
 import { resetExecutionEngine } from './execution/execution-engine.js';
 import { getRiskManager, resetRiskManager } from './execution/risk-manager.js';
 import { resetTransactionTracker } from './blockchain/transaction-tracker.js';
+import { resetMetricsRegistry } from './utils/metrics.js';
 import { initLogger, getLogger } from './utils/logger.js';
 import { validateConfig, printConfigSummary, LOG_CONFIG, NETWORK_CONFIG } from './utils/config.js';
 import { getErrorMessage } from './utils/errors.js';
@@ -345,6 +346,7 @@ export function resetTradingSystem(): void {
   resetExecutionEngine();
   resetRiskManager();
   resetTransactionTracker();
+  resetMetricsRegistry();
 }
 
 /**

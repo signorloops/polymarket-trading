@@ -49,7 +49,6 @@ export class RiskManager {
   private maxDailyPnL = 0;
   private minDailyPnL = 0;
   private circuitBreakerTriggered = false;
-  private lastReset: number = Date.now();
   private logger = getLogger().child({ module: 'RiskManager' });
   private config: Required<RiskManagerConfig>;
 
@@ -324,7 +323,6 @@ export class RiskManager {
     this.dailyPnL = 0;
     this.maxDailyPnL = 0;
     this.minDailyPnL = 0;
-    this.lastReset = Date.now();
     this.logger.info('Daily PnL reset');
   }
 

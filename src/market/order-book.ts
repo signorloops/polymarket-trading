@@ -9,7 +9,6 @@
  * - Slippage estimation
  */
 
-import { getLogger } from '../utils/logger.js';
 import { TRADING_CONFIG } from '../utils/config.js';
 import { SkipList } from './skip-list.js';
 
@@ -61,7 +60,6 @@ export class OrderBook {
   private askDepth = 0;
   private lastUpdate = 0;
   private sequence = 0;
-  private logger = getLogger().child({ module: 'OrderBook' });
 
   constructor(marketId: string) {
     this.marketId = marketId;

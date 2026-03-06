@@ -46,6 +46,11 @@ describe('Counter', () => {
     expect(counter.get({ method: 'POST' })).toBe(2);
   });
 
+  it('should return 0 for unregistered label set', () => {
+    counter.inc({ method: 'GET' });
+    expect(counter.get({ method: 'DELETE' })).toBe(0);
+  });
+
   it('should output prometheus format', () => {
     counter.inc({ method: 'GET' }, 5);
     const output = counter.toPrometheusFormat();
@@ -53,6 +58,14 @@ describe('Counter', () => {
     expect(output).toContain('# HELP test_counter Test counter');
     expect(output).toContain('# TYPE test_counter counter');
     expect(output).toContain('test_counter{method="GET"} 5');
+  });
+
+  it('should output only HELP/TYPE lines when no values', () => {
+    const output = counter.toPrometheusFormat();
+    const lines = output.split('\n');
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain('# HELP');
+    expect(lines[1]).toContain('# TYPE');
   });
 });
 
@@ -83,6 +96,29 @@ describe('Gauge', () => {
   it('should handle negative values', () => {
     gauge.set({}, -5);
     expect(gauge.get()).toBe(-5);
+  });
+
+  it('should inc from zero when no existing value (else branch)', () => {
+    gauge.inc({}, 3);
+    expect(gauge.get()).toBe(3);
+  });
+
+  it('should dec from zero when no existing value', () => {
+    gauge.dec({}, 2);
+    expect(gauge.get()).toBe(-2);
+  });
+
+  it('should return 0 for unregistered label set', () => {
+    gauge.set({ host: 'a' }, 10);
+    expect(gauge.get({ host: 'b' })).toBe(0);
+  });
+
+  it('should output only HELP/TYPE lines when no values', () => {
+    const output = gauge.toPrometheusFormat();
+    const lines = output.split('\n');
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain('# HELP');
+    expect(lines[1]).toContain('# TYPE');
   });
 });
 
@@ -116,6 +152,29 @@ describe('Histogram', () => {
 
     const output = histogram.toPrometheusFormat();
     expect(output).toContain('le="+Inf"');
+  });
+
+  it('should output only HELP/TYPE when no observations', () => {
+    const output = histogram.toPrometheusFormat();
+    const lines = output.split('\n');
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain('# HELP');
+    expect(lines[1]).toContain('# TYPE');
+  });
+
+  it('should handle multiple label sets', () => {
+    histogram.observe({ env: 'prod' }, 0.2);
+    histogram.observe({ env: 'staging' }, 0.8);
+    histogram.observe({ env: 'prod' }, 0.05);
+
+    const output = histogram.toPrometheusFormat();
+    expect(output).toContain('env="prod"');
+    expect(output).toContain('env="staging"');
+  });
+
+  it('should return empty maps from snapshots when no data', () => {
+    expect(histogram.getCountsSnapshot().size).toBe(0);
+    expect(histogram.getTotalsSnapshot().size).toBe(0);
   });
 });
 

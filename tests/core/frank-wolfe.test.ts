@@ -14,6 +14,7 @@ import {
   subtractInPlace,
   dot,
 } from '../../src/core/frank-wolfe.js';
+import { lineSearchKL, lineSearchObjective, adaptiveStepSize } from '../../src/core/line-search.js';
 import { klDivergence } from '../../src/utils/math.js';
 
 describe('FrankWolfe', () => {
@@ -906,5 +907,101 @@ describe('FrankWolfe', () => {
       expect([arr4, arr5, arr6]).toContain(arr2);
       expect([arr4, arr5, arr6]).toContain(arr3);
     });
+  });
+});
+
+describe('lineSearchKL', () => {
+  it('should throw on dimension mismatch between mu and s', () => {
+    expect(() => lineSearchKL([0.5, 0.5], [1], [0.1, 0.2])).toThrow('dimension mismatch');
+  });
+
+  it('should throw on dimension mismatch between mu and gradient', () => {
+    expect(() => lineSearchKL([0.5, 0.5], [0.6, 0.4], [0.1])).toThrow('dimension mismatch');
+  });
+
+  it('should return 0 when mu equals s (denom <= 0)', () => {
+    const gamma = lineSearchKL([0.5, 0.5], [0.5, 0.5], [0.1, -0.1]);
+    expect(gamma).toBe(0);
+  });
+
+  it('should return gamma in [0, 1] for normal inputs', () => {
+    const gamma = lineSearchKL([0.3, 0.7], [0.8, 0.2], [1.0, -0.5]);
+    expect(gamma).toBeGreaterThanOrEqual(0);
+    expect(gamma).toBeLessThanOrEqual(1);
+  });
+
+  it('should clamp negative gamma to 0', () => {
+    // numer = sum(gradient[i] * (s[i] - mu[i])); gamma = -numer/denom
+    // We need numer > 0 so gamma < 0 → clamped to 0
+    // direction = s - mu = [0.5, -0.5], gradient = [1, 1]
+    // numer = 1*0.5 + 1*(-0.5) = 0 → gamma = 0 (boundary)
+    // Use gradient = [2, 1]: numer = 2*0.5 + 1*(-0.5) = 0.5 > 0 → gamma = -0.5/0.5 < 0
+    const gamma = lineSearchKL([0.3, 0.7], [0.8, 0.2], [2.0, 1.0]);
+    expect(gamma).toBe(0);
+  });
+
+  it('should clamp gamma > 1 to 1', () => {
+    // Very large numer relative to denom
+    const gamma = lineSearchKL([0.5, 0.5], [0.50001, 0.49999], [100, -100]);
+    expect(gamma).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('lineSearchObjective', () => {
+  it('should throw on dimension mismatch', () => {
+    expect(() => lineSearchObjective([0.5], [0.5, 0.5], () => 0)).toThrow('dimension mismatch');
+  });
+
+  it('should find optimal step via golden section', () => {
+    // Minimize (1-gamma)*0.5 + gamma*1.0 → should choose gamma near 0 for target 0.5
+    const mu = [0.5, 0.5];
+    const s = [1.0, 0.0];
+    // Quadratic objective centered at 0.7
+    const obj = (c: number[] | Float64Array) => {
+      const x = c[0] ?? 0;
+      return (x - 0.7) ** 2;
+    };
+    const gamma = lineSearchObjective(mu, s, obj);
+    expect(gamma).toBeGreaterThanOrEqual(0);
+    expect(gamma).toBeLessThanOrEqual(1);
+    // Optimal x = 0.7 → 0.5 + gamma*(1-0.5) = 0.7 → gamma = 0.4
+    expect(gamma).toBeCloseTo(0.4, 2);
+  });
+
+  it('should use provided candidateBuffer', () => {
+    const mu = [0.3, 0.7];
+    const s = [0.8, 0.2];
+    const buffer = new Float64Array(2);
+    const gamma = lineSearchObjective(mu, s, () => 1, 40, buffer);
+    expect(gamma).toBeGreaterThanOrEqual(0);
+    expect(gamma).toBeLessThanOrEqual(1);
+  });
+
+  it('should allocate new buffer when candidateBuffer length mismatches', () => {
+    const mu = [0.3, 0.7];
+    const s = [0.8, 0.2];
+    const wrongBuffer = new Float64Array(5); // wrong length
+    const gamma = lineSearchObjective(mu, s, () => 1, 40, wrongBuffer);
+    expect(gamma).toBeGreaterThanOrEqual(0);
+    expect(gamma).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('adaptiveStepSize', () => {
+  it('should return 1 at iteration 0', () => {
+    expect(adaptiveStepSize(0)).toBe(1); // 2 / (0+2) = 1
+  });
+
+  it('should decrease with iterations', () => {
+    const step0 = adaptiveStepSize(0);
+    const step10 = adaptiveStepSize(10);
+    const step100 = adaptiveStepSize(100);
+    expect(step0).toBeGreaterThan(step10);
+    expect(step10).toBeGreaterThan(step100);
+  });
+
+  it('should equal 2/(n+2) formula', () => {
+    expect(adaptiveStepSize(8)).toBeCloseTo(2 / 10, 10);
+    expect(adaptiveStepSize(98)).toBeCloseTo(2 / 100, 10);
   });
 });

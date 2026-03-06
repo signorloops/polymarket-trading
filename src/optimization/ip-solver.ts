@@ -157,7 +157,7 @@ export function solveBinaryIP(
  * Enumerate vertices of the marginal polytope for Frank-Wolfe.
  */
 export function enumerateVertices(
-  constraints: { coefficients: number[]; rhs: number; type: 'equality' | 'inequality' }[],
+  _constraints: { coefficients: number[]; rhs: number; type: 'equality' | 'inequality' }[],
   n: number,
   maxVertices = 100
 ): number[][] {

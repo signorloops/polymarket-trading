@@ -5,6 +5,7 @@ export { type MetricValue, type MetricLabels, Counter, Gauge, Histogram } from '
 export {
   TradingMetrics,
   getRegistry,
+  resetMetricsRegistry,
   recordTrade,
   recordArbitrage,
   getMetricsForScraping,

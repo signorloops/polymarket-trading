@@ -137,7 +137,7 @@ function vertexInitialization(dimension: number, gradientFn: (mu: number[]) => n
 function conditionalGradientInit(
   dimension: number,
   gradientFn: (mu: number[]) => number[],
-  objectiveFn: (mu: number[]) => number,
+  _objectiveFn: (mu: number[]) => number,
   iterations: number
 ): number[] {
   let mu = vectorScale(ones(dimension), 1 / dimension);

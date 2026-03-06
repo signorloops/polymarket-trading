@@ -226,7 +226,6 @@ export class RateLimiter {
 export class AnomalyDetector {
   private tradeHistory: Map<string, number[]> = new Map();
   private maxHistorySize = 100;
-  private logger = getLogger().child({ module: 'AnomalyDetector' });
 
   /**
    * Record a trade for pattern analysis

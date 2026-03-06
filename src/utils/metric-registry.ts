@@ -50,6 +50,7 @@ const registrySingleton = createSingleton(() => {
 });
 
 export const getRegistry = registrySingleton.get;
+export const resetMetricsRegistry = registrySingleton.reset;
 
 // Pre-defined trading metrics
 export const TradingMetrics = {
@@ -147,8 +148,8 @@ export const TradingMetrics = {
 export function recordTrade(
   marketId: string,
   side: 'buy' | 'sell',
-  size: number,
-  price: number,
+  _size: number,
+  _price: number,
   executionTimeMs: number,
   success: boolean
 ): void {
@@ -169,7 +170,7 @@ export function recordTrade(
  */
 export function recordArbitrage(
   eventId: string,
-  profitEstimate: number,
+  _profitEstimate: number,
   executed: boolean,
   actualProfit?: number
 ): void {
