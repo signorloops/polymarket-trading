@@ -11,7 +11,7 @@
 
 import { getLogger } from '../utils/logger.js';
 import { NETWORK_CONFIG } from '../utils/config.js';
-import type { IRpcClient, TransactionReceipt } from './rpc-client.js';
+import type { IRpcClient } from './rpc-client.js';
 import type { IStateStore } from './state-store.js';
 
 export type TransactionStatus =
@@ -143,12 +143,12 @@ export class TransactionTracker {
     if (this.stateStore) {
       try {
         const state = await this.stateStore.load();
-        if (state?.transactions?.length) {
+        if (state?.transactions.length) {
           for (const tx of state.transactions) {
             this.transactions.set(tx.hash, tx);
           }
-          this.lastBlockNumber = state.lastBlockNumber ?? 0;
-          this.lastBlockHash = state.lastBlockHash ?? null;
+          this.lastBlockNumber = state.lastBlockNumber;
+          this.lastBlockHash = state.lastBlockHash;
           this.logger.info('Restored state from storage', {
             transactions: state.transactions.length,
             lastBlockNumber: this.lastBlockNumber,
@@ -167,11 +167,7 @@ export class TransactionTracker {
   /**
    * Start tracking a new transaction
    */
-  trackTransaction(
-    hash: string,
-    orderId: string,
-    marketId: string
-  ): Transaction {
+  trackTransaction(hash: string, orderId: string, marketId: string): Transaction {
     const tx: Transaction = {
       hash,
       orderId,
@@ -190,7 +186,7 @@ export class TransactionTracker {
     });
 
     this.startPolling();
-    this.saveState();
+    void this.saveState();
 
     return tx;
   }
@@ -239,7 +235,7 @@ export class TransactionTracker {
     });
 
     this.emit(tx);
-    this.saveState();
+    void this.saveState();
 
     // Clean up finalized or failed transactions after a delay
     if (update.status === 'finalized' || update.status === 'failed') {
@@ -279,9 +275,7 @@ export class TransactionTracker {
    * Get all transactions for a market
    */
   getMarketTransactions(marketId: string): Transaction[] {
-    return Array.from(this.transactions.values()).filter(
-      (tx) => tx.marketId === marketId
-    );
+    return Array.from(this.transactions.values()).filter((tx) => tx.marketId === marketId);
   }
 
   /**
@@ -335,7 +329,7 @@ export class TransactionTracker {
 
     // Emit for external handling (the actual resubmission must be done by the caller)
     this.emit(tx);
-    this.saveState();
+    void this.saveState();
 
     return true;
   }
@@ -366,10 +360,7 @@ export class TransactionTracker {
         }
 
         // Check if confirmed with enough blocks
-        if (
-          tx.status === 'confirmed' &&
-          tx.confirmations >= confirmations
-        ) {
+        if (tx.status === 'confirmed' && tx.confirmations >= confirmations) {
           resolve(tx);
           return;
         }
@@ -445,7 +436,7 @@ export class TransactionTracker {
     const existed = this.transactions.delete(hash);
     if (existed) {
       this.logger.debug('Transaction removed from tracking', { hash });
-      this.saveState();
+      void this.saveState();
     }
     return existed;
   }
@@ -453,19 +444,16 @@ export class TransactionTracker {
   /**
    * Clear old completed transactions
    */
-  clearOldTransactions(maxAgeMs: number = 3600000): number {
+  clearOldTransactions(maxAgeMs = 3600000): number {
     const now = Date.now();
     let removed = 0;
 
     for (const [hash, tx] of this.transactions.entries()) {
       const isComplete =
-        tx.status === 'finalized' ||
-        tx.status === 'failed' ||
-        tx.status === 'expired';
+        tx.status === 'finalized' || tx.status === 'failed' || tx.status === 'expired';
 
       if (isComplete) {
-        const lastUpdate =
-          tx.finalizedAt ?? tx.failedAt ?? tx.confirmedAt ?? tx.createdAt;
+        const lastUpdate = tx.finalizedAt ?? tx.failedAt ?? tx.confirmedAt ?? tx.createdAt;
 
         if (now - lastUpdate > maxAgeMs) {
           this.transactions.delete(hash);
@@ -475,8 +463,8 @@ export class TransactionTracker {
     }
 
     if (removed > 0) {
-      this.logger.info(`Cleared ${removed} old transactions`);
-      this.saveState();
+      this.logger.info(`Cleared ${String(removed)} old transactions`);
+      void this.saveState();
     }
 
     return removed;
@@ -545,10 +533,10 @@ export class TransactionTracker {
     if (this.pollInterval) return;
 
     this.pollInterval = setInterval(() => {
-      this.pollTransactions();
+      void this.pollTransactions();
     }, POLL_INTERVAL_MS);
 
-    this.pollInterval.unref?.();
+    this.pollInterval.unref();
   }
 
   private async pollTransactions(): Promise<void> {
@@ -587,7 +575,6 @@ export class TransactionTracker {
         for (const tx of this.getPendingTransactions()) {
           await this.queryTransactionStatus(tx, currentBlock);
         }
-
       } catch (error) {
         this.logger.error('Error polling blockchain', {
           error: error instanceof Error ? error.message : String(error),
@@ -664,7 +651,6 @@ export class TransactionTracker {
       }
 
       this.updateTransaction(update);
-
     } catch (error) {
       this.logger.error('Failed to query transaction status', {
         hash: tx.hash,
@@ -699,10 +685,11 @@ export class TransactionTracker {
 
         for (const [hash, tx] of this.transactions.entries()) {
           // Transactions confirmed in the reorged blocks need to be rechecked
-          if (tx.blockNumber &&
-              tx.blockNumber >= this.lastBlockNumber - depth &&
-              tx.blockNumber <= this.lastBlockNumber) {
-
+          if (
+            tx.blockNumber &&
+            tx.blockNumber >= this.lastBlockNumber - depth &&
+            tx.blockNumber <= this.lastBlockNumber
+          ) {
             // Check if this transaction is in the new chain
             try {
               const receipt = await this.rpcClient.getTransactionReceipt(hash);
@@ -714,7 +701,7 @@ export class TransactionTracker {
                 this.updateTransaction({
                   hash,
                   status: 'pending',
-                  error: `Block reorganization detected at block ${this.lastBlockNumber}`,
+                  error: `Block reorganization detected at block ${String(this.lastBlockNumber)}`,
                 });
               }
             } catch {
@@ -825,12 +812,9 @@ export class TransactionTracker {
 
   private scheduleCleanup(hash: string): void {
     // Remove finalized/failed transactions after 1 hour
-    setTimeout(
-      () => {
-        this.removeTransaction(hash);
-      },
-      3600000
-    ).unref?.();
+    setTimeout(() => {
+      this.removeTransaction(hash);
+    }, 3600000).unref();
   }
 
   /**
@@ -862,7 +846,7 @@ export class TransactionTracker {
     for (const tx of transactions) {
       this.transactions.set(tx.hash, tx);
     }
-    this.logger.info(`Loaded ${transactions.length} transactions from storage`);
+    this.logger.info(`Loaded ${String(transactions.length)} transactions from storage`);
     this.startPolling();
   }
 
@@ -871,9 +855,10 @@ export class TransactionTracker {
    */
   getRecentlyConfirmedTransactions(): Transaction[] {
     return Array.from(this.transactions.values()).filter(
-      tx => (tx.status === 'confirmed' || tx.status === 'finalized') &&
-            tx.blockNumber !== undefined &&
-            this.lastBlockNumber - tx.blockNumber < this.finalizationBlocks
+      (tx) =>
+        (tx.status === 'confirmed' || tx.status === 'finalized') &&
+        tx.blockNumber !== undefined &&
+        this.lastBlockNumber - tx.blockNumber < this.finalizationBlocks
     );
   }
 
@@ -882,23 +867,21 @@ export class TransactionTracker {
    */
   async waitForCriticalTransactions(timeoutMs: number): Promise<void> {
     const criticalStatuses = ['pending', 'submitted'];
-    const critical = this.getAllTransactions().filter(
-      tx => criticalStatuses.includes(tx.status)
-    );
+    const critical = this.getAllTransactions().filter((tx) => criticalStatuses.includes(tx.status));
 
     if (critical.length === 0) return;
 
-    this.logger.info(`Waiting for ${critical.length} critical transactions`, {
+    this.logger.info(`Waiting for ${String(critical.length)} critical transactions`, {
       timeoutMs,
-      hashes: critical.map(tx => tx.hash),
+      hashes: critical.map((tx) => tx.hash),
     });
 
     const startTime = Date.now();
 
     return new Promise((resolve) => {
       const check = () => {
-        const pending = this.getAllTransactions().filter(
-          tx => criticalStatuses.includes(tx.status)
+        const pending = this.getAllTransactions().filter((tx) =>
+          criticalStatuses.includes(tx.status)
         );
 
         if (pending.length === 0 || Date.now() - startTime > timeoutMs) {
@@ -955,9 +938,7 @@ export function getTransactionTracker(
     finalizationBlocks?: number;
   }
 ): TransactionTracker {
-  if (!globalTracker) {
-    globalTracker = new TransactionTracker(rpcUrl, options);
-  }
+  globalTracker ??= new TransactionTracker(rpcUrl, options);
   return globalTracker;
 }
 

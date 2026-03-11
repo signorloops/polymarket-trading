@@ -153,10 +153,7 @@ export class RpcClient implements IRpcClient {
   /**
    * Make JSON-RPC request with retry logic
    */
-  private async makeRequest<T>(
-    method: string,
-    params: unknown[] = []
-  ): Promise<T> {
+  private async makeRequest<T>(method: string, params: unknown[] = []): Promise<T> {
     const url = this.buildUrl();
     const body: JsonRpcRequest = {
       jsonrpc: '2.0',
@@ -177,24 +174,24 @@ export class RpcClient implements IRpcClient {
           body: JSON.stringify(body),
         };
 
-      if (this.config.apiKey) {
-        (requestInit.headers as Record<string, string>)['X-API-Key'] = this.config.apiKey;
-      }
-
-      if (this.abortController?.signal) {
-        requestInit.signal = this.abortController.signal;
-      }
-
-      const response = await fetch(url, requestInit);
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        if (this.config.apiKey) {
+          (requestInit.headers as Record<string, string>)['X-API-Key'] = this.config.apiKey;
         }
 
-        const data = await response.json() as JsonRpcResponse<T>;
+        if (this.abortController?.signal) {
+          requestInit.signal = this.abortController.signal;
+        }
+
+        const response = await fetch(url, requestInit);
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${String(response.status)}: ${response.statusText}`);
+        }
+
+        const data = (await response.json()) as JsonRpcResponse<T>;
 
         if (data.error) {
-          throw new Error(`RPC Error ${data.error.code}: ${data.error.message}`);
+          throw new Error(`RPC Error ${String(data.error.code)}: ${data.error.message}`);
         }
 
         if (data.result === undefined) {
@@ -236,7 +233,7 @@ export class RpcClient implements IRpcClient {
    * Sleep utility
    */
   private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**
@@ -267,7 +264,7 @@ export class RpcClient implements IRpcClient {
         gasUsed: result.gasUsed,
         effectiveGasPrice: result.effectiveGasPrice,
         cumulativeGasUsed: result.cumulativeGasUsed,
-        logs: result.logs.map(log => ({
+        logs: result.logs.map((log) => ({
           address: log.address,
           topics: log.topics,
           data: log.data,
@@ -295,7 +292,7 @@ export class RpcClient implements IRpcClient {
       [[hash], { searchTransactionHistory: true }]
     );
 
-    if (!result || !result.confirmationStatus) return null;
+    if (!result?.confirmationStatus) return null;
 
     // Helius returns slot instead of block number
     const slot = result.slot;
@@ -317,9 +314,7 @@ export class RpcClient implements IRpcClient {
   /**
    * Get transaction status (simplified)
    */
-  async getTransactionStatus(
-    hash: string
-  ): Promise<'pending' | 'confirmed' | 'failed' | null> {
+  async getTransactionStatus(hash: string): Promise<'pending' | 'confirmed' | 'failed' | null> {
     try {
       const receipt = await this.getTransactionReceipt(hash);
       if (!receipt) return 'pending';
@@ -334,9 +329,7 @@ export class RpcClient implements IRpcClient {
    * Get current block number
    */
   async getBlockNumber(): Promise<number> {
-    const method = this.config.provider === 'helius'
-      ? 'getSlot'
-      : 'eth_blockNumber';
+    const method = this.config.provider === 'helius' ? 'getSlot' : 'eth_blockNumber';
 
     const result = await this.makeRequest<string | number>(method);
     const blockNumber = typeof result === 'string' ? parseInt(result, 16) : result;
@@ -348,9 +341,7 @@ export class RpcClient implements IRpcClient {
   /**
    * Get block information
    */
-  async getBlock(
-    blockNumber: number | 'latest' | 'finalized' | 'safe'
-  ): Promise<BlockInfo> {
+  async getBlock(blockNumber: number | 'latest' | 'finalized' | 'safe'): Promise<BlockInfo> {
     const isHelius = this.config.provider === 'helius';
 
     if (isHelius && typeof blockNumber === 'number') {
@@ -374,9 +365,8 @@ export class RpcClient implements IRpcClient {
     }
 
     // Ethereum JSON-RPC
-    const blockParam = typeof blockNumber === 'number'
-      ? `0x${blockNumber.toString(16)}`
-      : blockNumber;
+    const blockParam =
+      typeof blockNumber === 'number' ? `0x${blockNumber.toString(16)}` : blockNumber;
 
     const result = await this.makeRequest<{
       hash: string;
@@ -420,7 +410,7 @@ export class RpcClient implements IRpcClient {
     }
 
     // For Helius, check confirmation status
-    const status = await this.makeRequest<Array<{ confirmationStatus: string } | null>>(
+    const status = await this.makeRequest<({ confirmationStatus: string } | null)[]>(
       'getSignatureStatuses',
       [[hash]]
     );
@@ -461,10 +451,10 @@ export class RpcClient implements IRpcClient {
         const basePrice = BigInt(result);
 
         this.gasPriceCache = {
-          safeLow: (basePrice * 100n / 100n).toString(),
-          standard: (basePrice * 120n / 100n).toString(),
-          fast: (basePrice * 150n / 100n).toString(),
-          fastest: (basePrice * 200n / 100n).toString(),
+          safeLow: ((basePrice * 100n) / 100n).toString(),
+          standard: ((basePrice * 120n) / 100n).toString(),
+          fast: ((basePrice * 150n) / 100n).toString(),
+          fastest: ((basePrice * 200n) / 100n).toString(),
           blockNumber: await this.getBlockNumber(),
           timestamp: now,
         };

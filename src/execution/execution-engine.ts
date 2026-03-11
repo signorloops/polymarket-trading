@@ -40,7 +40,7 @@ export class ExecutionEngine implements LifecycleComponent {
     this.cleanupInterval = setInterval(() => {
       this.orderManager.clearOldOrders(3600000); // Clean orders older than 1 hour
     }, 300000);
-    this.cleanupInterval.unref?.(); // Allow process to exit if this is the only active handle
+    this.cleanupInterval.unref(); // Allow process to exit if this is the only active handle
   }
 
   /**
@@ -76,27 +76,29 @@ export class ExecutionEngine implements LifecycleComponent {
   /**
    * Cancel all pending orders
    */
-  async cancelAllPending(timeoutMs: number = 10000): Promise<void> {
+  async cancelAllPending(timeoutMs = 10000): Promise<void> {
     const pending = this.orderManager.getAllPending();
     if (pending.length === 0) return;
 
-    this.logger.info(`Cancelling ${pending.length} pending orders...`);
+    this.logger.info(`Cancelling ${String(pending.length)} pending orders...`);
 
     const startTime = Date.now();
     const results = await Promise.all(
-      pending.map(order =>
+      pending.map((order) =>
         Promise.race([
           this.cancelOrder(order.id),
           new Promise<boolean>((_, reject) =>
-            setTimeout(() => reject(new Error('Cancel timeout')), timeoutMs)
-          )
+            setTimeout(() => {
+              reject(new Error('Cancel timeout'));
+            }, timeoutMs)
+          ),
         ]).catch(() => false)
       )
     );
 
-    const cancelled = results.filter(r => r).length;
-    this.logger.info(`Cancelled ${cancelled}/${pending.length} orders`, {
-      durationMs: Date.now() - startTime
+    const cancelled = results.filter((r) => r).length;
+    this.logger.info(`Cancelled ${String(cancelled)}/${String(pending.length)} orders`, {
+      durationMs: Date.now() - startTime,
     });
   }
 
@@ -219,15 +221,19 @@ export class ExecutionEngine implements LifecycleComponent {
 
     // Execute all orders in parallel
     const results = await Promise.all(
-      orders.map((order) => this.executeOrder(order).catch((error: unknown): OrderStatus => ({
-        orderId: order.id,
-        status: 'error',
-        filledSize: 0,
-        remainingSize: order.size,
-        avgPrice: 0,
-        timestamp: Date.now(),
-        error: error instanceof Error ? error.message : String(error),
-      })))
+      orders.map((order) =>
+        this.executeOrder(order).catch(
+          (error: unknown): OrderStatus => ({
+            orderId: order.id,
+            status: 'error',
+            filledSize: 0,
+            remainingSize: order.size,
+            avgPrice: 0,
+            timestamp: Date.now(),
+            error: error instanceof Error ? error.message : String(error),
+          })
+        )
+      )
     );
 
     const executionTime = Date.now() - startTime;
@@ -267,10 +273,7 @@ export class ExecutionEngine implements LifecycleComponent {
   /**
    * Execute an arbitrage trade with multiple legs
    */
-  async executeArbitrage(
-    legs: TradeLeg[],
-    arbitrageId: string
-  ): Promise<ExecutionResult> {
+  async executeArbitrage(legs: TradeLeg[], arbitrageId: string): Promise<ExecutionResult> {
     this.logger.info(`Executing arbitrage ${arbitrageId} with ${String(legs.length)} legs`);
 
     // Convert legs to orders
@@ -289,7 +292,10 @@ export class ExecutionEngine implements LifecycleComponent {
 
     // Check for partial fills
     const partialFills = result.orders.filter(
-      (o) => o.status === 'partial' || (o.status === 'filled' && o.filledSize < (orders.find(oo => oo.id === o.orderId)?.size ?? 0))
+      (o) =>
+        o.status === 'partial' ||
+        (o.status === 'filled' &&
+          o.filledSize < (orders.find((oo) => oo.id === o.orderId)?.size ?? 0))
     );
 
     if (partialFills.length > 0) {
@@ -479,12 +485,10 @@ export class ExecutionEngine implements LifecycleComponent {
     }
 
     // Get filled and failed orders
-    const filledOrders = orders.filter(
-      o => o.status === 'filled' || o.status === 'partial'
-    );
+    const filledOrders = orders.filter((o) => o.status === 'filled' || o.status === 'partial');
     const failedOrderIds = orders
-      .filter(o => o.status === 'error' || o.status === 'cancelled')
-      .map(o => o.orderId);
+      .filter((o) => o.status === 'error' || o.status === 'cancelled')
+      .map((o) => o.orderId);
 
     if (filledOrders.length === 0) {
       this.logger.info(`No filled orders to handle for ${arbitrageId}`);
@@ -493,11 +497,7 @@ export class ExecutionEngine implements LifecycleComponent {
 
     // Consult risk manager for action
     const riskManager = getRiskManager();
-    const decision = riskManager.handlePartialFill(
-      filledOrders,
-      failedOrderIds,
-      arbitrageId
-    );
+    const decision = riskManager.handlePartialFill(filledOrders, failedOrderIds, arbitrageId);
 
     this.logger.info(`Partial fill decision for ${arbitrageId}`, {
       action: decision.action,
@@ -533,9 +533,9 @@ export class ExecutionEngine implements LifecycleComponent {
 
     for (const order of filledOrders) {
       // Find original leg to determine the opposite side
-      const leg = originalLegs.find(l => {
+      const leg = originalLegs.find((l) => {
         // Match by constructing expected order ID
-        const expectedOrderId = `${arbitrageId}-${originalLegs.indexOf(l)}`;
+        const expectedOrderId = `${arbitrageId}-${String(originalLegs.indexOf(l))}`;
         return order.orderId === expectedOrderId;
       });
 
@@ -564,7 +564,7 @@ export class ExecutionEngine implements LifecycleComponent {
     }
 
     // Execute unwind orders in parallel
-    this.logger.info(`Executing ${unwindOrders.length} unwind orders for ${arbitrageId}`);
+    this.logger.info(`Executing ${String(unwindOrders.length)} unwind orders for ${arbitrageId}`);
     const result = await this.executeParallel(unwindOrders);
 
     if (result.success) {
@@ -590,8 +590,8 @@ export class ExecutionEngine implements LifecycleComponent {
     this.logger.info(`Hedging partial fill for ${arbitrageId}`);
 
     // Find failed legs
-    const failedLegs = originalLegs.filter(leg => {
-      const expectedOrderId = `${arbitrageId}-${originalLegs.indexOf(leg)}`;
+    const failedLegs = originalLegs.filter((leg) => {
+      const expectedOrderId = `${arbitrageId}-${String(originalLegs.indexOf(leg))}`;
       return failedOrderIds.includes(expectedOrderId);
     });
 
@@ -601,7 +601,7 @@ export class ExecutionEngine implements LifecycleComponent {
     }
 
     // Try to execute failed legs as hedge
-    const hedgeOrders: TradeOrder[] = failedLegs.map(leg => ({
+    const hedgeOrders: TradeOrder[] = failedLegs.map((leg) => ({
       id: `${arbitrageId}-hedge-${leg.marketId}`,
       marketId: leg.marketId,
       side: leg.side,
@@ -611,7 +611,7 @@ export class ExecutionEngine implements LifecycleComponent {
       timeInForce: 'IOC',
     }));
 
-    this.logger.info(`Executing ${hedgeOrders.length} hedge orders for ${arbitrageId}`);
+    this.logger.info(`Executing ${String(hedgeOrders.length)} hedge orders for ${arbitrageId}`);
     const result = await this.executeParallel(hedgeOrders);
 
     if (result.success) {
@@ -628,11 +628,7 @@ export class ExecutionEngine implements LifecycleComponent {
   /**
    * Alert for manual intervention
    */
-  private alertManualIntervention(
-    arbitrageId: string,
-    reason: string,
-    details: string[]
-  ): void {
+  private alertManualIntervention(arbitrageId: string, reason: string, details: string[]): void {
     this.logger.error(`MANUAL INTERVENTION REQUIRED for ${arbitrageId}`, {
       reason,
       details,

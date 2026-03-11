@@ -135,7 +135,10 @@ export class PolymarketWebSocketClient implements LifecycleComponent {
         this.handleMessage(message);
       } catch (error) {
         const dataStr = this.webSocketDataToString(data);
-        this.logger.error('Failed to parse message', { error: error instanceof Error ? error.message : String(error), data: dataStr });
+        this.logger.error('Failed to parse message', {
+          error: error instanceof Error ? error.message : String(error),
+          data: dataStr,
+        });
       }
     });
 
@@ -175,7 +178,10 @@ export class PolymarketWebSocketClient implements LifecycleComponent {
         this.emit({ type: 'orderbook', data: msg.data as WsOrderBookUpdate });
         break;
       case 'price':
-        this.emit({ type: 'price', data: msg.data as { marketId: string; price: string; timestamp: string } });
+        this.emit({
+          type: 'price',
+          data: msg.data as { marketId: string; price: string; timestamp: string },
+        });
         break;
       default:
         this.logger.debug('Unknown message type', { type: msg.type });
@@ -243,7 +249,7 @@ export class PolymarketWebSocketClient implements LifecycleComponent {
     this.reconnectTimer = setTimeout(() => {
       this.connect();
     }, delay);
-    this.reconnectTimer.unref?.();
+    this.reconnectTimer.unref();
   }
 
   private startHeartbeat(): void {
@@ -252,7 +258,7 @@ export class PolymarketWebSocketClient implements LifecycleComponent {
         this.ws.ping();
       }
     }, 30000);
-    this.heartbeatTimer.unref?.();
+    this.heartbeatTimer.unref();
   }
 
   private clearTimers(): void {
@@ -269,12 +275,13 @@ export class PolymarketWebSocketClient implements LifecycleComponent {
   /**
    * Lifecycle: Destroy the WebSocket client
    */
-  async destroy(): Promise<void> {
+  destroy(): Promise<void> {
     this.logger.info('Destroying PolymarketWebSocketClient...');
     this.disconnect();
     this.handlers.clear();
     this.subscribedMarkets.clear();
     this.logger.info('PolymarketWebSocketClient destroyed');
+    return Promise.resolve();
   }
 
   /**
@@ -293,7 +300,10 @@ export class PolymarketWebSocketClient implements LifecycleComponent {
 // Singleton instance
 let globalWsClient: PolymarketWebSocketClient | null = null;
 
-export function getPolymarketWebSocketClient(url?: string, apiKey?: string): PolymarketWebSocketClient {
+export function getPolymarketWebSocketClient(
+  url?: string,
+  apiKey?: string
+): PolymarketWebSocketClient {
   globalWsClient ??= new PolymarketWebSocketClient(url, apiKey);
   return globalWsClient;
 }

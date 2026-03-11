@@ -147,13 +147,19 @@ export class DataPipeline implements LifecycleComponent {
 
     this.ws.on('message', (wsData: WebSocket.Data) => {
       try {
-        const dataStr = typeof wsData === 'string' ? wsData : Buffer.from(wsData as Buffer).toString();
+        const dataStr =
+          typeof wsData === 'string' ? wsData : Buffer.from(wsData as Buffer).toString();
         const message: unknown = JSON.parse(dataStr);
         this.handleMessage(message);
       } catch (error) {
         this.logger.error('Failed to parse message', {
           error: error instanceof Error ? error.message : String(error),
-          data: typeof wsData === 'string' ? wsData : Buffer.from(wsData as Buffer).toString().slice(0, 200),
+          data:
+            typeof wsData === 'string'
+              ? wsData
+              : Buffer.from(wsData as Buffer)
+                  .toString()
+                  .slice(0, 200),
         });
       }
     });
@@ -209,14 +215,21 @@ export class DataPipeline implements LifecycleComponent {
   }
 
   private isValidMessage(msg: unknown): msg is { event_type: string } & Record<string, unknown> {
-    return typeof msg === 'object' && msg !== null && 'event_type' in msg && typeof (msg as Record<string, unknown>).event_type === 'string';
+    return (
+      typeof msg === 'object' &&
+      msg !== null &&
+      'event_type' in msg &&
+      typeof (msg as Record<string, unknown>).event_type === 'string'
+    );
   }
 
   private handleTradeMessage(msg: Record<string, unknown>): void {
     const rawMarketId = msg.market_id;
     const rawEventId = msg.event_id;
-    const marketId = typeof rawMarketId === 'string' || typeof rawMarketId === 'number' ? String(rawMarketId) : '';
-    const eventId = typeof rawEventId === 'string' || typeof rawEventId === 'number' ? String(rawEventId) : '';
+    const marketId =
+      typeof rawMarketId === 'string' || typeof rawMarketId === 'number' ? String(rawMarketId) : '';
+    const eventId =
+      typeof rawEventId === 'string' || typeof rawEventId === 'number' ? String(rawEventId) : '';
     const data: MarketData = {
       marketId,
       eventId,
@@ -247,7 +260,8 @@ export class DataPipeline implements LifecycleComponent {
       : [];
 
     const rawMarketId = msg.market_id;
-    const marketId = typeof rawMarketId === 'string' || typeof rawMarketId === 'number' ? String(rawMarketId) : '';
+    const marketId =
+      typeof rawMarketId === 'string' || typeof rawMarketId === 'number' ? String(rawMarketId) : '';
 
     // Validate sequence number
     const sequence = typeof msg.sequence === 'number' ? msg.sequence : undefined;
@@ -279,8 +293,10 @@ export class DataPipeline implements LifecycleComponent {
     // Convert price change to trade-like event for processing
     const rawMarketId = msg.market_id;
     const rawEventId = msg.event_id;
-    const marketId = typeof rawMarketId === 'string' || typeof rawMarketId === 'number' ? String(rawMarketId) : '';
-    const eventId = typeof rawEventId === 'string' || typeof rawEventId === 'number' ? String(rawEventId) : '';
+    const marketId =
+      typeof rawMarketId === 'string' || typeof rawMarketId === 'number' ? String(rawMarketId) : '';
+    const eventId =
+      typeof rawEventId === 'string' || typeof rawEventId === 'number' ? String(rawEventId) : '';
     const data: MarketData = {
       marketId,
       eventId,
@@ -489,7 +505,7 @@ export class DataPipeline implements LifecycleComponent {
     this.reconnectTimer = setTimeout(() => {
       this.connect();
     }, delay);
-    this.reconnectTimer.unref?.();
+    this.reconnectTimer.unref();
   }
 
   private startHeartbeat(): void {
@@ -499,7 +515,7 @@ export class DataPipeline implements LifecycleComponent {
         this.ws.ping();
       }
     }, 30000);
-    this.heartbeatTimer.unref?.();
+    this.heartbeatTimer.unref();
   }
 
   private clearTimers(): void {
@@ -516,7 +532,7 @@ export class DataPipeline implements LifecycleComponent {
   /**
    * Lifecycle: Destroy the data pipeline
    */
-  async destroy(): Promise<void> {
+  destroy(): Promise<void> {
     this.logger.info('Destroying DataPipeline...');
 
     // Disconnect WebSocket
@@ -529,6 +545,7 @@ export class DataPipeline implements LifecycleComponent {
     this.sequenceTracker.clear();
 
     this.logger.info('DataPipeline destroyed');
+    return Promise.resolve();
   }
 
   /**

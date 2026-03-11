@@ -100,7 +100,10 @@ export const WalletConfigSchema = z.object({
     .optional(),
 
   /** Wallet address */
-  WALLET_ADDRESS: z.string().regex(/^0x[a-fA-F0-9]{40}$/).optional(),
+  WALLET_ADDRESS: z
+    .string()
+    .regex(/^0x[a-fA-F0-9]{40}$/)
+    .optional(),
 });
 
 export type WalletConfig = z.infer<typeof WalletConfigSchema>;
@@ -251,7 +254,8 @@ export function parseConfigFromEnv(): AppConfig {
       WALLET_ADDRESS: process.env.WALLET_ADDRESS,
     }),
     logging: LogConfigSchema.parse({
-      LOG_LEVEL: (process.env.LOG_LEVEL as 'debug' | 'info' | 'warn' | 'error' | undefined) ?? 'info',
+      LOG_LEVEL:
+        (process.env.LOG_LEVEL as 'debug' | 'info' | 'warn' | 'error' | undefined) ?? 'info',
       SILENT: process.env.SILENT === 'true',
       STRUCTURED_LOGGING: process.env.STRUCTURED_LOGGING === 'true',
     }),
@@ -267,18 +271,21 @@ export function parseConfigFromEnv(): AppConfig {
       CIRCUIT_BREAKER_ENABLED: process.env.CIRCUIT_BREAKER_ENABLED !== 'false',
     }),
     blockchain: BlockchainConfigSchema.parse({
-      RPC_URL: process.env.RPC_URL || process.env.BLOCKCHAIN_RPC_URL,
-      RPC_PROVIDER: (process.env.RPC_PROVIDER as 'helius' | 'alchemy' | 'custom') ?? 'custom',
+      RPC_URL: process.env.RPC_URL ?? process.env.BLOCKCHAIN_RPC_URL,
+      RPC_PROVIDER: (process.env.RPC_PROVIDER ?? 'custom') as 'helius' | 'alchemy' | 'custom',
       RPC_TIMEOUT_MS: parseInt(process.env.RPC_TIMEOUT_MS ?? '30000', 10),
       RPC_MAX_RETRIES: parseInt(process.env.RPC_MAX_RETRIES ?? '3', 10),
       RPC_RETRY_DELAY_MS: parseInt(process.env.RPC_RETRY_DELAY_MS ?? '1000', 10),
       CONFIRMATION_BLOCKS: parseInt(process.env.CONFIRMATION_BLOCKS ?? '12', 10),
       FINALIZATION_BLOCKS: parseInt(process.env.FINALIZATION_BLOCKS ?? '128', 10),
-      STATE_STORE_TYPE: (process.env.STATE_STORE_TYPE as 'file' | 'redis' | 'memory') ?? 'file',
+      STATE_STORE_TYPE: (process.env.STATE_STORE_TYPE ?? 'file') as 'file' | 'redis' | 'memory',
       STATE_STORE_PATH: process.env.STATE_STORE_PATH ?? './data/transactions.json',
       ENABLE_REORG_DETECTION: process.env.ENABLE_REORG_DETECTION !== 'false',
       GAS_PRICE_THRESHOLD_GWEI: parseFloat(process.env.GAS_PRICE_THRESHOLD_GWEI ?? '0'),
-      STUCK_TRANSACTION_THRESHOLD_MS: parseInt(process.env.STUCK_TRANSACTION_THRESHOLD_MS ?? '300000', 10),
+      STUCK_TRANSACTION_THRESHOLD_MS: parseInt(
+        process.env.STUCK_TRANSACTION_THRESHOLD_MS ?? '300000',
+        10
+      ),
     }),
   };
 }

@@ -15,7 +15,9 @@ export default {
       },
     ],
   },
-  testMatch: ['**/tests/**/*.test.ts'],
+  testMatch: ['**/tests/**/*.test.ts', '**/tests/**/*.test.js'],
+  testPathIgnorePatterns: ['<rootDir>/.worktrees/'],
+  modulePathIgnorePatterns: ['<rootDir>/.worktrees/'],
   collectCoverageFrom: ['src/**/*.ts', '!src/**/*.d.ts'],
   coverageThreshold: {
     global: {

@@ -106,7 +106,9 @@ export class LifecycleManager implements ILifecycleManager {
     }
 
     this.components.set(component.id, component);
-    this.logger.debug(`Registered component: ${component.id} (priority: ${component.priority})`);
+    this.logger.debug(
+      `Registered component: ${component.id} (priority: ${String(component.priority)})`
+    );
   }
 
   /**
@@ -128,9 +130,7 @@ export class LifecycleManager implements ILifecycleManager {
    * Get components sorted by priority (ascending)
    */
   private getSortedComponents(): LifecycleComponent[] {
-    return Array.from(this.components.values()).sort(
-      (a, b) => a.priority - b.priority
-    );
+    return Array.from(this.components.values()).sort((a, b) => a.priority - b.priority);
   }
 
   /**
@@ -163,7 +163,7 @@ export class LifecycleManager implements ILifecycleManager {
         this.config.onPhaseComplete?.(phase.name, result.durationMs);
 
         if (!result.success && !phase.continueOnError) {
-          throw new Error(`Phase ${phase.name} failed: ${result.error}`);
+          throw new Error(`Phase ${phase.name} failed: ${result.error ?? 'unknown error'}`);
         }
       }
 
@@ -182,10 +182,8 @@ export class LifecycleManager implements ILifecycleManager {
       phaseResults.push(componentResult);
 
       // Clear force exit timer
-      if (this.forceExitTimer) {
-        clearTimeout(this.forceExitTimer);
-        this.forceExitTimer = null;
-      }
+      clearTimeout(this.forceExitTimer);
+      this.forceExitTimer = null;
 
       const stats: ShutdownStats = {
         totalDurationMs: Date.now() - startTime,
@@ -218,13 +216,10 @@ export class LifecycleManager implements ILifecycleManager {
     this.logger.debug(`Executing phase: ${phase.name}`);
 
     try {
-      await Promise.race([
-        phase.execute(),
-        this.createTimeout(phase.timeoutMs, phase.name),
-      ]);
+      await Promise.race([phase.execute(), this.createTimeout(phase.timeoutMs, phase.name)]);
 
       const durationMs = Date.now() - startTime;
-      this.logger.debug(`Phase complete: ${phase.name} (${durationMs}ms)`);
+      this.logger.debug(`Phase complete: ${phase.name} (${String(durationMs)}ms)`);
 
       return {
         name: phase.name,
@@ -255,7 +250,7 @@ export class LifecycleManager implements ILifecycleManager {
   private createTimeout(ms: number, context: string): Promise<never> {
     return new Promise((_, reject) => {
       setTimeout(() => {
-        reject(new Error(`Timeout after ${ms}ms: ${context}`));
+        reject(new Error(`Timeout after ${String(ms)}ms: ${context}`));
       }, ms);
     });
   }
@@ -266,7 +261,7 @@ export class LifecycleManager implements ILifecycleManager {
   private async destroyComponents(): Promise<void> {
     const components = this.getSortedComponents();
 
-    this.logger.info(`Destroying ${components.length} components...`);
+    this.logger.info(`Destroying ${String(components.length)} components...`);
 
     for (const component of components) {
       try {
@@ -311,9 +306,7 @@ export class LifecycleManager implements ILifecycleManager {
 // Singleton instance
 let globalLifecycleManager: LifecycleManager | null = null;
 
-export function getLifecycleManager(
-  config?: Partial<ShutdownConfig>
-): LifecycleManager {
+export function getLifecycleManager(config?: Partial<ShutdownConfig>): LifecycleManager {
   globalLifecycleManager ??= new LifecycleManager(config);
   return globalLifecycleManager;
 }
@@ -330,8 +323,8 @@ export function setupSignalHandlers(
   signals: string[] = ['SIGINT', 'SIGTERM', 'SIGHUP']
 ): void {
   for (const signal of signals) {
-    process.on(signal, async () => {
-      await manager.shutdown(signal);
+    process.on(signal, () => {
+      void manager.shutdown(signal);
     });
   }
 
@@ -374,8 +367,9 @@ export function createDefaultShutdownConfig(
         timeoutMs: 5000,
         skippable: false,
         continueOnError: true,
-        execute: async () => {
+        execute: () => {
           options.pauseTrading?.();
+          return Promise.resolve();
         },
       },
       {

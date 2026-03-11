@@ -117,7 +117,7 @@ export class FileStateStore implements IStateStore {
   async load(): Promise<TransactionState | null> {
     try {
       const data = await readFile(this.filePath, 'utf-8');
-      const state: TransactionState = JSON.parse(data);
+      const state = JSON.parse(data) as TransactionState;
 
       // Version migration if needed
       if (state.version !== CURRENT_VERSION) {
@@ -153,7 +153,7 @@ export class FileStateStore implements IStateStore {
    * Mark a block as processed
    */
   async markBlockProcessed(blockNumber: number, blockHash: string | null): Promise<void> {
-    const state = await this.load() ?? {
+    const state = (await this.load()) ?? {
       transactions: [],
       lastBlockNumber: 0,
       lastBlockHash: null,
@@ -181,9 +181,10 @@ export class FileStateStore implements IStateStore {
     const cutoff = now - maxAgeMs;
 
     const originalCount = state.transactions.length;
-    state.transactions = state.transactions.filter(tx => {
+    state.transactions = state.transactions.filter((tx) => {
       // Keep transactions that are not finalized/failed and are recent
-      const isComplete = tx.status === 'finalized' || tx.status === 'failed' || tx.status === 'expired';
+      const isComplete =
+        tx.status === 'finalized' || tx.status === 'failed' || tx.status === 'expired';
       const lastUpdate = tx.finalizedAt ?? tx.failedAt ?? tx.confirmedAt ?? tx.createdAt;
 
       return !isComplete || lastUpdate > cutoff;
@@ -192,7 +193,7 @@ export class FileStateStore implements IStateStore {
     const removed = originalCount - state.transactions.length;
     if (removed > 0) {
       await this.save(state);
-      this.logger.info(`Cleaned up ${removed} old transactions`);
+      this.logger.info(`Cleaned up ${String(removed)} old transactions`);
     }
   }
 
@@ -204,10 +205,10 @@ export class FileStateStore implements IStateStore {
 
     // For now, just ensure all required fields exist
     return {
-      transactions: oldState.transactions ?? [],
-      lastBlockNumber: oldState.lastBlockNumber ?? 0,
-      lastBlockHash: oldState.lastBlockHash ?? null,
-      lastUpdatedAt: oldState.lastUpdatedAt ?? Date.now(),
+      transactions: oldState.transactions,
+      lastBlockNumber: oldState.lastBlockNumber,
+      lastBlockHash: oldState.lastBlockHash,
+      lastUpdatedAt: oldState.lastUpdatedAt,
       version: CURRENT_VERSION,
     };
   }
@@ -223,19 +224,20 @@ export class FileStateStore implements IStateStore {
 export class MemoryStateStore implements IStateStore {
   private state: TransactionState | null = null;
 
-  async save(state: TransactionState): Promise<void> {
+  save(state: TransactionState): Promise<void> {
     this.state = { ...state, version: CURRENT_VERSION, lastUpdatedAt: Date.now() };
+    return Promise.resolve();
   }
 
-  async load(): Promise<TransactionState | null> {
-    return this.state ? { ...this.state } : null;
+  load(): Promise<TransactionState | null> {
+    return Promise.resolve(this.state ? { ...this.state } : null);
   }
 
-  async getLastKnownBlock(): Promise<number> {
-    return this.state?.lastBlockNumber ?? 0;
+  getLastKnownBlock(): Promise<number> {
+    return Promise.resolve(this.state?.lastBlockNumber ?? 0);
   }
 
-  async markBlockProcessed(blockNumber: number, blockHash: string | null): Promise<void> {
+  markBlockProcessed(blockNumber: number, blockHash: string | null): Promise<void> {
     if (!this.state) {
       this.state = {
         transactions: [],
@@ -251,17 +253,22 @@ export class MemoryStateStore implements IStateStore {
       }
       this.state.lastUpdatedAt = Date.now();
     }
+    return Promise.resolve();
   }
 
-  async cleanup(maxAgeMs: number): Promise<void> {
-    if (!this.state) return;
+  cleanup(maxAgeMs: number): Promise<void> {
+    if (!this.state) {
+      return Promise.resolve();
+    }
 
     const cutoff = Date.now() - maxAgeMs;
-    this.state.transactions = this.state.transactions.filter(tx => {
-      const isComplete = tx.status === 'finalized' || tx.status === 'failed' || tx.status === 'expired';
+    this.state.transactions = this.state.transactions.filter((tx) => {
+      const isComplete =
+        tx.status === 'finalized' || tx.status === 'failed' || tx.status === 'expired';
       const lastUpdate = tx.finalizedAt ?? tx.failedAt ?? tx.confirmedAt ?? tx.createdAt;
       return !isComplete || lastUpdate > cutoff;
     });
+    return Promise.resolve();
   }
 
   destroy(): void {
@@ -294,6 +301,6 @@ export function createStateStore(config: StateStoreConfig): IStateStore {
         config.maxStateAgeMs
       );
     default:
-      throw new Error(`Unknown state store type: ${config.type}`);
+      throw new Error('Unknown state store type');
   }
 }
