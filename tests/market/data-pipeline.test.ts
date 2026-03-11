@@ -96,7 +96,7 @@ const { DataPipeline, getDataPipeline, resetDataPipeline } =
 describe('DataPipeline', () => {
   let pipeline: InstanceType<typeof DataPipeline>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     jest.useFakeTimers();
     // Reset mock state
     mockLogger.info.mockClear();
@@ -106,13 +106,13 @@ describe('DataPipeline', () => {
     mockState.wsInstance = null;
     mockState.constructorCalls = [];
 
-    resetDataPipeline();
+    await resetDataPipeline();
     pipeline = new DataPipeline('wss://test.polymarket.com');
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     pipeline?.disconnect();
-    resetDataPipeline();
+    await resetDataPipeline();
     jest.useRealTimers();
   });
 
@@ -905,9 +905,9 @@ describe('DataPipeline', () => {
       expect(pipeline1).toBe(pipeline2);
     });
 
-    it('should create new instance after reset', () => {
+    it('should create new instance after reset', async () => {
       const pipeline1 = getDataPipeline();
-      resetDataPipeline();
+      await resetDataPipeline();
       const pipeline2 = getDataPipeline();
 
       expect(pipeline1).not.toBe(pipeline2);

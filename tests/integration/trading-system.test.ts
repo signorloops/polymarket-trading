@@ -26,14 +26,14 @@ import {
 import { getDependencyGraph, resetDependencyGraph } from '../../src/market/dependency-graph.js';
 
 describe('Trading System Integration', () => {
-  beforeEach(() => {
-    resetTradingSystem();
+  beforeEach(async () => {
+    await resetTradingSystem();
     resetDependencyGraph();
     jest.clearAllMocks();
   });
 
-  afterEach(() => {
-    resetTradingSystem();
+  afterEach(async () => {
+    await resetTradingSystem();
     resetDependencyGraph();
   });
 
@@ -654,7 +654,7 @@ describe('Trading System Integration', () => {
   });
 
   describe('State Management', () => {
-    it('should reset all singletons correctly', () => {
+    it('should reset all singletons correctly', async () => {
       // Initialize some state
       const riskManager = getRiskManager();
       riskManager.triggerCircuitBreaker('Test');
@@ -667,7 +667,7 @@ describe('Trading System Integration', () => {
       });
 
       // Reset all
-      resetTradingSystem();
+      await resetTradingSystem();
 
       // Get new instances
       const newRiskManager = getRiskManager();
