@@ -21,7 +21,7 @@ describe('OrderManager', () => {
 
   afterEach(() => {
     // Clean up after each test - suppress logs during cleanup
-    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     orderManager.clearAll();
     jest.restoreAllMocks();
   });
@@ -88,7 +88,9 @@ describe('OrderManager', () => {
     });
 
     it('should not throw when removing non-existent order', () => {
-      expect(() => orderManager.removePending('non-existent')).not.toThrow();
+      expect(() => {
+        orderManager.removePending('non-existent');
+      }).not.toThrow();
     });
   });
 
@@ -433,7 +435,7 @@ describe('OrderManager', () => {
     });
 
     it('should log debug message when orders are cleared', () => {
-      const consoleSpy = jest.spyOn(console, 'debug').mockImplementation(() => {});
+      const consoleSpy = jest.spyOn(console, 'debug').mockImplementation(() => undefined);
 
       const now = Date.now();
       const oldTimestamp = now - 7200000;
@@ -457,7 +459,7 @@ describe('OrderManager', () => {
     });
 
     it('should not log when no orders are cleared', () => {
-      const consoleSpy = jest.spyOn(console, 'debug').mockImplementation(() => {});
+      const consoleSpy = jest.spyOn(console, 'debug').mockImplementation(() => undefined);
 
       // Only add a recent order
       const now = Date.now();
@@ -479,7 +481,9 @@ describe('OrderManager', () => {
     });
 
     it('should handle empty order statuses', () => {
-      expect(() => orderManager.clearOldOrders(3600000)).not.toThrow();
+      expect(() => {
+        orderManager.clearOldOrders(3600000);
+      }).not.toThrow();
     });
 
     it('should clear multiple old orders at once', () => {
@@ -720,7 +724,7 @@ describe('OrderManager', () => {
     });
 
     it('should log warning when clearing all orders', () => {
-      const consoleSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const consoleSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
 
       orderManager.clearAll();
 
@@ -734,8 +738,8 @@ describe('OrderManager', () => {
   describe('concurrent access scenarios', () => {
     it('should handle rapid add and remove operations', () => {
       const orders: TradeOrder[] = Array.from({ length: 100 }, (_, i) => ({
-        id: `order-${i}`,
-        marketId: `market-${i}`,
+        id: `order-${String(i)}`,
+        marketId: `market-${String(i)}`,
         side: i % 2 === 0 ? 'buy' : 'sell',
         size: 100 + i,
         price: 0.5,
@@ -743,13 +747,17 @@ describe('OrderManager', () => {
       }));
 
       // Add all orders
-      orders.forEach(order => orderManager.addPending(order));
+      orders.forEach((order) => {
+        orderManager.addPending(order);
+      });
       expect(orderManager.getPendingCount()).toBe(100);
 
       // Remove all even-indexed orders
-      orders.filter((_, i) => i % 2 === 0).forEach(order => {
-        orderManager.removePending(order.id);
-      });
+      orders
+        .filter((_, i) => i % 2 === 0)
+        .forEach((order) => {
+          orderManager.removePending(order.id);
+        });
 
       expect(orderManager.getPendingCount()).toBe(50);
     });
@@ -790,12 +798,7 @@ describe('OrderManager', () => {
 
     it('should handle status transitions correctly', () => {
       const orderId = 'order-1';
-      const timestamps = [
-        Date.now(),
-        Date.now() + 1000,
-        Date.now() + 2000,
-        Date.now() + 3000,
-      ];
+      const timestamps = [Date.now(), Date.now() + 1000, Date.now() + 2000, Date.now() + 3000];
 
       const statuses: OrderStatus[] = [
         {
@@ -832,7 +835,7 @@ describe('OrderManager', () => {
         },
       ];
 
-      statuses.forEach(status => {
+      statuses.forEach((status) => {
         orderManager.updateStatus(status);
       });
 
@@ -843,15 +846,60 @@ describe('OrderManager', () => {
 
     it('should handle multiple orders with different statuses', () => {
       const orders: OrderStatus[] = [
-        { orderId: 'order-1', status: 'pending', filledSize: 0, remainingSize: 100, avgPrice: 0, timestamp: Date.now() },
-        { orderId: 'order-2', status: 'open', filledSize: 0, remainingSize: 100, avgPrice: 0, timestamp: Date.now() },
-        { orderId: 'order-3', status: 'filled', filledSize: 100, remainingSize: 0, avgPrice: 0.5, timestamp: Date.now() },
-        { orderId: 'order-4', status: 'partial', filledSize: 50, remainingSize: 50, avgPrice: 0.5, timestamp: Date.now() },
-        { orderId: 'order-5', status: 'cancelled', filledSize: 0, remainingSize: 100, avgPrice: 0, timestamp: Date.now() },
-        { orderId: 'order-6', status: 'error', filledSize: 0, remainingSize: 100, avgPrice: 0, timestamp: Date.now(), error: 'Network error' },
+        {
+          orderId: 'order-1',
+          status: 'pending',
+          filledSize: 0,
+          remainingSize: 100,
+          avgPrice: 0,
+          timestamp: Date.now(),
+        },
+        {
+          orderId: 'order-2',
+          status: 'open',
+          filledSize: 0,
+          remainingSize: 100,
+          avgPrice: 0,
+          timestamp: Date.now(),
+        },
+        {
+          orderId: 'order-3',
+          status: 'filled',
+          filledSize: 100,
+          remainingSize: 0,
+          avgPrice: 0.5,
+          timestamp: Date.now(),
+        },
+        {
+          orderId: 'order-4',
+          status: 'partial',
+          filledSize: 50,
+          remainingSize: 50,
+          avgPrice: 0.5,
+          timestamp: Date.now(),
+        },
+        {
+          orderId: 'order-5',
+          status: 'cancelled',
+          filledSize: 0,
+          remainingSize: 100,
+          avgPrice: 0,
+          timestamp: Date.now(),
+        },
+        {
+          orderId: 'order-6',
+          status: 'error',
+          filledSize: 0,
+          remainingSize: 100,
+          avgPrice: 0,
+          timestamp: Date.now(),
+          error: 'Network error',
+        },
       ];
 
-      orders.forEach(order => orderManager.updateStatus(order));
+      orders.forEach((order) => {
+        orderManager.updateStatus(order);
+      });
 
       expect(orderManager.getStatusCount()).toBe(6);
       expect(orderManager.getStatus('order-1')?.status).toBe('pending');
@@ -926,6 +974,9 @@ describe('OrderManager', () => {
     });
 
     it('should handle clearing with custom maxAgeMs of 0', () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2026-03-11T00:00:00.000Z'));
+
       const status: OrderStatus = {
         orderId: 'order-1',
         status: 'filled',
@@ -943,6 +994,8 @@ describe('OrderManager', () => {
 
       // Order should still exist because timestamp === Date.now() and cutoff === Date.now()
       expect(orderManager.getStatus('order-1')).toEqual(status);
+
+      jest.useRealTimers();
     });
 
     it('should handle very old orders with large maxAgeMs', () => {
