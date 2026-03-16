@@ -42,7 +42,7 @@
     "eslint-config-prettier": "^10.1.8",
     "husky": "^8.0.0",
     "jest": "^30.2.0",
-    "lint-staged": "^16.3.2",
+    "lint-staged": "^16.4.0",
     "prettier": "^3.8.1",
     "ts-jest": "^29.4.6",
     "typescript": "^5.9.3",
