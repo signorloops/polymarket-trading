@@ -53,7 +53,7 @@
     "axios": "^1.15.0",
     "dotenv": "^17.4.2",
     "javascript-lp-solver": "^1.0.3",
-    "nodemailer": "^8.0.5",
+    "nodemailer": "^8.0.7",
     "ws": "^8.20.0",
     "zod": "^4.3.6"
   },
