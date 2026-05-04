@@ -50,7 +50,7 @@
   },
   "dependencies": {
     "@slack/webhook": "^7.0.9",
-    "axios": "^1.15.2",
+    "axios": "^1.16.0",
     "dotenv": "^17.4.2",
     "javascript-lp-solver": "^1.0.3",
     "nodemailer": "^8.0.7",
