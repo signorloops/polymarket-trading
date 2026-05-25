@@ -54,7 +54,7 @@
     "dotenv": "^17.4.2",
     "javascript-lp-solver": "^1.0.3",
     "nodemailer": "^8.0.7",
-    "ws": "^8.20.1",
+    "ws": "^8.21.0",
     "zod": "^4.4.3"
   },
   "lint-staged": {
