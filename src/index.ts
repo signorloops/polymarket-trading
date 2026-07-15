@@ -412,7 +412,6 @@ export * from './execution/risk-manager.js';
 export * from './optimization/lp-solver.js';
 export * from './optimization/ip-solver.js';
 export * from './api/index.js';
-export * from './strategies/index.js';
 export * from './utils/math.js';
 export * from './utils/logger.js';
 export * from './utils/config.js';
