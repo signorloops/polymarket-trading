@@ -8,7 +8,7 @@
  * - Anomaly detection for trades
  */
 
-import { createHmac, randomBytes } from 'crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { getLogger } from '../utils/logger.js';
 import type { TradeOrder } from '../execution/types.js';
 
@@ -160,7 +160,13 @@ export class RequestSigner {
     const dataToSign = `${timestamp.toString()}.${payload}`;
     const expectedSignature = createHmac('sha256', this.apiSecret).update(dataToSign).digest('hex');
 
-    return signature === expectedSignature;
+    // Constant-time comparison: a plain === short-circuits on the first differing
+    // byte, leaking how many leading bytes of a forged signature match via response
+    // timing (classic signature timing attack). timingSafeEqual throws on
+    // mismatched lengths, so guard with the length check first.
+    const signatureBuf = Buffer.from(signature);
+    const expectedBuf = Buffer.from(expectedSignature);
+    return signatureBuf.length === expectedBuf.length && timingSafeEqual(signatureBuf, expectedBuf);
   }
 }
 

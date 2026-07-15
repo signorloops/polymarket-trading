@@ -14,6 +14,7 @@ import { DiscordChannel } from './channels/discord-channel.js';
 import { EmailChannel } from './channels/email-channel.js';
 import { PagerDutyChannel } from './channels/pagerduty-channel.js';
 import { createSingleton } from '../utils/singleton.js';
+import { getLogger } from '../utils/logger.js';
 
 function parseAlertLevel(value: string | undefined): AlertLevel {
   if (value === 'info' || value === 'warning' || value === 'critical') {
@@ -44,6 +45,7 @@ export class AlertNotificationService {
   private config: AlertConfig;
   private alertHistory: AlertHistoryEntry[] = [];
   private recentAlerts: Map<string, number> = new Map();
+  private logger = getLogger().child({ module: 'AlertNotificationService' });
 
   /**
    * Create notification service with configuration
@@ -105,6 +107,7 @@ export class AlertNotificationService {
       enabled: process.env.ALERTS_ENABLED !== 'false',
       minLevel: parseAlertLevel(process.env.ALERTS_MIN_LEVEL),
       dedupWindowMinutes: parsePositiveInt(process.env.ALERTS_DEDUP_WINDOW_MINUTES, 5),
+      channelTimeoutMs: parsePositiveInt(process.env.ALERTS_CHANNEL_TIMEOUT_MS, 10000),
       channels,
       routing: {
         info: parseCsvList(process.env.ALERT_ROUTING_INFO),
@@ -144,29 +147,37 @@ export class AlertNotificationService {
     // Get routing for this level
     const routing = this.config.routing[notification.level];
 
-    const sentTo: string[] = [];
-    const failedTo: string[] = [];
-
-    // Send to each routed channel
+    // Dispatch to every routed, enabled channel CONCURRENTLY with a per-channel
+    // timeout. A sequential await loop lets one hung channel (Slack/Discord/
+    // PagerDuty use bare fetch with no default timeout) block every later channel,
+    // so a critical alert routed [slack, email, pagerduty] may never reach PagerDuty.
+    const enabledChannels: [string, NotificationChannel][] = [];
     for (const channelName of routing) {
       const channel = this.channels.get(channelName);
       if (channel?.enabled) {
-        try {
-          const success = await channel.send(notification);
-          if (success) {
-            sentTo.push(channelName);
-          } else {
-            failedTo.push(channelName);
-          }
-        } catch (error) {
-          console.error(`[AlertNotificationService] Failed to send to ${channelName}:`, error);
-          failedTo.push(channelName);
-        }
+        enabledChannels.push([channelName, channel]);
       }
     }
 
-    // Record sent alert for deduplication
-    this.recordAlert(notification);
+    const results = await Promise.all(
+      enabledChannels.map(async ([channelName, channel]) => {
+        const ok = await this.sendToChannelWithTimeout(channel, notification);
+        if (!ok) {
+          this.logger.warn('Alert channel send failed or timed out', { channel: channelName });
+        }
+        return { channelName, ok };
+      })
+    );
+
+    const sentTo = results.filter((r) => r.ok).map((r) => r.channelName);
+    const failedTo = results.filter((r) => !r.ok).map((r) => r.channelName);
+
+    // Only record dedup when at least one channel succeeded; otherwise a transient
+    // full outage would suppress all retries within the dedup window, silently
+    // dropping the alert entirely.
+    if (sentTo.length > 0) {
+      this.recordAlert(notification);
+    }
 
     // Add to history
     const entry = this.createHistoryEntry(notification, sentTo, failedTo);
@@ -288,6 +299,40 @@ export class AlertNotificationService {
 
     const windowMs = this.config.dedupWindowMinutes * 60 * 1000;
     return Date.now() - lastSent < windowMs;
+  }
+
+  /**
+   * Send to a single channel bounded by channelTimeoutMs. Never rejects: a thrown
+   * send, a false result, or a timeout all resolve to false so concurrent dispatch
+   * (Promise.all) is not short-circuited by one failing channel.
+   */
+  private async sendToChannelWithTimeout(
+    channel: NotificationChannel,
+    notification: AlertNotification
+  ): Promise<boolean> {
+    const timeoutMs = this.config.channelTimeoutMs ?? 10000;
+    try {
+      const sendPromise = Promise.resolve(channel.send(notification)).catch(() => false);
+      if (timeoutMs <= 0) {
+        const noTimeoutResult = await sendPromise;
+        return noTimeoutResult;
+      }
+      let timer: NodeJS.Timeout | undefined;
+      const timeoutPromise = new Promise<false>((resolve) => {
+        timer = setTimeout(() => {
+          resolve(false);
+        }, timeoutMs);
+        timer.unref();
+      });
+      try {
+        const result = await Promise.race([sendPromise, timeoutPromise]);
+        return result;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    } catch {
+      return false;
+    }
   }
 
   /**

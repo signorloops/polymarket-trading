@@ -5,7 +5,11 @@ import {
   getNotificationService,
   sendAlert,
 } from '../../src/alerts/alert-notification-service.js';
-import type { AlertConfig, AlertNotification } from '../../src/alerts/types.js';
+import type {
+  AlertConfig,
+  AlertNotification,
+  NotificationChannel,
+} from '../../src/alerts/types.js';
 
 // Mock fetch for tests
 global.fetch = jest.fn() as unknown as typeof fetch;
@@ -224,3 +228,82 @@ describe('global notification service', () => {
 
 // Restore fetch after tests
 delete (global as Record<string, unknown>).fetch;
+
+describe('AlertNotificationService dispatch isolation', () => {
+  function makeMockChannel(
+    sendImpl: (n: AlertNotification) => Promise<boolean>
+  ): NotificationChannel {
+    return {
+      name: 'mock',
+      enabled: true,
+      send: jest.fn(sendImpl),
+      test: jest.fn(async () => true),
+    };
+  }
+
+  function inject(
+    service: AlertNotificationService,
+    name: string,
+    channel: NotificationChannel
+  ): void {
+    (service as unknown as { channels: Map<string, NotificationChannel> }).channels.set(
+      name,
+      channel
+    );
+  }
+
+  const baseConfig: AlertConfig = {
+    enabled: true,
+    minLevel: 'info',
+    dedupWindowMinutes: 5,
+    channelTimeoutMs: 50,
+    channels: {},
+    routing: { info: [], warning: [], critical: [] },
+  };
+
+  const notification: AlertNotification = {
+    level: 'critical',
+    title: 'KillSwitch',
+    message: 'loss limit hit',
+    timestamp: new Date(),
+  };
+
+  it('does not let a hung channel block or starve a healthy channel', async () => {
+    const service = new AlertNotificationService({
+      ...baseConfig,
+      routing: { info: [], warning: [], critical: ['hung', 'healthy'] },
+    });
+    const hung = makeMockChannel(() => new Promise<boolean>(() => undefined)); // never resolves
+    const healthy = makeMockChannel(async () => true);
+    inject(service, 'hung', hung);
+    inject(service, 'healthy', healthy);
+
+    const start = Date.now();
+    const result = await service.send(notification);
+    const elapsed = Date.now() - start;
+
+    expect(result.sentTo).toEqual(['healthy']);
+    expect(result.failedTo).toEqual(['hung']);
+    // Bounded by channelTimeoutMs (~50ms), not blocked by the hung channel.
+    expect(elapsed).toBeLessThan(2000);
+  });
+
+  it('records dedup only when at least one channel succeeds (no silent drop on full outage)', async () => {
+    const service = new AlertNotificationService({
+      ...baseConfig,
+      routing: { info: [], warning: [], critical: ['failing'] },
+    });
+    const failing = makeMockChannel(async () => false);
+    inject(service, 'failing', failing);
+
+    const first = await service.send(notification);
+    expect(first.sentTo).toEqual([]);
+    expect(first.failedTo).toEqual(['failing']);
+    expect(failing.send).toHaveBeenCalledTimes(1);
+
+    // A transient full outage must NOT be recorded as deduped, otherwise retries
+    // inside the window are skipped and the alert is lost.
+    await service.send(notification);
+    expect(failing.send).toHaveBeenCalledTimes(2);
+  });
+});

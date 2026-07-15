@@ -5,8 +5,11 @@
 import { solveLP, type LPProblem, type LPSolution } from './lp-solver.js';
 import lpSolver from 'javascript-lp-solver';
 import type { IPProblem, IPSolution, IPSolverOptions } from './ip-solver.js';
+import { getLogger } from '../utils/logger.js';
+import { getErrorMessage } from '../utils/errors.js';
 
 const milpBackend = lpSolver as unknown as { Solve: (model: unknown) => Record<string, unknown> };
+const logger = getLogger().child({ module: 'IPSolverUtils' });
 
 export function validateIPProblem(problem: IPProblem): void {
   const n = problem.objective.length;
@@ -216,7 +219,11 @@ export function solveWithMilpBackend(
       relaxationGap: 0,
       ...(Number.isFinite(iter) ? { iterations: iter } : {}),
     };
-  } catch {
+  } catch (error) {
+    // Mirror solveLP: log the failure instead of swallowing it silently, so a
+    // broken MILP backend is observable rather than degrading to a null result
+    // that callers (solveIP) then treat as "no MILP, fall back to B&B".
+    logger.error('MILP backend solve failed', { error: getErrorMessage(error) });
     return null;
   }
 }
@@ -278,7 +285,7 @@ export function branchAndBound(
     const leftResult = solveLP(createSubproblem(problem, leftFixed), options);
     const rightResult = solveLP(createSubproblem(problem, rightFixed), options);
 
-    if (leftResult.status === 'optimal' && leftResult.objectiveValue < bestValue * (1 + mipGap)) {
+    if (leftResult.status === 'optimal' && leftResult.objectiveValue < bestValue * (1 - mipGap)) {
       queue.push({
         solution: leftResult.solution,
         objectiveValue: leftResult.objectiveValue,
@@ -286,7 +293,7 @@ export function branchAndBound(
         fixedIndices: leftFixed,
       });
     }
-    if (rightResult.status === 'optimal' && rightResult.objectiveValue < bestValue * (1 + mipGap)) {
+    if (rightResult.status === 'optimal' && rightResult.objectiveValue < bestValue * (1 - mipGap)) {
       queue.push({
         solution: rightResult.solution,
         objectiveValue: rightResult.objectiveValue,

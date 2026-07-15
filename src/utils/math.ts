@@ -298,9 +298,13 @@ export function projectOntoSimplex(v: number[]): number[] {
   // Sort in descending order
   const sorted = [...v].sort((a, b) => b - a);
 
-  // Find the threshold
+  // Find the threshold (Duchi et al., 2008). rho is the largest index j (0-indexed)
+  // for which u[j] > (sum_{k<=j} u[k] - 1) / (j + 1). lambda must use the partial sum
+  // up to and including rho — NOT the total sum (the previous code used the running
+  // total after the loop, which produced degenerate non-simplex projections).
   let cumsum = 0;
   let rho = 0;
+  let rhoSum = 0;
 
   for (let i = 0; i < n; i++) {
     const sortedVal = sorted[i];
@@ -308,10 +312,11 @@ export function projectOntoSimplex(v: number[]): number[] {
     cumsum += sortedVal;
     if (sortedVal > (cumsum - 1) / (i + 1)) {
       rho = i;
+      rhoSum = cumsum;
     }
   }
 
-  const lambda = (cumsum - 1) / (rho + 1);
+  const lambda = (rhoSum - 1) / (rho + 1);
 
   // Project
   return v.map((x) => Math.max(x - lambda, 0));

@@ -193,6 +193,25 @@ describe('LPSolver', () => {
         'LMO LP solve failed under constraints'
       );
     });
+
+    it('非 strict 模式下，约束 LP 不可解时应降级返回顶点而非抛错', () => {
+      // Regression: the LMO runs once per Frank-Wolfe iteration (~150x/cycle). A
+      // throwing solve must not abort the whole arbitrage-detection cycle. The
+      // production caller (lmo.ts) now passes strict:false, so an infeasible/unbounded
+      // solve degrades to a fallback simplex vertex instead of throwing.
+      const gradient = [1, 2];
+      const constraints = [
+        { coefficients: [1, 0], rhs: 1, type: 'equality' as const },
+        { coefficients: [1, 0], rhs: 2, type: 'equality' as const },
+      ];
+
+      const vertex = solveLMO(gradient, constraints, { strict: false });
+
+      expect(Array.isArray(vertex)).toBe(true);
+      expect(vertex.length).toBe(gradient.length);
+      // Fallback simplex vertex is a unit vector (one coordinate = 1).
+      expect(vertex.reduce((acc, x) => acc + x, 0)).toBeCloseTo(1, 6);
+    });
   });
 
   describe('validateProblem', () => {

@@ -232,15 +232,29 @@ export function getLatencyPercentiles(
     totalObservations += count;
   }
 
+  let finiteObservations = 0;
+  const maxBucketValue = buckets.length > 0 ? (buckets[buckets.length - 1] ?? 0) : 0;
   for (let i = 0; i < buckets.length; i++) {
     const bucketValue = buckets[i];
     if (bucketValue === undefined) {
       continue;
     }
+    const bucketCount = totalCounts[i] ?? 0;
+    finiteObservations += bucketCount;
     histogramData.push({
       value: bucketValue,
-      count: totalCounts[i] ?? 0,
+      count: bucketCount,
     });
+  }
+
+  // Observations above the max finite bucket are included in totalObservations but
+  // have no finite bucket. Without representing them here they are silently dropped
+  // from the percentile population, understating p50/p95/p99 (the alerts driven by
+  // them). Add them as a bucket at the max finite bound — a conservative lower bound
+  // (the true value is >= maxBucketValue) that at least keeps the denominator correct.
+  const overflow = Math.max(totalObservations - finiteObservations, 0);
+  if (overflow > 0) {
+    histogramData.push({ value: maxBucketValue, count: overflow });
   }
 
   const percentiles = calculateHistogramPercentiles(histogramData, [50, 95, 99]);

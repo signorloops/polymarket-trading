@@ -142,9 +142,12 @@ export function frankWolfe(
       const sArray = lmoFn(gradient);
       copyTo(s, sArray);
 
-      // Compute Frank-Wolfe gap
+      // Compute Frank-Wolfe gap. By definition gap = <grad, x - s> >= 0 since s
+      // minimizes <grad, .> over the polytope and x is feasible. Numerical noise can
+      // push it slightly negative; clamp to 0 so it does not inflate guaranteedProfit
+      // (= objective - gap) or trigger spurious non-convergence signals downstream.
       subtractInPlace(tempDiff, mu, s);
-      const gap = dot(gradient, tempDiff);
+      const gap = Math.max(0, dot(gradient, tempDiff));
 
       if (verbose && iter % 10 === 0) {
         logger.debug('Iteration ' + String(iter), { objective, gap });
@@ -193,7 +196,7 @@ export function frankWolfe(
     copyTo(gradient, finalGradient);
     copyTo(s, finalS);
     subtractInPlace(tempDiff, mu, s);
-    const finalGap = dot(gradient, tempDiff);
+    const finalGap = Math.max(0, dot(gradient, tempDiff));
 
     logger.warn('Frank-Wolfe reached max iterations', {
       iterations: maxIterations,
@@ -309,7 +312,7 @@ export function barrierFrankWolfe(
     copyTo(gradient, finalGradient);
     copyTo(s, finalS);
     subtractInPlace(tempDiff, mu, s);
-    const finalGap = dot(gradient, tempDiff);
+    const finalGap = Math.max(0, dot(gradient, tempDiff));
 
     logger.warn('Barrier Frank-Wolfe reached max iterations', {
       iterations: maxIterations,

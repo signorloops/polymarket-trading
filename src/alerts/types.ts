@@ -92,6 +92,9 @@ export interface AlertConfig {
   minLevel: AlertLevel;
   /** Deduplication window in minutes (defaults to 5) */
   dedupWindowMinutes: number;
+  /** Per-channel send timeout in ms (defaults to 10000). Bounds how long a hung
+   *  channel can delay concurrent dispatch; 0 disables the timeout. */
+  channelTimeoutMs?: number;
   /** Channel configurations */
   channels: {
     slack?: SlackConfig;

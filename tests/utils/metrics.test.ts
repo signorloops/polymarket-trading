@@ -308,4 +308,31 @@ describe('getLatencyPercentiles', () => {
     const percentiles = getLatencyPercentiles('orderExecutionLatency');
     expect(percentiles.p95).toBeLessThanOrEqual(10);
   });
+
+  it('does not understate percentiles when observations exceed the max bucket', () => {
+    // Regression: observations above the max finite bucket were counted in `count`
+    // but dropped from the percentile population, so p99 was computed over a
+    // truncated set and understated. With buckets [1, 2, 5], 100 obs at 1.0 and
+    // 5 obs at 1000.0 (overflow): true p99 lands in the overflow region and must be
+    // reported as >= the max bucket (5), not ~1.0.
+    TradingMetrics.orderExecutionLatency = new Histogram(
+      'trading_order_execution_latency_ms',
+      'Order execution latency from submission to confirmation in milliseconds',
+      [1, 2, 5]
+    );
+
+    for (let i = 0; i < 100; i++) {
+      TradingMetrics.orderExecutionLatency.observe({}, 1.0);
+    }
+    for (let i = 0; i < 5; i++) {
+      TradingMetrics.orderExecutionLatency.observe({}, 1000.0); // above max bucket
+    }
+
+    const percentiles = getLatencyPercentiles('orderExecutionLatency');
+
+    expect(percentiles.count).toBe(105);
+    // p99 target = 0.99 * 105 = 103.95, which exceeds the 100 finite observations,
+    // so it must land in the overflow region -> reported as the max bucket bound.
+    expect(percentiles.p99).toBeGreaterThanOrEqual(5);
+  });
 });

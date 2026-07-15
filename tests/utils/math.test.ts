@@ -20,6 +20,7 @@ import {
   std,
   approxEqual,
   vectorApproxEqual,
+  projectOntoSimplex,
 } from '../../src/utils/math.js';
 
 describe('Vector Operations', () => {
@@ -273,5 +274,54 @@ describe('Utility Functions', () => {
     it('should return false for different lengths', () => {
       expect(vectorApproxEqual([1, 2], [1, 2, 3])).toBe(false);
     });
+  });
+});
+
+describe('Simplex Projection', () => {
+  // Regression: projectOntoSimplex previously computed lambda from the full cumsum
+  // instead of the partial sum up to rho, yielding degenerate vectors that did not
+  // sum to 1. These cases pin the Duchi et al. (2008) result.
+  const approxEq = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+
+  it('produces a vector that sums to 1', () => {
+    const result = projectOntoSimplex([0.1, 0.7, 0.2, 5]);
+    const sum = result.reduce((acc, x) => acc + x, 0);
+    expect(approxEq(sum, 1)).toBe(true);
+    for (const x of result) {
+      expect(x).toBeGreaterThanOrEqual(-1e-12);
+    }
+  });
+
+  it('matches the closed-form result for a known input', () => {
+    // Project [3, 1, 1]. Sorted desc: [3, 1, 1].
+    // rho: i=0 -> 3 > (3-1)/1=2 true; i=1 -> 1 > (4-1)/2=1.5 false; i=2 -> 1 > (5-1)/3=1.33 false.
+    // rho=0, rhoSum=3, lambda=(3-1)/1=2 -> [max(3-2,0), max(1-2,0), max(1-2,0)] = [1, 0, 0].
+    expect(projectOntoSimplex([3, 1, 1])).toEqual([1, 0, 0]);
+  });
+
+  it('distributes mass when all entries are equal and below the uniform point', () => {
+    // [0.2, 0.2, 0.2, 0.2]: sorted desc equal. rho is the largest index where the
+    // condition holds. Equal entries -> uniform projection [0.25, 0.25, 0.25, 0.25].
+    const result = projectOntoSimplex([0.2, 0.2, 0.2, 0.2]);
+    expect(result.every((x) => approxEq(x, 0.25))).toBe(true);
+  });
+
+  it('handles a uniform vector that already sums past 1', () => {
+    // [1,1,1,1] sums to 4. Sorted desc [1,1,1,1]. rho walks all indices (1 > (k-1)/k).
+    // rhoSum=4, lambda=(4-1)/4=0.75 -> each = max(1-0.75,0)=0.25 -> sums to 1.
+    const result = projectOntoSimplex([1, 1, 1, 1]);
+    const sum = result.reduce((acc, x) => acc + x, 0);
+    expect(approxEq(sum, 1)).toBe(true);
+  });
+
+  it('zeros out negative entries and renormalizes onto the simplex', () => {
+    const result = projectOntoSimplex([-1, 2, 3]);
+    const sum = result.reduce((acc, x) => acc + x, 0);
+    expect(approxEq(sum, 1)).toBe(true);
+    expect(result[0]).toBe(0); // negative input clamped to 0
+  });
+
+  it('returns [] for empty input', () => {
+    expect(projectOntoSimplex([])).toEqual([]);
   });
 });

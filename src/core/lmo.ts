@@ -114,5 +114,10 @@ export function linearMinimizationOracle(gradient: number[], constraints: Constr
     };
   });
 
-  return solveLPOBasedLMO(gradient, lpConstraints, { strict: true });
+  // Non-strict: a single infeasible/unbounded/error LP solve (including transient
+  // numerical hiccups from javascript-lp-solver) degrades to fallbackSimplexVertex
+  // instead of throwing. The LMO runs once per FW iteration (~150x/cycle); throwing
+  // here aborts the entire arbitrage-detection cycle (see solveLPO fallback path).
+  // solveLP already logs internally on error, so the failure remains observable.
+  return solveLPOBasedLMO(gradient, lpConstraints, { strict: false });
 }
