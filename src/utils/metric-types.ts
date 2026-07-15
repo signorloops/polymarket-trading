@@ -20,6 +20,14 @@ export abstract class Metric {
   protected name: string;
   protected description: string;
   protected logger = getLogger().child({ module: 'Metrics' });
+  /**
+   * Max number of distinct label-sets (time series) tracked per metric. High-
+   * cardinality labels (order_id, arbitrage_id, ...) create one series per value
+   * that is never evicted, leaking memory on a long-running daemon. This cap is a
+   * safety net: once reached, new label-sets are dropped (warned once).
+   */
+  protected maxCardinality = 10000;
+  private cardinalityWarned = false;
 
   constructor(name: string, description: string) {
     this.name = name;
@@ -32,6 +40,32 @@ export abstract class Metric {
 
   getDescription(): string {
     return this.description;
+  }
+
+  setMaxCardinality(cap: number): void {
+    this.maxCardinality = cap;
+  }
+
+  /**
+   * Returns true if a new label-set key may be recorded against `store`. Existing
+   * keys always pass; once the cap is hit, novel keys are refused (warned once).
+   */
+  protected withinCardinality(
+    store: { has(key: string): boolean; size: number },
+    key: string
+  ): boolean {
+    if (store.has(key)) return true;
+    if (store.size >= this.maxCardinality) {
+      if (!this.cardinalityWarned) {
+        this.cardinalityWarned = true;
+        this.logger.warn('Metric label cardinality cap reached; dropping new label sets', {
+          metric: this.name,
+          cap: this.maxCardinality,
+        });
+      }
+      return false;
+    }
+    return true;
   }
 
   protected serializeLabels(labels: MetricLabels): string {
@@ -55,6 +89,7 @@ export class Counter extends Metric {
     if (existing) {
       existing.value += value;
     } else {
+      if (!this.withinCardinality(this.values, key)) return;
       this.values.set(key, {
         value,
         timestamp: Date.now(),
@@ -88,6 +123,7 @@ export class Gauge extends Metric {
 
   set(labels: MetricLabels = {}, value: number): void {
     const key = this.serializeLabels(labels);
+    if (!this.values.has(key) && !this.withinCardinality(this.values, key)) return;
     this.values.set(key, {
       value,
       timestamp: Date.now(),
@@ -148,6 +184,7 @@ export class Histogram extends Metric {
     const key = this.serializeLabels(labels);
 
     if (!this.counts.has(key)) {
+      if (!this.withinCardinality(this.counts, key)) return;
       this.counts.set(key, new Array<number>(this.buckets.length).fill(0));
       this.sums.set(key, 0);
       this.counts_total.set(key, 0);

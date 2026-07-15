@@ -67,6 +67,21 @@ describe('Counter', () => {
     expect(lines[0]).toContain('# HELP');
     expect(lines[1]).toContain('# TYPE');
   });
+
+  it('should cap label cardinality to bound memory (drop new label-sets past the cap)', () => {
+    counter.setMaxCardinality(3);
+    counter.inc({ id: 'a' });
+    counter.inc({ id: 'b' });
+    counter.inc({ id: 'c' });
+    // At cap; existing key still records.
+    counter.inc({ id: 'a' });
+    expect(counter.get({ id: 'a' })).toBe(2);
+    // New keys past the cap are dropped.
+    counter.inc({ id: 'd' });
+    expect(counter.get({ id: 'd' })).toBe(0);
+    counter.inc({ id: 'e' });
+    expect(counter.get({ id: 'e' })).toBe(0);
+  });
 });
 
 describe('Gauge', () => {
