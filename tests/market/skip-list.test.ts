@@ -135,6 +135,14 @@ describe('SkipList', () => {
       const result = list.toArrayDescending();
       expect(result.map((r) => r.price)).toEqual([15, 10, 5]);
     });
+
+    it('should reject NaN, Infinity, and negative prices (would corrupt sorted invariant)', () => {
+      for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -0.01]) {
+        expect(() => list.insert(bad, 100)).toThrow(/invalid price/);
+      }
+      // None of the rejected prices were inserted.
+      expect(list.getSize()).toBe(0);
+    });
   });
 
   describe('getSize', () => {

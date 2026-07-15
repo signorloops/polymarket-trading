@@ -43,6 +43,16 @@ export class SkipList {
   }
 
   insert(price: number, size: number): void {
+    // Fail fast on invalid prices: NaN/Infinity/negative values corrupt the
+    // sorted invariant silently (NaN comparisons are always false, so the node is
+    // mis-linked and BBO lookups return wrong levels). Upstream should validate,
+    // but the data structure must not accept poison values.
+    if (!Number.isFinite(price) || price < 0) {
+      throw new Error(
+        `SkipList.insert rejected invalid price: ${String(price)} (must be finite and >= 0)`
+      );
+    }
+
     const update: (SkipListNode | null)[] = Array.from<SkipListNode | null>({
       length: this.maxLevel,
     }).fill(null);
