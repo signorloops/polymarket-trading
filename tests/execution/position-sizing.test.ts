@@ -119,10 +119,12 @@ describe('Position Sizing', () => {
 
       const result = calculateSingleMarketArbitrageSize(0.35, 0.35, 100000, yesBook, noBook);
 
-      // Result may be 0 if constraints are not met
-      expect(result.yesSize).toBeGreaterThanOrEqual(0);
-      expect(result.noSize).toBeGreaterThanOrEqual(0);
-      expect(result.expectedProfit).toBeGreaterThanOrEqual(0);
+      // This order book's asks (0.35) sit ~7.7% above mid (0.325), beyond
+      // SLIPPAGE_TOLERANCE, so getMaxExecutableSize correctly yields 0 and the
+      // arbitrage size is 0. Assert the non-trivial invariant that YES and NO are
+      // always sized equally (the function buys both legs in equal quantity).
+      expect(result.noSize).toBe(result.yesSize);
+      expect(result.expectedProfit).toBeCloseTo(result.yesSize * (1 - 0.7), 6);
     });
 
     it('should return zero when no arbitrage exists', () => {
