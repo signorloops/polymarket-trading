@@ -12,6 +12,7 @@ import { getLogger } from '../utils/logger.js';
 import { RISK_CONFIG } from '../utils/config.js';
 import { OrderStatus } from './execution-engine.js';
 import { createSingleton } from '../utils/singleton.js';
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'fs';
 
 export interface Position {
   marketId: string;
@@ -40,6 +41,20 @@ export interface RiskManagerConfig {
   maxBetFraction?: number;
   maxDailyLoss?: number;
   emergencyStopThreshold?: number;
+  /**
+   * Optional path to persist risk state (positions, dailyPnL, circuit breaker).
+   * When set, state is loaded on construction and saved after meaningful changes
+   * so a restart does not zero the loss circuit breaker / daily PnL.
+   */
+  stateFilePath?: string;
+}
+
+interface PersistedRiskState {
+  positions: Position[];
+  dailyPnL: number;
+  maxDailyPnL: number;
+  minDailyPnL: number;
+  circuitBreakerTriggered: boolean;
 }
 
 export class RiskManager {
@@ -50,7 +65,8 @@ export class RiskManager {
   private minDailyPnL = 0;
   private circuitBreakerTriggered = false;
   private logger = getLogger().child({ module: 'RiskManager' });
-  private config: Required<RiskManagerConfig>;
+  private config: Required<Omit<RiskManagerConfig, 'stateFilePath'>>;
+  private stateFilePath: string | undefined;
 
   constructor(config: RiskManagerConfig = {}) {
     this.config = {
@@ -59,6 +75,10 @@ export class RiskManager {
       maxDailyLoss: config.maxDailyLoss ?? RISK_CONFIG.MAX_DAILY_LOSS,
       emergencyStopThreshold: config.emergencyStopThreshold ?? RISK_CONFIG.EMERGENCY_STOP_THRESHOLD,
     };
+    this.stateFilePath = config.stateFilePath;
+    if (this.stateFilePath) {
+      this.loadState();
+    }
   }
 
   /**
@@ -201,6 +221,7 @@ export class RiskManager {
 
     // Update PnL tracking
     this.updatePnLTracking();
+    this.persistState();
   }
 
   /**
@@ -298,6 +319,7 @@ export class RiskManager {
     if (!this.circuitBreakerTriggered) {
       this.circuitBreakerTriggered = true;
       this.logger.error(`Circuit breaker triggered: ${reason}`);
+      this.persistState();
     }
   }
 
@@ -307,6 +329,7 @@ export class RiskManager {
   resetCircuitBreaker(): void {
     this.circuitBreakerTriggered = false;
     this.logger.info('Circuit breaker reset');
+    this.persistState();
   }
 
   /**
@@ -324,6 +347,7 @@ export class RiskManager {
     this.maxDailyPnL = 0;
     this.minDailyPnL = 0;
     this.logger.info('Daily PnL reset');
+    this.persistState();
   }
 
   /**
@@ -347,6 +371,7 @@ export class RiskManager {
     this.positions.clear();
     this.marketPrices.clear();
     this.logger.warn('All positions cleared');
+    this.persistState();
   }
 
   private getTotalExposure(): number {
@@ -382,11 +407,82 @@ export class RiskManager {
       this.minDailyPnL = this.dailyPnL;
     }
   }
+
+  /**
+   * Load persisted risk state (positions, dailyPnL, circuit breaker). Missing file
+   * (first run) is silent; corrupt file logs a warning and starts fresh — risk
+   * state must never crash the daemon at startup. marketPrices are intentionally
+   * NOT persisted (transient, repopulated from live feeds, stale on reload).
+   */
+  private loadState(): void {
+    if (!this.stateFilePath || !existsSync(this.stateFilePath)) {
+      return;
+    }
+    try {
+      const raw = readFileSync(this.stateFilePath, 'utf8');
+      const state = JSON.parse(raw) as Partial<PersistedRiskState>;
+      if (Array.isArray(state.positions)) {
+        for (const pos of state.positions) {
+          // Per-element guard: untrusted disk JSON could contain null/malformed
+          // entries; skip them instead of discarding the whole state.
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+          if (pos && typeof pos.marketId === 'string') {
+            this.positions.set(pos.marketId, pos);
+          }
+        }
+      }
+      if (typeof state.dailyPnL === 'number') this.dailyPnL = state.dailyPnL;
+      if (typeof state.maxDailyPnL === 'number') this.maxDailyPnL = state.maxDailyPnL;
+      if (typeof state.minDailyPnL === 'number') this.minDailyPnL = state.minDailyPnL;
+      if (typeof state.circuitBreakerTriggered === 'boolean') {
+        this.circuitBreakerTriggered = state.circuitBreakerTriggered;
+      }
+      this.logger.info('Risk state loaded from disk', {
+        positions: this.positions.size,
+        dailyPnL: this.dailyPnL,
+        circuitBreakerTriggered: this.circuitBreakerTriggered,
+      });
+    } catch (error) {
+      this.logger.warn('Risk state file unreadable; starting fresh', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Atomically persist risk state (temp file + rename). Called only on meaningful
+   * state changes (trade fills, circuit-breaker transitions) — not on every price
+   * tick — to bound I/O. Failures are logged, never thrown: in-memory risk checks
+   * must keep running even if the disk is unavailable.
+   */
+  private persistState(): void {
+    if (!this.stateFilePath) return;
+    const state: PersistedRiskState = {
+      positions: Array.from(this.positions.values()),
+      dailyPnL: this.dailyPnL,
+      maxDailyPnL: this.maxDailyPnL,
+      minDailyPnL: this.minDailyPnL,
+      circuitBreakerTriggered: this.circuitBreakerTriggered,
+    };
+    try {
+      const tmp = `${this.stateFilePath}.tmp`;
+      writeFileSync(tmp, JSON.stringify(state), 'utf8');
+      renameSync(tmp, this.stateFilePath);
+    } catch (error) {
+      this.logger.error('Failed to persist risk state', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 }
 
 /**
- * Global risk manager instance
+ * Global risk manager instance. When RISK_STATE_FILE is set, risk state (positions,
+ * daily PnL, circuit breaker) is persisted across restarts.
  */
-const riskManagerSingleton = createSingleton(() => new RiskManager());
+const riskManagerSingleton = createSingleton(() => {
+  const stateFilePath = process.env.RISK_STATE_FILE;
+  return new RiskManager(stateFilePath ? { stateFilePath } : {});
+});
 export const getRiskManager = riskManagerSingleton.get;
 export const resetRiskManager = riskManagerSingleton.reset;

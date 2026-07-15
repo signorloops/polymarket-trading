@@ -4,6 +4,8 @@
 
 import { RiskManager, getRiskManager, resetRiskManager } from '../../src/execution/risk-manager.js';
 import { OrderStatus } from '../../src/execution/execution-engine.js';
+import { tmpdir } from 'os';
+import { writeFileSync, unlinkSync } from 'fs';
 
 describe('RiskManager', () => {
   let riskManager: RiskManager;
@@ -305,6 +307,55 @@ describe('RiskManager', () => {
 
       const metrics = riskManager.getRiskMetrics();
       expect(metrics.dailyPnL).toBe(0);
+    });
+  });
+
+  describe('state persistence', () => {
+    it('persists positions, daily PnL, and circuit breaker across restart', () => {
+      const tmpFile = `${tmpdir()}/risk-state-${Date.now()}-${Math.floor(Math.random() * 1e6)}.json`;
+      try {
+        // First instance: open a position, trigger the circuit breaker.
+        const first = new RiskManager({ stateFilePath: tmpFile });
+        const status: OrderStatus = {
+          orderId: 'order-1',
+          status: 'filled',
+          filledSize: 100,
+          remainingSize: 0,
+          avgPrice: 0.4,
+          timestamp: Date.now(),
+        };
+        first.updatePosition(status, 'market-1', 'buy');
+        first.triggerCircuitBreaker('loss limit');
+
+        // A fresh instance with the same path must reload that state rather than
+        // zeroing it (the whole point: restart must not defeat the loss circuit breaker).
+        const reloaded = new RiskManager({ stateFilePath: tmpFile });
+        expect(reloaded.isCircuitBreakerActive()).toBe(true);
+        expect(reloaded.getPosition('market-1')).toBeDefined();
+        expect(reloaded.getPosition('market-1')?.size).toBe(100);
+      } finally {
+        try {
+          unlinkSync(tmpFile);
+        } catch {
+          /* ignore */
+        }
+      }
+    });
+
+    it('starts fresh (no crash) when the state file is corrupt', () => {
+      const tmpFile = `${tmpdir()}/risk-state-corrupt-${Date.now()}.json`;
+      try {
+        writeFileSync(tmpFile, '{ not valid json');
+        const rm = new RiskManager({ stateFilePath: tmpFile });
+        expect(rm.isCircuitBreakerActive()).toBe(false);
+        expect(rm.getPositions()).toEqual([]);
+      } finally {
+        try {
+          unlinkSync(tmpFile);
+        } catch {
+          /* ignore */
+        }
+      }
     });
   });
 });
