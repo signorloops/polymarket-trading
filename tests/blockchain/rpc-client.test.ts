@@ -69,9 +69,54 @@ describe('RpcClient', () => {
       const client = new RpcClient({
         rpcUrl: 'https://example.com',
         ...NETWORKS.mumbai,
+        maxRetries: 0,
       });
 
       await expect(client.getBlockNumber()).rejects.toThrow('RPC request failed');
+    });
+
+    it('retries transient failures then succeeds', async () => {
+      // First two attempts fail (transient 503), third succeeds.
+      mockFetch
+        .mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Slow Down' } as Response)
+        .mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Slow Down' } as Response)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ jsonrpc: '2.0', id: 1, result: '0x64' }),
+        } as Response);
+
+      const client = new RpcClient({
+        rpcUrl: 'https://example.com',
+        ...NETWORKS.mumbai,
+        maxRetries: 2,
+        retryBaseDelayMs: 1,
+      });
+
+      const block = await client.getBlockNumber();
+      expect(block).toBe(100);
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    });
+
+    it('falls back to a fallback RPC URL when the primary fails', async () => {
+      mockFetch.mockImplementation(async (input: string | URL) => {
+        if (String(input) === 'https://primary.example') {
+          return { ok: false, status: 500, statusText: 'Down' } as Response;
+        }
+        return {
+          ok: true,
+          json: async () => ({ jsonrpc: '2.0', id: 1, result: '0x3e8' }),
+        } as Response;
+      });
+
+      const client = new RpcClient({
+        rpcUrl: 'https://primary.example',
+        ...NETWORKS.mumbai,
+        fallbackRpcUrls: ['https://fallback.example'],
+        maxRetries: 0,
+      });
+
+      const block = await client.getBlockNumber();
+      expect(block).toBe(1000);
     });
   });
 

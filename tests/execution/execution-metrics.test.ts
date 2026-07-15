@@ -108,7 +108,7 @@ describe('recordOrderMetrics', () => {
 describe('recordArbitrageMetrics', () => {
   beforeEach(() => jest.clearAllMocks());
 
-  it('should observe detection latency and record success with profit', () => {
+  it('should observe detection latency and record execution without fabricating profit', () => {
     const result: ExecutionResult = {
       success: true,
       orders: [],
@@ -121,8 +121,8 @@ describe('recordArbitrageMetrics', () => {
     recordArbitrageMetrics('arb-1', result, 15);
 
     expect(mockObserveDetectionLatency).toHaveBeenCalledWith({ arbitrage_id: 'arb-1' }, 15);
-    // profit = 200 * 0.01 = 2
-    expect(mockRecordArbitrage).toHaveBeenCalledWith('arb-1', 2, true, 2);
+    // Arbitrage profit is unknown until settlement; do NOT fabricate totalFilled*0.01.
+    expect(mockRecordArbitrage).toHaveBeenCalledWith('arb-1', 0, true, 0);
   });
 
   it('should record profit=0 on failure', () => {

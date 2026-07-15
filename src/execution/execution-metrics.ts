@@ -40,8 +40,14 @@ export function recordArbitrageMetrics(
     { arbitrage_id: arbitrageId },
     detectionLatencyMs
   );
-  const totalProfit = result.success ? result.totalFilled * 0.01 : 0;
-  recordArbitrage(arbitrageId, totalProfit, result.success, totalProfit);
+
+  // Arbitrage profit is NOT known at execution time — it realizes only at market
+  // resolution, and ExecutionResult carries no per-leg side to compute signed cash
+  // flow here. The previous `totalFilled * 0.01` fabricated a per-unit $0.01
+  // "profit" that polluted the arbitrageProfit gauge and any alerting on it.
+  // Execution is still observable (arbitrageExecuted counter + totalFilled); real
+  // realized P&L must be computed at settlement, not invented here.
+  recordArbitrage(arbitrageId, 0, result.success, 0);
 }
 
 /**

@@ -43,6 +43,14 @@ export interface RpcClientConfig {
   chainId: number;
   confirmationBlocks: number;
   finalizationBlocks: number;
+  /** Additional RPC endpoints tried in order when the primary endpoint fails. */
+  fallbackRpcUrls?: string[];
+  /** Max retry attempts after the initial attempt (default 2). */
+  maxRetries?: number;
+  /** Base delay (ms) for exponential backoff with full jitter (default 500). */
+  retryBaseDelayMs?: number;
+  /** Per-request deadline via AbortSignal.timeout in ms (default 10000). */
+  requestTimeoutMs?: number;
 }
 
 // Network configurations
@@ -70,7 +78,13 @@ export class RpcClient {
   private chainId: number;
   private confirmationBlocks: number;
   private finalizationBlocks: number;
+  private fallbackRpcUrls: string[];
+  private maxRetries: number;
+  private retryBaseDelayMs: number;
+  private requestTimeoutMs: number;
   private logger = getLogger().child({ module: 'RpcClient' });
+
+  private static readonly MAX_RETRY_DELAY_MS = 4000;
 
   constructor(config: RpcClientConfig) {
     this.rpcUrl = config.rpcUrl;
@@ -78,6 +92,10 @@ export class RpcClient {
     this.chainId = config.chainId;
     this.confirmationBlocks = config.confirmationBlocks;
     this.finalizationBlocks = config.finalizationBlocks;
+    this.fallbackRpcUrls = config.fallbackRpcUrls ?? [];
+    this.maxRetries = config.maxRetries ?? 2;
+    this.retryBaseDelayMs = config.retryBaseDelayMs ?? 500;
+    this.requestTimeoutMs = config.requestTimeoutMs ?? 10000;
   }
 
   /**
@@ -93,9 +111,15 @@ export class RpcClient {
     const network: NetworkType = process.env.NETWORK === 'mumbai' ? 'mumbai' : 'mainnet';
     const networkConfig = NETWORKS[network];
 
+    const fallbackRpcUrls = (process.env.RPC_FALLBACK_URLS ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
     return new RpcClient({
       rpcUrl,
       ...networkConfig,
+      fallbackRpcUrls,
     });
   }
 
@@ -115,38 +139,79 @@ export class RpcClient {
   }
 
   /**
-   * Make JSON-RPC request
+   * Make JSON-RPC request with per-call timeout, endpoint fallback, and retry with
+   * exponential backoff + full jitter. A single bare fetch to one endpoint fails
+   * outright on any transient blip, RPC 429, or hung socket; for tx tracking that
+   * means the status silently stops updating.
    */
   private async rpcCall<T>(method: string, params: unknown[]): Promise<T> {
-    const response = await fetch(this.rpcUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: Date.now(),
-        method,
-        params,
-      }),
+    const body = JSON.stringify({
+      jsonrpc: '2.0',
+      id: Date.now(),
+      method,
+      params,
     });
+    const endpoints = [this.rpcUrl, ...this.fallbackRpcUrls];
+    let lastError: Error | undefined;
 
-    if (!response.ok) {
-      throw new Error(`RPC request failed: ${String(response.status)} ${response.statusText}`);
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      for (const url of endpoints) {
+        try {
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body,
+            signal: AbortSignal.timeout(this.requestTimeoutMs),
+          });
+
+          if (!response.ok) {
+            throw new Error(
+              `RPC request failed: ${String(response.status)} ${response.statusText}`
+            );
+          }
+
+          const data = (await response.json()) as {
+            jsonrpc: string;
+            id: number;
+            result?: T;
+            error?: { code: number; message: string };
+          };
+
+          if (data.error) {
+            throw new Error(`RPC error: ${data.error.message} (code: ${String(data.error.code)})`);
+          }
+
+          return data.result as T;
+        } catch (error) {
+          lastError = error instanceof Error ? error : new Error(String(error));
+          this.logger.warn('RPC call failed; trying next endpoint or retry', {
+            method,
+            attempt,
+            url,
+            error: getErrorMessage(error),
+          });
+        }
+      }
+
+      if (attempt < this.maxRetries) {
+        await this.sleep(this.backoffDelay(attempt));
+      }
     }
 
-    const data = (await response.json()) as {
-      jsonrpc: string;
-      id: number;
-      result?: T;
-      error?: { code: number; message: string };
-    };
+    throw lastError ?? new Error(`RPC ${method} failed after ${String(this.maxRetries)} retries`);
+  }
 
-    if (data.error) {
-      throw new Error(`RPC error: ${data.error.message} (code: ${String(data.error.code)})`);
-    }
+  private backoffDelay(attempt: number): number {
+    const exponential = this.retryBaseDelayMs * Math.pow(2, attempt);
+    const capped = Math.min(exponential, RpcClient.MAX_RETRY_DELAY_MS);
+    return Math.random() * capped; // full jitter to avoid thundering herd
+  }
 
-    return data.result as T;
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, ms);
+      timer.unref();
+    });
   }
 
   /**

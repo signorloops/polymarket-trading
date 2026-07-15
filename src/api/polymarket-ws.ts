@@ -33,6 +33,11 @@ export type WsMessage =
 type WsHandler = (message: WsMessage) => void;
 
 export class PolymarketWebSocketClient {
+  private static readonly HEARTBEAT_INTERVAL_MS = 30000;
+  // If no pong arrives within this window (>= 2 missed heartbeats), the socket is
+  // considered half-open/dead and terminated so reconnect logic can take over.
+  private static readonly HEARTBEAT_DEAD_THRESHOLD_MS = 75000;
+
   private ws: WebSocket | null = null;
   private url: string;
   private apiKey: string;
@@ -42,6 +47,7 @@ export class PolymarketWebSocketClient {
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private isManualClose = false;
   private subscribedMarkets: Set<string> = new Set();
+  private lastPongAt = 0;
   private logger = getLogger().child({ module: 'PolymarketWebSocket' });
 
   constructor(url?: string, apiKey?: string) {
@@ -124,6 +130,7 @@ export class PolymarketWebSocketClient {
       }
       this.logger.info('WebSocket connected');
       this.reconnectAttempts = 0;
+      this.lastPongAt = Date.now();
       this.startHeartbeat();
 
       // Resubscribe to markets
@@ -173,6 +180,11 @@ export class PolymarketWebSocketClient {
       if (this.ws?.readyState === WebSocket.OPEN) {
         this.ws.pong(data);
       }
+    });
+
+    // Track our own pings' pongs so the heartbeat can detect a half-open socket.
+    currentWs.on('pong', () => {
+      this.lastPongAt = Date.now();
     });
   }
 
@@ -286,10 +298,25 @@ export class PolymarketWebSocketClient {
     }
 
     this.heartbeatTimer = setInterval(() => {
-      if (this.ws?.readyState === WebSocket.OPEN) {
-        this.ws.ping();
+      if (this.ws?.readyState !== WebSocket.OPEN) {
+        return;
       }
-    }, 30000);
+      this.ws.ping();
+
+      // Dead-socket detection: a fire-and-forget ping can't tell us the peer is
+      // gone. If no pong has arrived since the dead-window started, the socket is
+      // effectively half-open; terminate it so the 'close' handler reconnects.
+      const sincePong = Date.now() - this.lastPongAt;
+      if (
+        this.lastPongAt > 0 &&
+        sincePong > PolymarketWebSocketClient.HEARTBEAT_DEAD_THRESHOLD_MS
+      ) {
+        this.logger.warn('WebSocket dead socket (no pong received); terminating to reconnect', {
+          sincePongMs: sincePong,
+        });
+        this.ws.terminate();
+      }
+    }, PolymarketWebSocketClient.HEARTBEAT_INTERVAL_MS);
     this.heartbeatTimer.unref();
   }
 
