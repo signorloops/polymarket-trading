@@ -1,0 +1,24 @@
+{
+  "liveTrading": false,
+  "markets": [
+    "market-yes",
+    "market-no"
+  ],
+  "events": [
+    {
+      "id": "sample-event",
+      "markets": [
+        {
+          "id": "market-yes",
+          "outcome": "YES",
+          "price": 0.55
+        },
+        {
+          "id": "market-no",
+          "outcome": "NO",
+          "price": 0.4
+        }
+      ]
+    }
+  ]
+}

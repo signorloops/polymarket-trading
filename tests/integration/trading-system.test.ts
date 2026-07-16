@@ -133,8 +133,7 @@ describe('Trading System Integration', () => {
       // Stop system
       await system.stop();
 
-      // Should complete without errors
-      expect(true).toBe(true);
+      expect(system.getStatus().running).toBe(false);
     });
   });
 
@@ -384,8 +383,7 @@ describe('Trading System Integration', () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
       await system.stop();
 
-      // Should complete without throwing
-      expect(true).toBe(true);
+      expect(system.getStatus().running).toBe(false);
     });
   });
 
@@ -743,7 +741,7 @@ describe('Trading System Integration', () => {
       expect(() => system.initialize()).not.toThrow();
     });
 
-    it('should handle live trading configuration', async () => {
+    it('should reject live trading configuration until CLOB execution is implemented', async () => {
       const config: TradingSystemConfig = {
         liveTrading: true,
         markets: ['market-1'],
@@ -756,10 +754,7 @@ describe('Trading System Integration', () => {
       };
 
       const system = new PolymarketTradingSystem(config);
-      await system.initialize();
-
-      // Should initialize without errors
-      expect(true).toBe(true);
+      expect(() => system.initialize()).toThrow(/Live trading is disabled/);
     });
 
     it('should prevent multiple start calls', async () => {
@@ -776,12 +771,12 @@ describe('Trading System Integration', () => {
 
       // Second start should not throw, just log warning
       expect(() => system.start()).not.toThrow();
-      system.stop();
+      await system.stop();
     });
   });
 
   describe('Live Trading Execution', () => {
-    it('should execute opportunity in live trading mode', async () => {
+    it('should not report successful execution in live trading mode', async () => {
       const config: TradingSystemConfig = {
         liveTrading: true,
         markets: ['market-yes', 'market-no'],
@@ -797,20 +792,21 @@ describe('Trading System Integration', () => {
       };
 
       const system = new PolymarketTradingSystem(config);
-      await system.initialize();
+      const opportunity: ArbitrageOpportunity = {
+        id: 'live-opportunity',
+        type: 'single-market',
+        markets: ['market-yes', 'market-no'],
+        tradeDirection: [1, 1],
+        expectedProfit: 0.1,
+        guaranteedProfit: 0.1,
+        confidence: 0.9,
+        timestamp: Date.now(),
+        expiresAt: Date.now() + 60_000,
+      };
 
-      // Run detection cycle
-      const opportunities = await system.runDetectionCycle();
+      const result = system.executeOpportunity(opportunity);
 
-      // Should find arbitrage opportunity
-      expect(opportunities.length).toBeGreaterThan(0);
-
-      // Execute the first opportunity in live trading mode
-      // Result depends on risk manager check
-      if (opportunities.length > 0) {
-        const result = await system.executeOpportunity(opportunities[0]!);
-        expect(typeof result).toBe('boolean');
-      }
+      expect(result).toBe(false);
     });
   });
 
@@ -834,8 +830,7 @@ describe('Trading System Integration', () => {
       // Stop to trigger disconnection event
       await system.stop();
 
-      // Should complete without errors
-      expect(true).toBe(true);
+      expect(system.getStatus()).toMatchObject({ running: false, websocketConnected: false });
     });
 
     it('should handle orderbook events', async () => {
@@ -853,7 +848,7 @@ describe('Trading System Integration', () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
       await system.stop();
 
-      expect(true).toBe(true);
+      expect(system.getStatus().running).toBe(false);
     });
   });
 
@@ -916,7 +911,7 @@ describe('Trading System Integration', () => {
       // Stop cleanly
       await system.stop();
 
-      expect(true).toBe(true);
+      expect(system.getStatus().running).toBe(false);
     });
   });
 
@@ -999,7 +994,7 @@ describe('Trading System Integration', () => {
 
       const opportunity: ArbitrageOpportunity = {
         id: 'price-aware-notional',
-        type: 'cross-market',
+        type: 'single-market',
         markets: ['market-1', 'market-2'],
         expectedProfit: 1,
         guaranteedProfit: 1,
@@ -1013,7 +1008,7 @@ describe('Trading System Integration', () => {
       expect(result).toBe(true);
     });
 
-    it('should handle cross-market opportunity execution', async () => {
+    it('should reject cross-market execution until a dollar payoff model exists', async () => {
       const config: TradingSystemConfig = {
         liveTrading: false,
         markets: ['market-a', 'market-b', 'market-c'],
@@ -1032,10 +1027,19 @@ describe('Trading System Integration', () => {
       const system = new PolymarketTradingSystem(config);
       await system.initialize();
 
-      const opportunities = await system.runDetectionCycle();
+      const opportunity: ArbitrageOpportunity = {
+        id: 'cross-market-signal',
+        type: 'cross-market',
+        markets: ['market-a', 'market-b', 'market-c'],
+        expectedProfit: 0.2,
+        guaranteedProfit: 0.1,
+        confidence: 0.8,
+        tradeDirection: [0.1, -0.1, 0.05],
+        timestamp: Date.now(),
+        expiresAt: Date.now() + 60_000,
+      };
 
-      // Should handle cross-market detection
-      expect(Array.isArray(opportunities)).toBe(true);
+      expect(system.executeOpportunity(opportunity)).toBe(false);
     });
   });
 });
