@@ -342,12 +342,12 @@ describe('RiskManager', () => {
       }
     });
 
-    it('starts fresh (no crash) when the state file is corrupt', () => {
+    it('fails closed when the state file is corrupt', () => {
       const tmpFile = `${tmpdir()}/risk-state-corrupt-${Date.now()}.json`;
       try {
         writeFileSync(tmpFile, '{ not valid json');
         const rm = new RiskManager({ stateFilePath: tmpFile });
-        expect(rm.isCircuitBreakerActive()).toBe(false);
+        expect(rm.isCircuitBreakerActive()).toBe(true);
         expect(rm.getPositions()).toEqual([]);
       } finally {
         try {
@@ -355,6 +355,30 @@ describe('RiskManager', () => {
         } catch {
           /* ignore */
         }
+      }
+    });
+
+    it('activates the circuit breaker when updated risk state cannot be persisted', () => {
+      const parentAsFile = `${tmpdir()}/risk-state-parent-${Date.now()}`;
+      writeFileSync(parentAsFile, 'not a directory');
+      try {
+        const rm = new RiskManager({ stateFilePath: `${parentAsFile}/risk.json` });
+        rm.updatePosition(
+          {
+            orderId: 'order-write-failure',
+            status: 'filled',
+            filledSize: 1,
+            remainingSize: 0,
+            avgPrice: 0.4,
+            timestamp: Date.now(),
+          },
+          'market-1',
+          'buy'
+        );
+
+        expect(rm.isCircuitBreakerActive()).toBe(true);
+      } finally {
+        unlinkSync(parentAsFile);
       }
     });
   });

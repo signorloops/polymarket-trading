@@ -12,16 +12,19 @@ import {
 } from '../../src/execution/execution-engine.js';
 import { PolymarketClient } from '../../src/api/polymarket-client.js';
 import { OrderManager } from '../../src/execution/order-manager.js';
+import { RiskManager, resetRiskManager } from '../../src/execution/risk-manager.js';
 
 describe('ExecutionEngine', () => {
   beforeEach(() => {
     resetExecutionEngine();
+    resetRiskManager();
   });
 
   afterEach(() => {
     const engine = getExecutionEngine();
     engine.stop();
     resetExecutionEngine();
+    resetRiskManager();
   });
 
   describe('executeOrder', () => {
@@ -169,6 +172,27 @@ describe('ExecutionEngine', () => {
 
       // Should handle partial fills gracefully
       expect(result.orders).toHaveLength(2);
+    });
+
+    it('blocks order submission when the risk circuit breaker is active (kill-switch)', async () => {
+      const riskManager = new RiskManager();
+      riskManager.triggerCircuitBreaker('test loss limit');
+      const engine = new ExecutionEngine(new OrderManager(), undefined, riskManager);
+
+      const legs: TradeLeg[] = [
+        { marketId: 'market-yes', side: 'buy', size: 100, expectedPrice: 0.6 },
+        { marketId: 'market-no', side: 'buy', size: 100, expectedPrice: 0.35 },
+      ];
+
+      const result = await engine.executeArbitrage(legs, 'arb-kill');
+
+      // No order should reach the exchange while the circuit breaker is active.
+      expect(result.orders).toHaveLength(2);
+      for (const order of result.orders) {
+        expect(order.status).toBe('cancelled');
+        expect(order.filledSize).toBe(0);
+      }
+      expect(result.totalFilled).toBe(0);
     });
   });
 
@@ -400,6 +424,7 @@ describe('ExecutionEngine', () => {
       const result = await engine.executeOrder(order);
 
       expect(mockPlaceOrder).toHaveBeenCalledWith({
+        idempotencyKey: 'order-api-1',
         marketId: 'test-market',
         side: 'buy',
         size: 100,
@@ -407,6 +432,8 @@ describe('ExecutionEngine', () => {
         orderType: 'limit',
         timeInForce: 'GTC',
       });
+      expect(result.orderId).toBe(order.id);
+      expect(result.exchangeOrderId).toBe('api-order-1');
       expect(result.status).toBe('filled');
       expect(result.filledSize).toBe(100);
 
@@ -667,6 +694,52 @@ describe('ExecutionEngine', () => {
   });
 
   describe('cancelOrder with API client', () => {
+    it('should cancel tracked open orders using the exchange order id', async () => {
+      const mockCancelOrder = jest.fn().mockResolvedValue(undefined);
+      const mockPlaceOrder = jest.fn().mockResolvedValue({
+        id: 'exchange-order-1',
+        marketId: 'test-market',
+        side: 'buy',
+        size: 100,
+        price: 0.6,
+        status: 'open',
+        filledSize: 0,
+        remainingSize: 100,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      const orderManager = new OrderManager();
+      const engine = new ExecutionEngine(orderManager, {
+        placeOrder: mockPlaceOrder,
+        cancelOrder: mockCancelOrder,
+      });
+
+      const order: TradeOrder = {
+        id: 'local-order-1',
+        marketId: 'test-market',
+        side: 'buy',
+        size: 100,
+        price: 0.6,
+        orderType: 'limit',
+      };
+
+      await engine.executeOrder(order);
+
+      const result = await engine.cancelOrder(order.id);
+      const status = engine.getOrderStatus(order.id);
+
+      expect(result).toBe(true);
+      expect(mockCancelOrder).toHaveBeenCalledWith('exchange-order-1');
+      expect(status).toMatchObject({
+        orderId: 'local-order-1',
+        exchangeOrderId: 'exchange-order-1',
+        status: 'cancelled',
+      });
+
+      engine.stop();
+    });
+
     it('should cancel order using API client when configured', async () => {
       const mockCancelOrder = jest.fn().mockResolvedValue(undefined);
       const mockPlaceOrder = jest.fn().mockResolvedValue({
@@ -773,6 +846,91 @@ describe('ExecutionEngine', () => {
   });
 
   describe('executeArbitrage with partial fills', () => {
+    it('confirms cancellation, unwinds filled legs, and trips the review circuit breaker', async () => {
+      const riskManager = new RiskManager();
+      const placeOrder = jest
+        .fn()
+        .mockImplementation(
+          (order: {
+            marketId: string;
+            side: string;
+            size: number;
+            price: number;
+            idempotencyKey: string;
+          }) => {
+            if (order.idempotencyKey.includes('unwind')) {
+              return Promise.resolve({
+                id: 'exchange-unwind',
+                marketId: order.marketId,
+                side: order.side,
+                size: order.size,
+                price: order.price,
+                status: 'filled',
+                filledSize: order.size,
+                remainingSize: 0,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              });
+            }
+            const filled = order.marketId === 'market-1';
+            return Promise.resolve({
+              id: filled ? 'exchange-filled' : 'exchange-open',
+              marketId: order.marketId,
+              side: order.side,
+              size: order.size,
+              price: order.price,
+              status: filled ? 'filled' : 'open',
+              filledSize: filled ? order.size : 0,
+              remainingSize: filled ? 0 : order.size,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            });
+          }
+        );
+      const client = {
+        placeOrder,
+        cancelOrder: jest.fn().mockResolvedValue(undefined),
+        getOrder: jest.fn().mockResolvedValue({
+          id: 'exchange-open',
+          marketId: 'market-2',
+          side: 'sell',
+          size: 10,
+          price: 0.4,
+          status: 'cancelled',
+          filledSize: 0,
+          remainingSize: 10,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }),
+      };
+      const engine = new ExecutionEngine(new OrderManager(), client, riskManager, {
+        sleep: () => Promise.resolve(),
+        recoveryPollIntervalMs: 1,
+        recoveryPollTimeoutMs: 5,
+      });
+
+      const result = await engine.executeArbitrage(
+        [
+          { marketId: 'market-1', side: 'buy', size: 10, expectedPrice: 0.6 },
+          { marketId: 'market-2', side: 'sell', size: 10, expectedPrice: 0.4 },
+        ],
+        'arb-recovery'
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.recovery).toMatchObject({
+        attempted: true,
+        cancellationsConfirmed: true,
+        unwindAttempted: true,
+        unwindComplete: true,
+        manualInterventionRequired: true,
+      });
+      expect(result.recovery?.unwindOrders).toHaveLength(1);
+      expect(riskManager.getPositions()).toHaveLength(0);
+      expect(riskManager.isCircuitBreakerActive()).toBe(true);
+      engine.stop();
+    });
+
     it('should detect partial fills and trigger handlePartialFills', async () => {
       // This test verifies that partial fills are detected and logged
       // handlePartialFills is called but may not find orders to cancel

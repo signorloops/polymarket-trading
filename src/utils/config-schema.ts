@@ -7,6 +7,37 @@
 
 import { z } from 'zod';
 
+function optionalEnv(name: string): string | undefined {
+  const value = process.env[name];
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed === '' ? undefined : trimmed;
+}
+
+function optionalNumberEnv(name: string): number | undefined {
+  const value = optionalEnv(name);
+  return value === undefined ? undefined : Number(value);
+}
+
+function optionalBooleanEnv(name: string): boolean | undefined {
+  const value = optionalEnv(name);
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === 'true') {
+    return true;
+  }
+  if (value === 'false') {
+    return false;
+  }
+
+  throw new Error(`${name} must be "true" or "false" when provided`);
+}
+
 /**
  * Algorithm configuration schema
  * Controls Frank-Wolfe and Bregman projection parameters
@@ -65,7 +96,7 @@ export const NetworkConfigSchema = z.object({
   RPC_URL: z.string().url().optional(),
 
   /** WebSocket URL for real-time data */
-  WS_URL: z.string().url().default('wss://ws.polymarket.com'),
+  WS_URL: z.string().url().default('wss://ws-subscriptions-clob.polymarket.com/ws/market'),
 
   /** API key for Polymarket */
   POLYMARKET_API_KEY: z.string().optional(),
@@ -75,6 +106,24 @@ export const NetworkConfigSchema = z.object({
 
   /** API passphrase for Polymarket (used for request signing) */
   POLYMARKET_PASSPHRASE: z.string().optional(),
+
+  /** Polygon chain id for CLOB signing */
+  POLYMARKET_CHAIN_ID: z.union([z.literal(137), z.literal(80002)]).default(137),
+
+  /** Signature type for Polymarket CLOB orders: 0=EOA, 1=Proxy, 2=Gnosis Safe */
+  POLYMARKET_SIGNATURE_TYPE: z.union([z.literal(0), z.literal(1), z.literal(2)]).default(0),
+
+  /** Polymarket profile/proxy funder address, required for proxy wallet modes */
+  POLYMARKET_FUNDER_ADDRESS: z
+    .string()
+    .regex(/^0x[a-fA-F0-9]{40}$/)
+    .optional(),
+
+  /** Optional default order tick size; omitted lets the SDK fetch market metadata */
+  POLYMARKET_DEFAULT_TICK_SIZE: z.enum(['0.1', '0.01', '0.001', '0.0001']).optional(),
+
+  /** Optional negative-risk override; omitted lets the SDK fetch market metadata */
+  POLYMARKET_NEG_RISK: z.boolean().optional(),
 
   /** Connection timeout in milliseconds */
   CONNECTION_TIMEOUT: z.number().int().positive().default(30000),
@@ -236,18 +285,23 @@ export function parseConfigFromEnv(): AppConfig {
       MIN_ORDER_BOOK_DEPTH: parseFloat(process.env.MIN_ORDER_BOOK_DEPTH ?? '100'),
     }),
     network: NetworkConfigSchema.parse({
-      RPC_URL: process.env.RPC_URL,
-      WS_URL: process.env.WS_URL,
-      POLYMARKET_API_KEY: process.env.POLYMARKET_API_KEY,
-      POLYMARKET_SECRET: process.env.POLYMARKET_SECRET,
-      POLYMARKET_PASSPHRASE: process.env.POLYMARKET_PASSPHRASE,
+      RPC_URL: optionalEnv('RPC_URL'),
+      WS_URL: optionalEnv('WS_URL'),
+      POLYMARKET_API_KEY: optionalEnv('POLYMARKET_API_KEY'),
+      POLYMARKET_SECRET: optionalEnv('POLYMARKET_SECRET'),
+      POLYMARKET_PASSPHRASE: optionalEnv('POLYMARKET_PASSPHRASE'),
+      POLYMARKET_CHAIN_ID: optionalNumberEnv('POLYMARKET_CHAIN_ID'),
+      POLYMARKET_SIGNATURE_TYPE: optionalNumberEnv('POLYMARKET_SIGNATURE_TYPE'),
+      POLYMARKET_FUNDER_ADDRESS: optionalEnv('POLYMARKET_FUNDER_ADDRESS'),
+      POLYMARKET_DEFAULT_TICK_SIZE: optionalEnv('POLYMARKET_DEFAULT_TICK_SIZE'),
+      POLYMARKET_NEG_RISK: optionalBooleanEnv('POLYMARKET_NEG_RISK'),
       CONNECTION_TIMEOUT: parseInt(process.env.CONNECTION_TIMEOUT ?? '30000', 10),
       RECONNECT_INTERVAL: parseInt(process.env.RECONNECT_INTERVAL ?? '5000', 10),
       MAX_RECONNECT_ATTEMPTS: parseInt(process.env.MAX_RECONNECT_ATTEMPTS ?? '10', 10),
     }),
     wallet: WalletConfigSchema.parse({
-      PRIVATE_KEY: process.env.PRIVATE_KEY,
-      WALLET_ADDRESS: process.env.WALLET_ADDRESS,
+      PRIVATE_KEY: optionalEnv('PRIVATE_KEY'),
+      WALLET_ADDRESS: optionalEnv('WALLET_ADDRESS'),
     }),
     logging: LogConfigSchema.parse({
       LOG_LEVEL:
@@ -267,7 +321,7 @@ export function parseConfigFromEnv(): AppConfig {
       CIRCUIT_BREAKER_ENABLED: process.env.CIRCUIT_BREAKER_ENABLED !== 'false',
     }),
     blockchain: BlockchainConfigSchema.parse({
-      RPC_URL: process.env.RPC_URL ?? process.env.BLOCKCHAIN_RPC_URL,
+      RPC_URL: optionalEnv('RPC_URL') ?? optionalEnv('BLOCKCHAIN_RPC_URL'),
       RPC_PROVIDER: (process.env.RPC_PROVIDER ?? 'custom') as 'helius' | 'alchemy' | 'custom',
       RPC_TIMEOUT_MS: parseInt(process.env.RPC_TIMEOUT_MS ?? '30000', 10),
       RPC_MAX_RETRIES: parseInt(process.env.RPC_MAX_RETRIES ?? '3', 10),

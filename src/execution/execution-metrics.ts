@@ -91,7 +91,9 @@ export function legsToOrders(legs: TradeLeg[], arbitrageId: string): TradeOrder[
     size: leg.size,
     price: leg.expectedPrice,
     orderType: 'limit' as const,
-    timeInForce: 'IOC' as const,
+    // The signed CLOB adapter currently supports GTC limit orders. Multi-leg
+    // atomicity is not implied; ExecutionEngine performs compensating recovery.
+    timeInForce: 'GTC' as const,
   }));
 }
 

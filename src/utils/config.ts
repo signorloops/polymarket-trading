@@ -103,6 +103,9 @@ export function printConfigSummary(): void {
     rpcConfigured: !!NETWORK_CONFIG.RPC_URL,
     wsUrl: NETWORK_CONFIG.WS_URL,
     apiKeyConfigured: !!NETWORK_CONFIG.POLYMARKET_API_KEY,
+    clobChainId: NETWORK_CONFIG.POLYMARKET_CHAIN_ID,
+    signatureType: NETWORK_CONFIG.POLYMARKET_SIGNATURE_TYPE,
+    funderConfigured: !!NETWORK_CONFIG.POLYMARKET_FUNDER_ADDRESS,
   });
   logger.info('Wallet:', {
     addressConfigured: !!WALLET_CONFIG.WALLET_ADDRESS,

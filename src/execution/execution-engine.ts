@@ -10,12 +10,19 @@
 
 import { getLogger } from '../utils/logger.js';
 import { TRADING_CONFIG } from '../utils/config.js';
-import type { TradeOrder, OrderStatus, ExecutionResult, TradeLeg } from './types.js';
+import type {
+  TradeOrder,
+  OrderStatus,
+  ExecutionResult,
+  ExecutionRecoveryResult,
+  TradeLeg,
+} from './types.js';
 import { OrderManager } from './order-manager.js';
-import { PolymarketClient } from '../api/polymarket-client.js';
+import type { TradingClient } from '../api/trading-client.js';
 import { TradingMetrics } from '../utils/metrics.js';
 import { getErrorMessage } from '../utils/errors.js';
 import { createSingleton } from '../utils/singleton.js';
+import { getRiskManager, type RiskManager } from './risk-manager.js';
 import {
   recordOrderMetrics,
   recordArbitrageMetrics,
@@ -23,8 +30,17 @@ import {
   legsToOrders,
   detectPartialFills,
 } from './execution-metrics.js';
+import { isTradingStatusClient, pollOrderUntilTerminal } from './order-lifecycle.js';
 
-export type { TradeOrder, OrderStatus, ExecutionResult, TradeLeg };
+export type { TradeOrder, OrderStatus, ExecutionResult, ExecutionRecoveryResult, TradeLeg };
+
+export interface ExecutionEngineOptions {
+  recoveryPollIntervalMs?: number;
+  recoveryPollTimeoutMs?: number;
+  maxUnwindSlippage?: number;
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
+}
 
 /**
  * ExecutionEngine handles order submission and tracking
@@ -33,11 +49,26 @@ export class ExecutionEngine {
   private orderManager: OrderManager;
   private cleanupInterval: NodeJS.Timeout | null = null;
   private logger = getLogger().child({ module: 'ExecutionEngine' });
-  private apiClient: PolymarketClient | null = null;
+  private apiClient: TradingClient | null = null;
+  private riskManager: RiskManager;
+  private readonly options: Required<ExecutionEngineOptions>;
 
-  constructor(orderManager?: OrderManager, apiClient?: PolymarketClient) {
+  constructor(
+    orderManager?: OrderManager,
+    apiClient?: TradingClient,
+    riskManager?: RiskManager,
+    options: ExecutionEngineOptions = {}
+  ) {
     this.orderManager = orderManager ?? new OrderManager();
     this.apiClient = apiClient ?? null;
+    this.riskManager = riskManager ?? getRiskManager();
+    this.options = {
+      recoveryPollIntervalMs: options.recoveryPollIntervalMs ?? 500,
+      recoveryPollTimeoutMs: options.recoveryPollTimeoutMs ?? 5_000,
+      maxUnwindSlippage: options.maxUnwindSlippage ?? 0.05,
+      sleep: options.sleep ?? defaultSleep,
+      now: options.now ?? Date.now,
+    };
 
     // Start automatic cleanup every 5 minutes
     this.cleanupInterval = setInterval(() => {
@@ -49,7 +80,7 @@ export class ExecutionEngine {
   /**
    * Set the API client for real order submission
    */
-  setApiClient(client: PolymarketClient): void {
+  setApiClient(client: TradingClient): void {
     this.apiClient = client;
   }
 
@@ -85,6 +116,7 @@ export class ExecutionEngine {
 
       this.orderManager.updateStatus(status);
       this.orderManager.removePending(order.id);
+      this.riskManager.updatePosition(status, order.marketId, order.side);
       recordOrderMetrics(order, status, executionTime);
       return status;
     } catch (error) {
@@ -191,9 +223,15 @@ export class ExecutionEngine {
     recordArbitrageMetrics(arbitrageId, result, performance.now() - startTime);
 
     const partialFills = detectPartialFills(result, orders);
-    if (partialFills.length > 0) {
+    const incomplete =
+      partialFills.length > 0 ||
+      result.orders.some((order) => order.status !== 'filled') ||
+      result.orders.length !== orders.length;
+    if (incomplete) {
       this.logger.warn(`Arbitrage ${arbitrageId} has partial fills`, { partialFills });
-      await this.handlePartialFills(arbitrageId, result.orders);
+      result.success = false;
+      result.recovery = await this.recoverIncompleteArbitrage(arbitrageId, orders, result.orders);
+      result.errors.push(...result.recovery.errors);
       await alertPartialFills({ arbitrageId, partialFills, totalFilled: result.totalFilled });
     }
 
@@ -207,29 +245,34 @@ export class ExecutionEngine {
     this.logger.info(`Cancelling order ${orderId}`);
 
     const order = this.orderManager.getPending(orderId);
-    if (!order) {
+    const trackedStatus = this.orderManager.getStatus(orderId);
+    if (!order && !this.isCancellableStatus(trackedStatus)) {
       this.logger.warn(`Order ${orderId} not found or not pending`);
       return false;
     }
 
     try {
-      // Simulate cancel (replace with actual API call)
-      await this.submitCancel(orderId);
+      await this.submitCancel(trackedStatus?.exchangeOrderId ?? orderId);
 
       const status: OrderStatus = {
         orderId,
         status: 'cancelled',
-        filledSize: 0,
-        remainingSize: order.size,
-        avgPrice: 0,
+        ...(trackedStatus?.exchangeOrderId
+          ? { exchangeOrderId: trackedStatus.exchangeOrderId }
+          : {}),
+        filledSize: trackedStatus?.filledSize ?? 0,
+        remainingSize: order?.size ?? trackedStatus?.remainingSize ?? 0,
+        avgPrice: trackedStatus?.avgPrice ?? order?.price ?? 0,
         timestamp: Date.now(),
       };
 
       this.orderManager.updateStatus(status);
       this.orderManager.removePending(orderId);
 
-      // Record cancellation metric
-      TradingMetrics.ordersCancelled.inc({ order_id: orderId });
+      // Record cancellation metric. NOTE: do NOT label by order_id — that creates
+      // one unbounded time series per order (a cardinality leak). Count as a total;
+      // per-order detail belongs in structured logs, not metrics.
+      TradingMetrics.ordersCancelled.inc({});
 
       return true;
     } catch (error) {
@@ -269,6 +312,24 @@ export class ExecutionEngine {
   }
 
   private async submitOrder(order: TradeOrder): Promise<OrderStatus> {
+    // Kill-switch: never place an order while the risk circuit breaker is active.
+    // This is the last line of defense on the order-submission path — even if an
+    // upstream caller skipped the risk check, no real-money order leaves the system.
+    if (this.riskManager.isCircuitBreakerActive()) {
+      this.logger.error('Order submission blocked: risk circuit breaker is active', {
+        orderId: order.id,
+        marketId: order.marketId,
+      });
+      return {
+        orderId: order.id,
+        status: 'cancelled',
+        filledSize: 0,
+        remainingSize: order.size,
+        avgPrice: 0,
+        timestamp: Date.now(),
+      };
+    }
+
     // If API client is not configured, use simulation mode (for testing)
     if (!this.apiClient) {
       return this.simulateOrderSubmission(order);
@@ -276,6 +337,7 @@ export class ExecutionEngine {
 
     try {
       const response = await this.apiClient.placeOrder({
+        idempotencyKey: order.id,
         marketId: order.marketId,
         side: order.side,
         size: order.size,
@@ -289,7 +351,8 @@ export class ExecutionEngine {
       const remainingSize = response.remainingSize;
 
       return {
-        orderId: response.id,
+        orderId: order.id,
+        exchangeOrderId: response.id,
         status: this.mapOrderStatus(response.status),
         filledSize,
         remainingSize,
@@ -358,17 +421,151 @@ export class ExecutionEngine {
     }
   }
 
-  private async handlePartialFills(arbitrageId: string, orders: OrderStatus[]): Promise<void> {
-    // Strategy: Cancel remaining orders and try to unwind filled positions
-    this.logger.info(`Handling partial fills for ${arbitrageId}`);
+  private isCancellableStatus(status: OrderStatus | undefined): boolean {
+    return (
+      status?.status === 'open' || status?.status === 'pending' || status?.status === 'partial'
+    );
+  }
 
-    // Cancel any remaining pending orders
-    for (const order of orders) {
-      if (order.status === 'open' || order.status === 'pending') {
-        await this.cancelOrder(order.orderId);
+  private async recoverIncompleteArbitrage(
+    arbitrageId: string,
+    requestedOrders: TradeOrder[],
+    observedOrders: OrderStatus[]
+  ): Promise<ExecutionRecoveryResult> {
+    const cancelledOrderIds: string[] = [];
+    const errors: string[] = [];
+    const finalFilledByOrder = new Map<string, number>();
+    let cancellationsConfirmed = true;
+
+    for (const observed of observedOrders) {
+      finalFilledByOrder.set(observed.orderId, observed.filledSize);
+      if (
+        observed.status !== 'open' &&
+        observed.status !== 'pending' &&
+        observed.status !== 'partial'
+      ) {
+        continue;
+      }
+
+      const cancelled = await this.cancelOrder(observed.orderId);
+      if (!cancelled) {
+        cancellationsConfirmed = false;
+        errors.push(`Failed to cancel incomplete order ${observed.orderId}`);
+        continue;
+      }
+      cancelledOrderIds.push(observed.orderId);
+
+      if (!this.apiClient || !isTradingStatusClient(this.apiClient) || !observed.exchangeOrderId) {
+        cancellationsConfirmed = false;
+        errors.push(
+          `Cancellation for ${observed.orderId} could not be confirmed from the exchange`
+        );
+        continue;
+      }
+
+      let terminal;
+      try {
+        terminal = await pollOrderUntilTerminal({
+          tradingClient: this.apiClient,
+          orderId: observed.exchangeOrderId,
+          pollIntervalMs: this.options.recoveryPollIntervalMs,
+          pollTimeoutMs: this.options.recoveryPollTimeoutMs,
+          sleep: this.options.sleep,
+          now: this.options.now,
+          mapStatus: (status) => status,
+          openStatuses: new Set(['open', 'partial']),
+        });
+      } catch (error) {
+        cancellationsConfirmed = false;
+        errors.push(
+          `Cancellation confirmation failed for ${observed.orderId}: ${getErrorMessage(error)}`
+        );
+        continue;
+      }
+      if (!terminal) {
+        cancellationsConfirmed = false;
+        errors.push(`Cancellation for ${observed.orderId} remained unconfirmed`);
+        continue;
+      }
+
+      const additionalFill = Math.max(terminal.filledSize - observed.filledSize, 0);
+      if (additionalFill > 0) {
+        const requested = requestedOrders.find((order) => order.id === observed.orderId);
+        if (requested) {
+          this.riskManager.updatePosition(
+            {
+              orderId: observed.orderId,
+              exchangeOrderId: observed.exchangeOrderId,
+              status: terminal.status === 'filled' ? 'filled' : 'partial',
+              filledSize: additionalFill,
+              remainingSize: terminal.remainingSize,
+              avgPrice: terminal.price,
+              timestamp: this.options.now(),
+            },
+            requested.marketId,
+            requested.side
+          );
+        }
+      }
+      finalFilledByOrder.set(observed.orderId, terminal.filledSize);
+    }
+
+    const unwindOrders: OrderStatus[] = [];
+    let unwindComplete = cancellationsConfirmed;
+    if (cancellationsConfirmed) {
+      for (const requested of requestedOrders) {
+        const filledSize = finalFilledByOrder.get(requested.id) ?? 0;
+        if (filledSize <= 0) {
+          continue;
+        }
+        const observed = observedOrders.find((order) => order.orderId === requested.id);
+        const referencePrice = observed?.avgPrice ?? requested.price;
+        const unwindSide = requested.side === 'buy' ? 'sell' : 'buy';
+        const unwindPrice =
+          unwindSide === 'sell'
+            ? Math.max(0.001, referencePrice - this.options.maxUnwindSlippage)
+            : Math.min(0.999, referencePrice + this.options.maxUnwindSlippage);
+        const unwind = await this.executeOrder({
+          id: `${arbitrageId}-unwind-${requested.id}`,
+          marketId: requested.marketId,
+          side: unwindSide,
+          size: filledSize,
+          price: unwindPrice,
+          orderType: 'limit',
+          timeInForce: 'GTC',
+        });
+        unwindOrders.push(unwind);
+        if (unwind.status !== 'filled' || unwind.filledSize + 1e-8 < filledSize) {
+          unwindComplete = false;
+          errors.push(`Unwind order ${unwind.orderId} did not fill completely`);
+          if (unwind.status === 'open' || unwind.status === 'partial') {
+            await this.cancelOrder(unwind.orderId);
+          }
+        }
       }
     }
+
+    this.riskManager.triggerCircuitBreaker(
+      `Incomplete multi-leg arbitrage ${arbitrageId}; operator review required`
+    );
+    const unwindAttempted = unwindOrders.length > 0;
+    return {
+      attempted: true,
+      cancellationsConfirmed,
+      unwindAttempted,
+      unwindComplete: unwindAttempted && unwindComplete,
+      // Every incomplete multi-leg trade requires human review, even if the
+      // compensating orders appear to have flattened the position.
+      manualInterventionRequired: true,
+      cancelledOrderIds,
+      unwindOrders,
+      errors,
+    };
   }
+}
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**

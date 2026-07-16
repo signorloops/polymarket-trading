@@ -153,7 +153,7 @@ describe('PolymarketClient', () => {
   });
 
   describe('authentication', () => {
-    it('should add authorization header with api key', async () => {
+    it('should add CLOB API key header without bearer auth', async () => {
       mockAxiosInstance.get.mockResolvedValueOnce({ data: [mockMarket] });
 
       await client.getMarkets();
@@ -163,7 +163,8 @@ describe('PolymarketClient', () => {
 
       requestInterceptor(config);
 
-      expect(config.headers.set).toHaveBeenCalledWith('Authorization', 'Bearer test-api-key');
+      expect(config.headers.set).toHaveBeenCalledWith('POLY_API_KEY', 'test-api-key');
+      expect(config.headers.set).not.toHaveBeenCalledWith('Authorization', expect.any(String));
     });
 
     it('should add timestamp and passphrase headers when secret provided', async () => {
@@ -176,9 +177,9 @@ describe('PolymarketClient', () => {
 
       requestInterceptor(config);
 
-      expect(config.headers.set).toHaveBeenCalledWith('Authorization', 'Bearer test-api-key');
-      expect(config.headers.set).toHaveBeenCalledWith('POLYMARKET-PASSPHRASE', 'test-passphrase');
-      expect(config.headers.set).toHaveBeenCalledWith('POLYMARKET-TIMESTAMP', expect.any(String));
+      expect(config.headers.set).toHaveBeenCalledWith('POLY_API_KEY', 'test-api-key');
+      expect(config.headers.set).toHaveBeenCalledWith('POLY_PASSPHRASE', 'test-passphrase');
+      expect(config.headers.set).toHaveBeenCalledWith('POLY_TIMESTAMP', expect.any(String));
     });
   });
 
@@ -262,16 +263,13 @@ describe('PolymarketClient', () => {
       timeInForce: 'GTC',
     };
 
-    it('should place order successfully', async () => {
-      mockAxiosInstance.post.mockResolvedValueOnce({ data: mockOrderResponse });
+    it('should reject unsigned direct order placement', async () => {
+      await expect(client.placeOrder(orderRequest)).rejects.toThrow(/signed CLOB order/);
 
-      const result = await client.placeOrder(orderRequest);
-
-      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/orders', orderRequest);
-      expect(result).toEqual(mockOrderResponse);
+      expect(mockAxiosInstance.post).not.toHaveBeenCalled();
     });
 
-    it('should place market order without price', async () => {
+    it('should reject unsigned market order placement', async () => {
       const marketOrder: OrderRequest = {
         marketId: 'market-1',
         side: 'sell',
@@ -279,23 +277,17 @@ describe('PolymarketClient', () => {
         price: 0,
         orderType: 'market',
       };
-      mockAxiosInstance.post.mockResolvedValueOnce({
-        data: { ...mockOrderResponse, orderType: 'market' },
-      });
+      await expect(client.placeOrder(marketOrder)).rejects.toThrow(/signed CLOB order/);
 
-      await client.placeOrder(marketOrder);
-
-      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/orders', marketOrder);
+      expect(mockAxiosInstance.post).not.toHaveBeenCalled();
     });
   });
 
   describe('cancelOrder', () => {
-    it('should cancel order successfully', async () => {
-      mockAxiosInstance.delete.mockResolvedValueOnce({ data: undefined });
+    it('should reject direct cancellation without CLOB L2 signing', async () => {
+      await expect(client.cancelOrder('order-1')).rejects.toThrow(/CLOB client/);
 
-      await client.cancelOrder('order-1');
-
-      expect(mockAxiosInstance.delete).toHaveBeenCalledWith('/orders/order-1');
+      expect(mockAxiosInstance.delete).not.toHaveBeenCalled();
     });
   });
 

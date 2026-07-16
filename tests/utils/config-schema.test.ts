@@ -74,7 +74,17 @@ describe('NetworkConfigSchema', () => {
 
   it('should use default WS_URL', () => {
     const config = NetworkConfigSchema.parse({});
-    expect(config.WS_URL).toBe('wss://ws.polymarket.com');
+    expect(config.WS_URL).toBe('wss://ws-subscriptions-clob.polymarket.com/ws/market');
+  });
+
+  it('should use safe CLOB signing defaults', () => {
+    const config = NetworkConfigSchema.parse({});
+
+    expect(config.POLYMARKET_CHAIN_ID).toBe(137);
+    expect(config.POLYMARKET_SIGNATURE_TYPE).toBe(0);
+    expect(config.POLYMARKET_FUNDER_ADDRESS).toBeUndefined();
+    expect(config.POLYMARKET_DEFAULT_TICK_SIZE).toBeUndefined();
+    expect(config.POLYMARKET_NEG_RISK).toBeUndefined();
   });
 });
 
@@ -165,5 +175,51 @@ describe('parseConfigFromEnv', () => {
 
     expect(config.algorithm.ALPHA).toBe(0.9);
     expect(config.logging.LOG_LEVEL).toBe('info');
+  });
+
+  it('should treat empty optional secret and wallet env vars as unset', () => {
+    process.env.PRIVATE_KEY = '';
+    process.env.WALLET_ADDRESS = '';
+    process.env.POLYMARKET_API_KEY = '';
+    process.env.POLYMARKET_SECRET = '';
+    process.env.POLYMARKET_PASSPHRASE = '';
+    process.env.POLYMARKET_FUNDER_ADDRESS = '';
+    process.env.POLYMARKET_DEFAULT_TICK_SIZE = '';
+    process.env.POLYMARKET_NEG_RISK = '';
+
+    const config = parseConfigFromEnv();
+
+    expect(config.wallet.PRIVATE_KEY).toBeUndefined();
+    expect(config.wallet.WALLET_ADDRESS).toBeUndefined();
+    expect(config.network.POLYMARKET_API_KEY).toBeUndefined();
+    expect(config.network.POLYMARKET_SECRET).toBeUndefined();
+    expect(config.network.POLYMARKET_PASSPHRASE).toBeUndefined();
+    expect(config.network.POLYMARKET_FUNDER_ADDRESS).toBeUndefined();
+    expect(config.network.POLYMARKET_DEFAULT_TICK_SIZE).toBeUndefined();
+    expect(config.network.POLYMARKET_NEG_RISK).toBeUndefined();
+  });
+
+  it('should parse CLOB signing environment variables', () => {
+    process.env.POLYMARKET_CHAIN_ID = '80002';
+    process.env.POLYMARKET_SIGNATURE_TYPE = '2';
+    process.env.POLYMARKET_FUNDER_ADDRESS = '0x1111111111111111111111111111111111111111';
+    process.env.POLYMARKET_DEFAULT_TICK_SIZE = '0.001';
+    process.env.POLYMARKET_NEG_RISK = 'true';
+
+    const config = parseConfigFromEnv();
+
+    expect(config.network.POLYMARKET_CHAIN_ID).toBe(80002);
+    expect(config.network.POLYMARKET_SIGNATURE_TYPE).toBe(2);
+    expect(config.network.POLYMARKET_FUNDER_ADDRESS).toBe(
+      '0x1111111111111111111111111111111111111111'
+    );
+    expect(config.network.POLYMARKET_DEFAULT_TICK_SIZE).toBe('0.001');
+    expect(config.network.POLYMARKET_NEG_RISK).toBe(true);
+  });
+
+  it('should reject invalid CLOB boolean environment variables', () => {
+    process.env.POLYMARKET_NEG_RISK = 'yes';
+
+    expect(() => parseConfigFromEnv()).toThrow(/POLYMARKET_NEG_RISK/);
   });
 });

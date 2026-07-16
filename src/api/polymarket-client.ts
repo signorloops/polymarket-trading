@@ -29,6 +29,8 @@ export interface PolymarketMarket {
 }
 
 export interface OrderRequest {
+  /** Unique logical order key, persisted before any signed real-money submission. */
+  idempotencyKey?: string;
   marketId: string;
   side: 'buy' | 'sell';
   size: number;
@@ -43,7 +45,7 @@ export interface OrderResponse {
   side: 'buy' | 'sell';
   size: number;
   price: number;
-  status: 'open' | 'filled' | 'cancelled' | 'rejected';
+  status: 'open' | 'partial' | 'filled' | 'cancelled' | 'rejected';
   filledSize: number;
   remainingSize: number;
   createdAt: string;
@@ -88,7 +90,7 @@ export class PolymarketClient {
     };
 
     this.client = axios.create({
-      baseURL: 'https://api.polymarket.com',
+      baseURL: 'https://clob.polymarket.com',
       timeout: NETWORK_CONFIG.CONNECTION_TIMEOUT,
       headers: {
         'Content-Type': 'application/json',
@@ -105,13 +107,14 @@ export class PolymarketClient {
       (config) => {
         // Add authentication headers if credentials are configured
         if (this.credentials.apiKey) {
-          config.headers.set('Authorization', `Bearer ${this.credentials.apiKey}`);
+          config.headers.set('POLY_API_KEY', this.credentials.apiKey);
 
-          // Add additional security headers if secret and passphrase are provided
+          // Signed trading requires the official CLOB client, but read endpoints can still
+          // carry the API key and request metadata.
           if (this.credentials.secret && this.credentials.passphrase) {
             const timestamp = Date.now().toString();
-            config.headers.set('POLYMARKET-TIMESTAMP', timestamp);
-            config.headers.set('POLYMARKET-PASSPHRASE', this.credentials.passphrase);
+            config.headers.set('POLY_TIMESTAMP', timestamp);
+            config.headers.set('POLY_PASSPHRASE', this.credentials.passphrase);
           }
         }
 
@@ -210,16 +213,26 @@ export class PolymarketClient {
   /**
    * Place a new order
    */
-  async placeOrder(order: OrderRequest): Promise<OrderResponse> {
-    const response = await this.client.post<OrderResponse>('/orders', order);
-    return response.data;
+  placeOrder(order: OrderRequest): Promise<OrderResponse> {
+    this.logger.error('Unsigned direct order placement is disabled', {
+      marketId: order.marketId,
+      side: order.side,
+    });
+    return Promise.reject(
+      new Error(
+        'Unsigned direct REST order placement is disabled. Use an official signed CLOB order client.'
+      )
+    );
   }
 
   /**
    * Cancel an existing order
    */
-  async cancelOrder(orderId: string): Promise<void> {
-    await this.client.delete(`/orders/${orderId}`);
+  cancelOrder(orderId: string): Promise<void> {
+    this.logger.error('Direct order cancellation is disabled', { orderId });
+    return Promise.reject(
+      new Error('Direct REST order cancellation is disabled. Use an official signed CLOB client.')
+    );
   }
 
   /**

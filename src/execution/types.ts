@@ -22,6 +22,7 @@ export interface TradeOrder {
  */
 export interface OrderStatus {
   orderId: string;
+  exchangeOrderId?: string;
   status: 'pending' | 'open' | 'filled' | 'partial' | 'cancelled' | 'error';
   filledSize: number;
   remainingSize: number;
@@ -40,6 +41,18 @@ export interface ExecutionResult {
   totalCost: number;
   errors: string[];
   executionTime: number;
+  recovery?: ExecutionRecoveryResult;
+}
+
+export interface ExecutionRecoveryResult {
+  attempted: boolean;
+  cancellationsConfirmed: boolean;
+  unwindAttempted: boolean;
+  unwindComplete: boolean;
+  manualInterventionRequired: boolean;
+  cancelledOrderIds: string[];
+  unwindOrders: OrderStatus[];
+  errors: string[];
 }
 
 /**

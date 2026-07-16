@@ -180,7 +180,7 @@ describe('legsToOrders', () => {
       size: 100,
       price: 0.5,
       orderType: 'limit',
-      timeInForce: 'IOC',
+      timeInForce: 'GTC',
     });
     expect(orders[1]!.id).toBe('arb-1-1');
   });

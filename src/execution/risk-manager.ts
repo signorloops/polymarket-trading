@@ -12,7 +12,8 @@ import { getLogger } from '../utils/logger.js';
 import { RISK_CONFIG } from '../utils/config.js';
 import { OrderStatus } from './execution-engine.js';
 import { createSingleton } from '../utils/singleton.js';
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 export interface Position {
   marketId: string;
@@ -495,8 +496,8 @@ export class RiskManager {
 
   /**
    * Load persisted risk state (positions, dailyPnL, circuit breaker). Missing file
-   * (first run) is silent; corrupt file logs a warning and starts fresh — risk
-   * state must never crash the daemon at startup. marketPrices are intentionally
+   * (first run) is silent; a corrupt existing file fails closed by activating
+   * the circuit breaker. marketPrices are intentionally
    * NOT persisted (transient, repopulated from live feeds, stale on reload).
    */
   private loadState(): void {
@@ -505,30 +506,25 @@ export class RiskManager {
     }
     try {
       const raw = readFileSync(this.stateFilePath, 'utf8');
-      const state = JSON.parse(raw) as Partial<PersistedRiskState>;
-      if (Array.isArray(state.positions)) {
-        for (const pos of state.positions) {
-          // Per-element guard: untrusted disk JSON could contain null/malformed
-          // entries; skip them instead of discarding the whole state.
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-          if (pos && typeof pos.marketId === 'string') {
-            this.positions.set(pos.marketId, pos);
-          }
-        }
+      const state = JSON.parse(raw) as unknown;
+      if (!isPersistedRiskState(state)) {
+        throw new Error('Risk state file has an invalid schema');
       }
-      if (typeof state.dailyPnL === 'number') this.dailyPnL = state.dailyPnL;
-      if (typeof state.maxDailyPnL === 'number') this.maxDailyPnL = state.maxDailyPnL;
-      if (typeof state.minDailyPnL === 'number') this.minDailyPnL = state.minDailyPnL;
-      if (typeof state.circuitBreakerTriggered === 'boolean') {
-        this.circuitBreakerTriggered = state.circuitBreakerTriggered;
+      for (const position of state.positions) {
+        this.positions.set(position.marketId, position);
       }
+      this.dailyPnL = state.dailyPnL;
+      this.maxDailyPnL = state.maxDailyPnL;
+      this.minDailyPnL = state.minDailyPnL;
+      this.circuitBreakerTriggered = state.circuitBreakerTriggered;
       this.logger.info('Risk state loaded from disk', {
         positions: this.positions.size,
         dailyPnL: this.dailyPnL,
         circuitBreakerTriggered: this.circuitBreakerTriggered,
       });
     } catch (error) {
-      this.logger.warn('Risk state file unreadable; starting fresh', {
+      this.circuitBreakerTriggered = true;
+      this.logger.error('Risk state file unreadable; circuit breaker activated', {
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -537,8 +533,8 @@ export class RiskManager {
   /**
    * Atomically persist risk state (temp file + rename). Called only on meaningful
    * state changes (trade fills, circuit-breaker transitions) — not on every price
-   * tick — to bound I/O. Failures are logged, never thrown: in-memory risk checks
-   * must keep running even if the disk is unavailable.
+   * tick — to bound I/O. A persistence failure activates the in-memory circuit
+   * breaker so the process cannot continue adding exposure that would be lost on restart.
    */
   private persistState(): void {
     if (!this.stateFilePath) return;
@@ -550,15 +546,55 @@ export class RiskManager {
       circuitBreakerTriggered: this.circuitBreakerTriggered,
     };
     try {
+      mkdirSync(dirname(this.stateFilePath), { recursive: true });
       const tmp = `${this.stateFilePath}.tmp`;
       writeFileSync(tmp, JSON.stringify(state), 'utf8');
       renameSync(tmp, this.stateFilePath);
     } catch (error) {
+      this.circuitBreakerTriggered = true;
       this.logger.error('Failed to persist risk state', {
         error: error instanceof Error ? error.message : String(error),
       });
     }
   }
+}
+
+function isPersistedRiskState(value: unknown): value is PersistedRiskState {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const state = value as Partial<PersistedRiskState>;
+  return (
+    Array.isArray(state.positions) &&
+    state.positions.every(isPersistedPosition) &&
+    typeof state.dailyPnL === 'number' &&
+    Number.isFinite(state.dailyPnL) &&
+    typeof state.maxDailyPnL === 'number' &&
+    Number.isFinite(state.maxDailyPnL) &&
+    typeof state.minDailyPnL === 'number' &&
+    Number.isFinite(state.minDailyPnL) &&
+    typeof state.circuitBreakerTriggered === 'boolean'
+  );
+}
+
+function isPersistedPosition(value: unknown): value is Position {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const position = value as Partial<Position>;
+  return (
+    typeof position.marketId === 'string' &&
+    position.marketId.trim() !== '' &&
+    typeof position.size === 'number' &&
+    Number.isFinite(position.size) &&
+    typeof position.avgPrice === 'number' &&
+    Number.isFinite(position.avgPrice) &&
+    position.avgPrice >= 0 &&
+    (position.side === 'long' || position.side === 'short') &&
+    typeof position.timestamp === 'number' &&
+    Number.isFinite(position.timestamp) &&
+    position.timestamp >= 0
+  );
 }
 
 /**
