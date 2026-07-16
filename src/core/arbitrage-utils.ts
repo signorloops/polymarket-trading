@@ -24,6 +24,17 @@ export function isProfitableArbitrage(
 }
 
 /**
+ * Interpret the Frank-Wolfe objective and duality gap only as a dimensionless
+ * incoherence diagnostic. The lower bound is measured in nats, not dollars.
+ */
+export function isSignificantIncoherence(
+  result: FrankWolfeResult,
+  minLowerBoundNats: number
+): boolean {
+  return result.objective - result.gap >= minLowerBoundNats;
+}
+
+/**
  * Compute the trade recommendation from Frank-Wolfe result
  *
  * @param result Frank-Wolfe result

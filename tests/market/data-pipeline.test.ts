@@ -50,7 +50,7 @@ jest.unstable_mockModule('../../src/utils/logger.js', () => ({
 // Mock config
 jest.unstable_mockModule('../../src/utils/config.js', () => ({
   NETWORK_CONFIG: {
-    WS_URL: 'wss://ws.polymarket.com',
+    WS_URL: 'wss://ws-subscriptions-clob.polymarket.com/ws/market',
     CONNECTION_TIMEOUT: 30000,
     RECONNECT_INTERVAL: 100,
     MAX_RECONNECT_ATTEMPTS: 3,
@@ -424,6 +424,32 @@ describe('DataPipeline', () => {
       );
     });
 
+    it('should handle official CLOB book message with asset_id', () => {
+      const handler = jest.fn();
+      pipeline.subscribe(handler);
+
+      const bookMessage = {
+        event_type: 'book',
+        asset_id: 'asset-yes',
+        market: '0xcondition',
+        bids: [{ price: '.48', size: '30' }],
+        asks: [{ price: '.52', size: '25' }],
+        timestamp: '123456789000',
+      };
+
+      mockState.wsInstance?.eventHandlers['message']?.(JSON.stringify(bookMessage));
+
+      expect(handler).toHaveBeenCalledWith({
+        type: 'orderbook',
+        data: {
+          marketId: 'asset-yes',
+          bids: [{ price: 0.48, size: 30 }],
+          asks: [{ price: 0.52, size: 25 }],
+          timestamp: 123456789000,
+        },
+      });
+    });
+
     it('should handle orderbook without bids/asks arrays', () => {
       const handler = jest.fn();
       pipeline.subscribe(handler);
@@ -485,6 +511,71 @@ describe('DataPipeline', () => {
           size: 0,
           side: 'buy',
           timestamp: 1234567890,
+        },
+      });
+    });
+
+    it('should handle official CLOB price_change arrays as orderbook updates', () => {
+      const handler = jest.fn();
+      pipeline.subscribe(handler);
+
+      const priceMessage = {
+        event_type: 'price_change',
+        market: '0xcondition',
+        price_changes: [
+          { asset_id: 'asset-yes', price: '0.5', size: '200', side: 'BUY' },
+          { asset_id: 'asset-no', price: '0.6', size: '0', side: 'SELL' },
+        ],
+        timestamp: '1757908892351',
+      };
+
+      mockState.wsInstance?.eventHandlers['message']?.(JSON.stringify(priceMessage));
+
+      expect(handler).toHaveBeenCalledWith({
+        type: 'orderbook',
+        data: {
+          marketId: 'asset-yes',
+          bids: [{ price: 0.5, size: 200 }],
+          asks: [],
+          timestamp: 1757908892351,
+        },
+      });
+      expect(handler).toHaveBeenCalledWith({
+        type: 'orderbook',
+        data: {
+          marketId: 'asset-no',
+          bids: [],
+          asks: [{ price: 0.6, size: 0 }],
+          timestamp: 1757908892351,
+        },
+      });
+    });
+
+    it('should handle official CLOB last_trade_price messages', () => {
+      const handler = jest.fn();
+      pipeline.subscribe(handler);
+
+      const tradeMessage = {
+        event_type: 'last_trade_price',
+        asset_id: 'asset-yes',
+        market: '0xcondition',
+        price: '0.456',
+        side: 'BUY',
+        size: '219.217767',
+        timestamp: '1750428146322',
+      };
+
+      mockState.wsInstance?.eventHandlers['message']?.(JSON.stringify(tradeMessage));
+
+      expect(handler).toHaveBeenCalledWith({
+        type: 'trade',
+        data: {
+          marketId: 'asset-yes',
+          eventId: '0xcondition',
+          price: 0.456,
+          size: 219.217767,
+          side: 'buy',
+          timestamp: 1750428146322,
         },
       });
     });
@@ -872,17 +963,22 @@ describe('DataPipeline', () => {
       }
     });
 
-    it('should subscribe to all market channels on connect', () => {
+    it('should subscribe to configured CLOB asset ids on connect', () => {
+      pipeline.disconnect();
+      pipeline = new DataPipeline('wss://test.polymarket.com', ['asset-1', 'asset-2']);
+      pipeline.connect();
+      if (mockState.wsInstance) {
+        mockState.wsInstance.readyState = 1; // OPEN
+      }
+
       mockState.wsInstance?.eventHandlers['open']?.();
 
       expect(mockState.wsInstance?.send).toHaveBeenCalledWith(
-        JSON.stringify({ type: 'subscribe', channel: 'trades' })
-      );
-      expect(mockState.wsInstance?.send).toHaveBeenCalledWith(
-        JSON.stringify({ type: 'subscribe', channel: 'orderbook' })
-      );
-      expect(mockState.wsInstance?.send).toHaveBeenCalledWith(
-        JSON.stringify({ type: 'subscribe', channel: 'price_change' })
+        JSON.stringify({
+          assets_ids: ['asset-1', 'asset-2'],
+          type: 'market',
+          custom_feature_enabled: true,
+        })
       );
     });
 
@@ -1027,7 +1123,8 @@ describe('DataPipeline', () => {
       const tradeMessage = {
         event_type: 'trade',
         market_id: 'market-1',
-        // Missing optional fields
+        price: 0.5,
+        // Missing optional fields: eventId, size, side
       };
 
       mockState.wsInstance?.eventHandlers['message']?.(JSON.stringify(tradeMessage));
@@ -1037,12 +1134,30 @@ describe('DataPipeline', () => {
         data: {
           marketId: 'market-1',
           eventId: '',
-          price: 0,
+          price: 0.5,
           size: 0,
           side: 'sell', // default when not 'buy'
           timestamp: expect.any(Number),
         },
       });
+    });
+
+    it('should drop a trade message whose price is missing or out of range', () => {
+      pipeline.connect();
+      if (mockState.wsInstance) {
+        mockState.wsInstance.readyState = 1; // OPEN
+      }
+
+      const handler = jest.fn();
+      pipeline.subscribe(handler);
+
+      for (const badPrice of [undefined, 'abc', '1e999', -0.1, 1.5]) {
+        mockState.wsInstance?.eventHandlers['message']?.(
+          JSON.stringify({ event_type: 'trade', market_id: 'market-1', price: badPrice })
+        );
+      }
+
+      expect(handler).not.toHaveBeenCalled();
     });
 
     it('should handle orderbook with missing bid/ask fields', () => {
@@ -1057,8 +1172,13 @@ describe('DataPipeline', () => {
       const orderbookMessage = {
         event_type: 'orderbook',
         market_id: 'market-1',
-        bids: [{ price: undefined, size: null }, { price: 0.5 }],
-        asks: [{ unknown: 'field' }],
+        // Malformed levels (missing/invalid price or size) are dropped; only
+        // well-formed levels survive.
+        bids: [
+          { price: undefined, size: null },
+          { price: 0.5, size: 100 },
+        ],
+        asks: [{ unknown: 'field' }, { price: 0.55, size: 50 }],
       };
 
       mockState.wsInstance?.eventHandlers['message']?.(JSON.stringify(orderbookMessage));
@@ -1067,11 +1187,37 @@ describe('DataPipeline', () => {
         type: 'orderbook',
         data: {
           marketId: 'market-1',
-          bids: [
-            { price: expect.any(Number), size: expect.any(Number) },
-            { price: 0.5, size: expect.any(Number) },
-          ],
-          asks: [{ price: expect.any(Number), size: expect.any(Number) }],
+          bids: [{ price: 0.5, size: 100 }],
+          asks: [{ price: 0.55, size: 50 }],
+          timestamp: expect.any(Number),
+        },
+      });
+    });
+
+    it('should filter out all malformed levels, emitting an empty book', () => {
+      pipeline.connect();
+      if (mockState.wsInstance) {
+        mockState.wsInstance.readyState = 1; // OPEN
+      }
+
+      const handler = jest.fn();
+      pipeline.subscribe(handler);
+
+      const orderbookMessage = {
+        event_type: 'orderbook',
+        market_id: 'market-1',
+        bids: [{ price: undefined, size: null }, { unknown: 'field' }],
+        asks: [{ price: 'abc' }],
+      };
+
+      mockState.wsInstance?.eventHandlers['message']?.(JSON.stringify(orderbookMessage));
+
+      expect(handler).toHaveBeenCalledWith({
+        type: 'orderbook',
+        data: {
+          marketId: 'market-1',
+          bids: [],
+          asks: [],
           timestamp: expect.any(Number),
         },
       });

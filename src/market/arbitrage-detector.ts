@@ -12,14 +12,19 @@ import { MarginalPolytope, Event } from '../core/marginal-polytope.js';
 import { BregmanProjectionResult } from '../core/bregman-projection.js';
 import {
   frankWolfe,
-  isProfitableArbitrage,
+  isSignificantIncoherence,
   linearMinimizationOracle as fwLinearMinimizationOracle,
 } from '../core/frank-wolfe.js';
-import { vectorSubtract, generalizedKLDivergence } from '../utils/math.js';
+import { generalizedKLDivergence } from '../utils/math.js';
 import { getLogger } from '../utils/logger.js';
 import { ALGORITHM_CONFIG } from '../utils/config.js';
 import { OrderBook } from './order-book.js';
 import { createSingleton } from '../utils/singleton.js';
+import {
+  findDollarPayoffArbitrage,
+  validatePayoffModel,
+  type CrossMarketPayoffModel,
+} from './payoff-model.js';
 
 export interface ArbitrageOpportunity {
   id: string;
@@ -27,6 +32,7 @@ export interface ArbitrageOpportunity {
   markets: string[];
   expectedProfit: number;
   guaranteedProfit: number;
+  profitUnit: 'USD';
   confidence: number;
   tradeDirection: number[];
   timestamp: number;
@@ -44,22 +50,34 @@ export interface SingleMarketArbitrage {
   profitPotential: number;
 }
 
-export interface CrossMarketArbitrage {
+export interface CrossMarketIncoherenceDiagnostic {
   markets: string[];
   prices: number[];
   projection: number[];
-  divergence: number;
-  gap: number;
-  guaranteedProfit: number;
+  divergenceNats: number;
+  dualityGapNats: number;
+  lowerBoundNats: number;
 }
 
 export class ArbitrageDetector {
   private polytope: MarginalPolytope;
   private logger = getLogger().child({ module: 'ArbitrageDetector' });
   private lastResults: Map<string, BregmanProjectionResult> = new Map();
+  private payoffModels: CrossMarketPayoffModel[];
 
-  constructor() {
+  constructor(payoffModels: CrossMarketPayoffModel[] = []) {
     this.polytope = new MarginalPolytope();
+    for (const model of payoffModels) {
+      validatePayoffModel(model);
+    }
+    this.payoffModels = [...payoffModels];
+  }
+
+  setPayoffModels(payoffModels: CrossMarketPayoffModel[]): void {
+    for (const model of payoffModels) {
+      validatePayoffModel(model);
+    }
+    this.payoffModels = [...payoffModels];
   }
 
   /**
@@ -122,10 +140,8 @@ export class ArbitrageDetector {
     return opportunities;
   }
 
-  /**
-   * Detect cross-market arbitrage using Frank-Wolfe optimization
-   */
-  detectCrossMarketArbitrage(): CrossMarketArbitrage | null {
+  /** Diagnose probability incoherence using Frank-Wolfe optimization. */
+  diagnoseCrossMarketIncoherence(): CrossMarketIncoherenceDiagnostic | null {
     const markets = this.polytope.getMarkets();
     if (markets.length < 2) {
       return null;
@@ -151,34 +167,31 @@ export class ArbitrageDetector {
       }
     );
 
-    // Check if profitable.
-    // WARNING: `guaranteedProfit` here is `objective - gap`, i.e. a KL-divergence
-    // bound in NATS (dimensionless) — NOT dollars. It is a useful pre-filter signal
+    // `objective - gap` is a KL-divergence lower bound in NATS (dimensionless),
+    // not dollars. It is a useful research signal
     // that the markets are mispriced relative to the marginal polytope, but it is
     // not comparable to a dollar threshold and does not account for fills, depth,
     // or fees. Converting it to a real dollar-payoff estimate requires modeling the
     // cross-market arbitrage's payoff structure (which outcomes pay across markets),
     // which this Frank-Wolfe-on-probabilities formulation does not expose. Until
-    // that payoff model exists, cross-market execution must be gated on a real
-    // fill simulation, not on this nats value. (Single-market arb IS dollar-based:
-    // profitPotential = |1 - sum|.)
-    const guaranteedProfit = fwResult.objective - fwResult.gap;
+    // that payoff model exists, cross-market execution must use findDollarPayoffArbitrage.
+    const lowerBoundNats = fwResult.objective - fwResult.gap;
 
-    if (isProfitableArbitrage(fwResult, ALGORITHM_CONFIG.MIN_PROFIT_THRESHOLD)) {
-      this.logger.info(`Cross-market arbitrage detected`, {
+    if (isSignificantIncoherence(fwResult, ALGORITHM_CONFIG.MIN_PROFIT_THRESHOLD)) {
+      this.logger.info(`Cross-market probability incoherence detected`, {
         markets: markets.length,
-        divergence: fwResult.objective,
-        gap: fwResult.gap,
-        guaranteedProfit,
+        divergenceNats: fwResult.objective,
+        dualityGapNats: fwResult.gap,
+        lowerBoundNats,
       });
 
       return {
         markets: markets.map((m) => m.id),
         prices,
         projection: fwResult.mu,
-        divergence: fwResult.objective,
-        gap: fwResult.gap,
-        guaranteedProfit,
+        divergenceNats: fwResult.objective,
+        dualityGapNats: fwResult.gap,
+        lowerBoundNats,
       };
     }
 
@@ -188,7 +201,7 @@ export class ArbitrageDetector {
   /**
    * Find all arbitrage opportunities
    */
-  findAllOpportunities(): ArbitrageOpportunity[] {
+  findAllOpportunities(orderBooks: Map<string, OrderBook> = new Map()): ArbitrageOpportunity[] {
     const opportunities: ArbitrageOpportunity[] = [];
     const timestamp = Date.now();
     const expiresAt = timestamp + 60000; // 1 minute validity
@@ -202,6 +215,7 @@ export class ArbitrageDetector {
         markets: [arb.yesMarketId, arb.noMarketId],
         expectedProfit: arb.profitPotential,
         guaranteedProfit: arb.profitPotential * 0.9, // Conservative estimate
+        profitUnit: 'USD',
         confidence: Math.min(arb.deviation * 10, 1),
         tradeDirection: this.computeSingleMarketTrade(arb),
         timestamp,
@@ -209,17 +223,44 @@ export class ArbitrageDetector {
       });
     }
 
-    // Cross-market arbitrage
-    const crossMarket = this.detectCrossMarketArbitrage();
-    if (crossMarket) {
+    // Cross-market execution candidates must come from an explicit terminal
+    // payoff model and executable asks. The KL diagnostic above remains useful
+    // for research, but is dimensionless and is never returned as USD profit.
+    for (const model of this.payoffModels) {
+      const quotes = model.marketIds.flatMap((marketId) => {
+        const ask = orderBooks.get(marketId)?.getBestAsk();
+        return ask ? [{ marketId, askPrice: ask.price, availableSize: ask.size }] : [];
+      });
+      const crossMarket = findDollarPayoffArbitrage(model, quotes);
+      if (!crossMarket) {
+        continue;
+      }
+
+      const activeEventIds = new Set(
+        crossMarket.marketIds.flatMap((marketId, index) => {
+          if ((crossMarket.quantities[index] ?? 0) <= 1e-8) {
+            return [];
+          }
+          const eventId = this.polytope.getMarket(marketId)?.eventId;
+          return eventId ? [eventId] : [];
+        })
+      );
+      if (activeEventIds.size < 2) {
+        this.logger.warn('Ignoring payoff cover that does not span multiple events', {
+          modelId: model.id,
+        });
+        continue;
+      }
+
       opportunities.push({
-        id: `cross-${crossMarket.markets.join('-')}-${String(timestamp)}`,
+        id: `cross-${crossMarket.modelId}-${String(timestamp)}`,
         type: 'cross-market',
-        markets: crossMarket.markets,
-        expectedProfit: crossMarket.divergence,
-        guaranteedProfit: crossMarket.guaranteedProfit,
-        confidence: Math.min(crossMarket.guaranteedProfit / crossMarket.divergence, 1),
-        tradeDirection: vectorSubtract(crossMarket.projection, crossMarket.prices),
+        markets: crossMarket.marketIds,
+        expectedProfit: crossMarket.guaranteedProfitUsd,
+        guaranteedProfit: crossMarket.guaranteedProfitUsd,
+        profitUnit: 'USD',
+        confidence: Math.min(Math.max(crossMarket.returnOnCost, 0), 1),
+        tradeDirection: crossMarket.quantities,
         timestamp,
         expiresAt,
       });

@@ -44,6 +44,7 @@ type EventHandler = (event: DataPipelineEvent) => void;
 export class DataPipeline {
   private ws: WebSocket | null = null;
   private url: string;
+  private assetIds: string[];
   private reconnectAttempts = 0;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
@@ -51,8 +52,9 @@ export class DataPipeline {
   private logger = getLogger().child({ module: 'DataPipeline' });
   private isManualClose = false;
 
-  constructor(url: string = NETWORK_CONFIG.WS_URL) {
+  constructor(url: string = NETWORK_CONFIG.WS_URL, assetIds: string[] = []) {
     this.url = url;
+    this.assetIds = [...assetIds];
   }
 
   /**
@@ -200,6 +202,7 @@ export class DataPipeline {
 
     switch (msg.event_type) {
       case 'trade':
+      case 'last_trade_price':
         this.handleTradeMessage(msg);
         break;
       case 'orderbook':
@@ -225,18 +228,23 @@ export class DataPipeline {
   }
 
   private handleTradeMessage(msg: Record<string, unknown>): void {
-    const rawMarketId = msg.market_id;
-    const rawEventId = msg.event_id;
-    const marketId =
-      typeof rawMarketId === 'string' || typeof rawMarketId === 'number' ? String(rawMarketId) : '';
-    const eventId =
-      typeof rawEventId === 'string' || typeof rawEventId === 'number' ? String(rawEventId) : '';
+    const marketId = this.readStringIdentifier(msg.asset_id ?? msg.market_id);
+    const eventId = this.readStringIdentifier(msg.market ?? msg.event_id);
+
+    if (!this.isValidPrice(msg.price)) {
+      this.logger.warn('Dropping trade message with invalid price', {
+        marketId,
+        rawPrice: msg.price,
+      });
+      return;
+    }
+
     const data: MarketData = {
       marketId,
       eventId,
-      price: Number(msg.price ?? 0),
-      size: Number(msg.size ?? 0),
-      side: msg.side === 'buy' ? 'buy' : 'sell',
+      price: Number(msg.price),
+      size: this.isValidSize(msg.size) ? Number(msg.size) : 0,
+      side: this.normalizeSide(msg.side),
       timestamp: Number(msg.timestamp ?? Date.now()),
     };
 
@@ -248,23 +256,23 @@ export class DataPipeline {
   private handleOrderBookMessage(msg: Record<string, unknown>): void {
     const processStartTime = performance.now();
 
-    const bids = Array.isArray(msg.bids)
-      ? msg.bids.map((b: unknown) => ({
-          price: Number((b as Record<string, unknown>).price ?? 0),
-          size: Number((b as Record<string, unknown>).size ?? 0),
-        }))
-      : [];
+    const toLevels = (arr: unknown): { price: number; size: number }[] => {
+      if (!Array.isArray(arr)) return [];
+      const levels: { price: number; size: number }[] = [];
+      for (const entry of arr) {
+        const record = (entry ?? {}) as Record<string, unknown>;
+        if (!this.isValidPrice(record.price) || !this.isValidSize(record.size)) {
+          continue;
+        }
+        levels.push({ price: Number(record.price), size: Number(record.size) });
+      }
+      return levels;
+    };
 
-    const asks = Array.isArray(msg.asks)
-      ? msg.asks.map((a: unknown) => ({
-          price: Number((a as Record<string, unknown>).price ?? 0),
-          size: Number((a as Record<string, unknown>).size ?? 0),
-        }))
-      : [];
+    const bids = toLevels(msg.bids);
+    const asks = toLevels(msg.asks);
 
-    const rawMarketId = msg.market_id;
-    const marketId =
-      typeof rawMarketId === 'string' || typeof rawMarketId === 'number' ? String(rawMarketId) : '';
+    const marketId = this.readStringIdentifier(msg.asset_id ?? msg.market_id);
     const data: OrderBookUpdate = {
       marketId,
       bids,
@@ -283,38 +291,75 @@ export class DataPipeline {
   }
 
   private handlePriceChangeMessage(msg: Record<string, unknown>): void {
-    // Convert price change to trade-like event for processing
-    const rawMarketId = msg.market_id;
-    const rawEventId = msg.event_id;
-    const marketId =
-      typeof rawMarketId === 'string' || typeof rawMarketId === 'number' ? String(rawMarketId) : '';
-    const eventId =
-      typeof rawEventId === 'string' || typeof rawEventId === 'number' ? String(rawEventId) : '';
+    const timestamp = Number(msg.timestamp ?? Date.now());
+    const rawChanges = msg.price_changes;
+
+    if (Array.isArray(rawChanges)) {
+      for (const change of rawChanges) {
+        const entry = (change ?? {}) as Record<string, unknown>;
+        const marketId = this.readStringIdentifier(entry.asset_id ?? entry.market_id);
+        if (!marketId) {
+          continue;
+        }
+
+        const side = this.normalizeSide(entry.side);
+        if (!this.isValidPrice(entry.price) || !this.isValidSize(entry.size)) {
+          continue;
+        }
+        const level = {
+          price: Number(entry.price),
+          size: Number(entry.size),
+        };
+
+        this.emit({
+          type: 'orderbook',
+          data: {
+            marketId,
+            bids: side === 'buy' ? [level] : [],
+            asks: side === 'sell' ? [level] : [],
+            timestamp,
+          },
+        });
+      }
+      return;
+    }
+
+    const marketId = this.readStringIdentifier(msg.asset_id ?? msg.market_id);
+    const eventId = this.readStringIdentifier(msg.market ?? msg.event_id);
+
+    if (!this.isValidPrice(msg.price)) {
+      this.logger.warn('Dropping price-change message with invalid price', {
+        marketId,
+        rawPrice: msg.price,
+      });
+      return;
+    }
+
     const data: MarketData = {
       marketId,
       eventId,
-      price: Number(msg.price ?? 0),
+      price: Number(msg.price),
       size: 0,
-      side: 'buy',
-      timestamp: Number(msg.timestamp ?? Date.now()),
+      side: msg.side === undefined ? 'buy' : this.normalizeSide(msg.side),
+      timestamp,
     };
 
-    if (data.marketId) {
+    if (marketId) {
       this.emit({ type: 'trade', data });
     }
   }
 
   private subscribeToMarkets(): void {
-    // Subscribe to all market data channels
-    const subscriptions = [
-      { type: 'subscribe', channel: 'trades' },
-      { type: 'subscribe', channel: 'orderbook' },
-      { type: 'subscribe', channel: 'price_change' },
-    ];
-
-    for (const sub of subscriptions) {
-      this.send(sub);
+    if (this.assetIds.length === 0) {
+      this.logger.warn('No asset ids configured for market subscription');
+      return;
     }
+
+    this.send({
+      assets_ids: this.assetIds,
+      type: 'market',
+      custom_feature_enabled: true,
+    });
   }
 
   private send(data: unknown): void {
@@ -346,6 +391,33 @@ export class DataPipeline {
         });
       }
     }
+  }
+
+  private readStringIdentifier(value: unknown): string {
+    if (typeof value === 'string' || typeof value === 'number') {
+      return String(value);
+    }
+    return '';
+  }
+
+  private normalizeSide(side: unknown): 'buy' | 'sell' {
+    return typeof side === 'string' && side.toLowerCase() === 'buy' ? 'buy' : 'sell';
+  }
+
+  /**
+   * Validate a price from an untrusted WebSocket message. Polymarket outcome-token
+   * prices live in [0, 1]; reject NaN/Infinity/out-of-range/missing values so a
+   * malformed or hostile message cannot poison the arbitrage detector. Number("abc")
+   * is NaN, Number("1e999") is Infinity, and a missing field must not default to 0.
+   */
+  private isValidPrice(value: unknown): boolean {
+    const num = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(num) && num >= 0 && num <= 1;
+  }
+
+  private isValidSize(value: unknown): boolean {
+    const num = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(num) && num >= 0;
   }
 
   private scheduleReconnect(): void {

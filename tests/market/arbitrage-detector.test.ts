@@ -319,7 +319,7 @@ describe('ArbitrageDetector', () => {
         outcomes: ['YES', 'NO'],
       });
 
-      const result = detector.detectCrossMarketArbitrage();
+      const result = detector.diagnoseCrossMarketIncoherence();
       expect(result).toBeNull();
     });
 
@@ -336,7 +336,7 @@ describe('ArbitrageDetector', () => {
         outcomes: ['YES', 'NO'],
       });
 
-      const result = detector.detectCrossMarketArbitrage();
+      const result = detector.diagnoseCrossMarketIncoherence();
       // Result depends on Frank-Wolfe implementation
       expect(result === null || Array.isArray(result?.markets)).toBe(true);
     });
@@ -362,9 +362,9 @@ describe('ArbitrageDetector', () => {
         outcomes: ['YES', 'NO'],
       });
 
-      const result = detector.detectCrossMarketArbitrage();
+      const result = detector.diagnoseCrossMarketIncoherence();
       // Should either find arbitrage or return null
-      expect(result === null || typeof result.divergence === 'number').toBe(true);
+      expect(result === null || typeof result.divergenceNats === 'number').toBe(true);
     });
   });
 
@@ -437,6 +437,74 @@ describe('ArbitrageDetector', () => {
       expect(opportunities.length).toBeGreaterThan(0);
       expect(opportunities[0]!.timestamp).toBeGreaterThan(0);
       expect(opportunities[0]!.expiresAt).toBeGreaterThan(opportunities[0]!.timestamp);
+    });
+
+    it('returns cross-market opportunities only from executable USD payoff models', () => {
+      const detector = new ArbitrageDetector([
+        {
+          id: 'implication-cover',
+          marketIds: ['event-a-yes', 'event-b-no'],
+          feeBufferBps: 100,
+          minGuaranteedProfitUsd: 0.05,
+          scenarios: [
+            { id: 'both-yes', payouts: [1, 0] },
+            { id: 'a-yes-b-no', payouts: [1, 1] },
+            { id: 'both-no', payouts: [0, 1] },
+          ],
+        },
+      ]);
+      detector.addEvent({
+        id: 'event-a',
+        markets: [{ id: 'event-a-yes', eventId: 'event-a', outcome: 'YES', price: 0.4 }],
+        outcomes: ['YES', 'NO'],
+      });
+      detector.addEvent({
+        id: 'event-b',
+        markets: [{ id: 'event-b-no', eventId: 'event-b', outcome: 'NO', price: 0.5 }],
+        outcomes: ['YES', 'NO'],
+      });
+
+      const manager = getOrderBookManager();
+      manager.updateBook('event-a-yes', [], [{ price: 0.4, size: 10 }]);
+      manager.updateBook('event-b-no', [], [{ price: 0.5, size: 10 }]);
+      const orderBooks = new Map([
+        ['event-a-yes', manager.getBook('event-a-yes')],
+        ['event-b-no', manager.getBook('event-b-no')],
+      ]);
+
+      const opportunities = detector.findAllOpportunities(orderBooks);
+      const crossMarket = opportunities.find((opportunity) => opportunity.type === 'cross-market');
+
+      expect(crossMarket).toMatchObject({
+        markets: ['event-a-yes', 'event-b-no'],
+        profitUnit: 'USD',
+        tradeDirection: [1, 1],
+      });
+      expect(crossMarket?.guaranteedProfit).toBeCloseTo(0.091, 8);
+    });
+
+    it('never promotes the dimensionless KL diagnostic without payoff scenarios and books', () => {
+      const detector = new ArbitrageDetector();
+      detector.addEvent({
+        id: 'event-a',
+        markets: [
+          { id: 'a-yes', eventId: 'event-a', outcome: 'YES', price: 0.8 },
+          { id: 'a-no', eventId: 'event-a', outcome: 'NO', price: 0.1 },
+        ],
+        outcomes: ['YES', 'NO'],
+      });
+      detector.addEvent({
+        id: 'event-b',
+        markets: [
+          { id: 'b-yes', eventId: 'event-b', outcome: 'YES', price: 0.7 },
+          { id: 'b-no', eventId: 'event-b', outcome: 'NO', price: 0.1 },
+        ],
+        outcomes: ['YES', 'NO'],
+      });
+
+      expect(
+        detector.findAllOpportunities().every((opportunity) => opportunity.type !== 'cross-market')
+      ).toBe(true);
     });
   });
 

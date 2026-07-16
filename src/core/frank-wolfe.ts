@@ -20,7 +20,11 @@ export type { FrankWolfeResult, FrankWolfeOptions };
 export type { Constraint } from './frank-wolfe-types.js';
 export { linearMinimizationOracle } from './lmo.js';
 export { lineSearchKL, lineSearchObjective, adaptiveStepSize } from './line-search.js';
-export { isProfitableArbitrage, computeTradeRecommendation } from './arbitrage-utils.js';
+export {
+  isProfitableArbitrage,
+  isSignificantIncoherence,
+  computeTradeRecommendation,
+} from './arbitrage-utils.js';
 
 /**
  * Object pool for reusing Float64Array buffers
