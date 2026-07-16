@@ -2,6 +2,7 @@
  * API Security Tests
  */
 
+import { jest } from '@jest/globals';
 import {
   ApiKeyManager,
   RequestSigner,
@@ -152,6 +153,29 @@ describe('RateLimiter', () => {
       limiter.isAllowed('user1');
 
       expect(limiter.isAllowed('user2')).toBe(true);
+    });
+
+    it('evicts expired entries to bound memory under high cardinality', () => {
+      jest.useFakeTimers();
+      const base = 1_000_000;
+      jest.setSystemTime(base);
+      try {
+        const limiter = new RateLimiter(5, 1000); // 1s window
+        for (let i = 0; i < 10; i++) {
+          limiter.isAllowed(`k${String(i)}`);
+        }
+        const map = (limiter as unknown as { limits: Map<string, unknown> }).limits;
+        expect(map.size).toBe(10);
+
+        // Advance well past both the window (1s) and the sweep interval (60s); the
+        // next call triggers a sweep that drops every expired entry, bounding memory
+        // instead of growing forever.
+        jest.setSystemTime(base + 120000);
+        limiter.isAllowed('after');
+        expect(map.size).toBe(1);
+      } finally {
+        jest.useRealTimers();
+      }
     });
   });
 
@@ -339,15 +363,16 @@ describe('Utility functions', () => {
       expect(hash1).not.toBe(hash2);
     });
 
-    it('should use random salt when HASH_SALT is not set', () => {
+    it('should be deterministic within a process even when HASH_SALT is unset', () => {
       delete process.env.HASH_SALT;
       const hash1 = hashSensitive('secret');
       const hash2 = hashSensitive('secret');
 
-      // With random salt, same input produces different hashes
-      expect(hash1).not.toBe(hash2);
+      // Same input must yield the same hash within a process so hashes can be
+      // correlated across log lines. (Previously a fresh random salt per call made
+      // every hash unique and useless for correlation.)
+      expect(hash1).toBe(hash2);
       expect(hash1.length).toBe(16);
-      expect(hash2.length).toBe(16);
     });
   });
 });

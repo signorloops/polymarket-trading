@@ -174,9 +174,17 @@ export class RequestSigner {
  * Simple in-memory rate limiter
  */
 export class RateLimiter {
+  /** Soft cap on tracked keys. When exceeded, expired entries are swept to bound
+   *  memory (the limiter is keyed on caller-supplied, potentially high-cardinality
+   *  values like per-IP/per-token; without sweeping this Map grew unbounded). */
+  private static readonly MAX_ENTRIES = 10000;
+  /** Sweep at most this often (and on cap breach) — amortized O(1) per call. */
+  private static readonly SWEEP_INTERVAL_MS = 60000;
+
   private limits: Map<string, RateLimitEntry> = new Map();
   private maxRequests: number;
   private windowMs: number;
+  private lastSweepAt = 0;
   private logger = getLogger().child({ module: 'RateLimiter' });
 
   constructor(maxRequests = 100, windowMs = 60000) {
@@ -189,6 +197,17 @@ export class RateLimiter {
    */
   isAllowed(key: string): boolean {
     const now = Date.now();
+
+    // Amortized sweep: drop expired entries periodically (and immediately if the
+    // cap is breached) so high-cardinality keys cannot exhaust memory.
+    if (
+      this.limits.size >= RateLimiter.MAX_ENTRIES ||
+      now - this.lastSweepAt >= RateLimiter.SWEEP_INTERVAL_MS
+    ) {
+      this.sweepExpired(now);
+      this.lastSweepAt = now;
+    }
+
     const entry = this.limits.get(key);
 
     if (!entry || now > entry.resetTime) {
@@ -207,6 +226,23 @@ export class RateLimiter {
 
     entry.count++;
     return true;
+  }
+
+  /**
+   * Remove entries whose window has elapsed.
+   */
+  private sweepExpired(now: number): void {
+    for (const [k, entry] of this.limits) {
+      if (now > entry.resetTime) {
+        this.limits.delete(k);
+      }
+    }
+    if (this.limits.size >= RateLimiter.MAX_ENTRIES) {
+      this.logger.warn('RateLimiter at capacity after sweep (sustained high cardinality)', {
+        size: this.limits.size,
+        cap: RateLimiter.MAX_ENTRIES,
+      });
+    }
   }
 
   /**
@@ -304,10 +340,20 @@ export function generateNonce(): string {
 }
 
 /**
- * Hash sensitive data (for logging)
- * Uses environment variable HASH_SALT or generates a random salt
+ * Process-wide salt cache for {@link hashSensitive}. When HASH_SALT is unset we
+ * generate ONE random salt per process and reuse it, so the same secret hashes
+ * consistently across log lines within a run (the point of logging a hash).
+ * Previously a fresh random salt per call made every hash unique and useless for
+ * correlation. Set HASH_SALT to make hashes comparable across restarts too.
+ */
+let hashSaltCache: string | null = null;
+
+/**
+ * Hash sensitive data (for logging). Deterministic within a process: the same
+ * input yields the same hash for the lifetime of the process (so hashes can be
+ * correlated across log lines). Set HASH_SALT for cross-restart comparability.
  */
 export function hashSensitive(data: string): string {
-  const salt = process.env.HASH_SALT ?? randomBytes(32).toString('hex');
+  const salt = process.env.HASH_SALT ?? (hashSaltCache ??= randomBytes(32).toString('hex'));
   return createHmac('sha256', salt).update(data).digest('hex').substring(0, 16);
 }
