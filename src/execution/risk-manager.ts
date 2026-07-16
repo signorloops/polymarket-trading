@@ -36,6 +36,22 @@ export interface RiskCheckResult {
   riskLevel: 'low' | 'medium' | 'high' | 'critical';
 }
 
+/** External (exchange) position used for reconciliation. `assetId` is the outcome
+ *  token id, matching Position.marketId (order.marketId is used as the tokenID). */
+export interface ExchangeBalance {
+  assetId: string;
+  size: number;
+}
+
+export interface ReconcileResult {
+  /** In-memory positions whose size was corrected to match the exchange. */
+  synced: string[];
+  /** In-memory positions the exchange no longer holds (closed externally). */
+  removed: string[];
+  /** Exchange positions not previously tracked (cost basis unknown). */
+  imported: string[];
+}
+
 export interface RiskManagerConfig {
   maxExposure?: number;
   maxBetFraction?: number;
@@ -58,6 +74,8 @@ interface PersistedRiskState {
 }
 
 export class RiskManager {
+  private static readonly RECONCILE_TOLERANCE = 1e-6;
+
   private positions: Map<string, Position> = new Map();
   private marketPrices: Map<string, number> = new Map();
   private dailyPnL = 0;
@@ -374,6 +392,67 @@ export class RiskManager {
     this.persistState();
   }
 
+  /**
+   * Reconcile in-memory positions against exchange ground truth. Use on startup
+   * (after loading persisted state) and periodically: the persisted state can be
+   * stale if orders filled while the daemon was down, or if positions changed
+   * externally. The exchange is authoritative for SIZE:
+   *  - synced: correct in-memory size to the exchange value when they differ.
+   *  - removed: drop in-memory positions the exchange no longer holds.
+   *  - imported: record exchange positions we didn't know about, with avgPrice 0
+   *    (cost basis unknown) — these are excluded from unrealized PnL until a cost
+   *    basis is supplied, so they can't inflate/deflate the circuit-breaker math.
+   * Any drift is logged at WARN for operator review, and state is re-persisted.
+   */
+  reconcile(balances: readonly ExchangeBalance[]): ReconcileResult {
+    const exchange = new Map<string, number>();
+    for (const b of balances) {
+      if (Number.isFinite(b.size) && Math.abs(b.size) > RiskManager.RECONCILE_TOLERANCE) {
+        exchange.set(b.assetId, b.size);
+      }
+    }
+
+    const synced: string[] = [];
+    const removed: string[] = [];
+
+    for (const [assetId, pos] of this.positions) {
+      const exchangeSize = exchange.get(assetId);
+      if (exchangeSize === undefined) {
+        removed.push(assetId);
+        this.positions.delete(assetId);
+      } else if (Math.abs(exchangeSize - pos.size) > RiskManager.RECONCILE_TOLERANCE) {
+        synced.push(assetId);
+        pos.size = exchangeSize;
+        pos.side = exchangeSize >= 0 ? 'long' : 'short';
+        pos.timestamp = Date.now();
+      }
+    }
+
+    const imported: string[] = [];
+    for (const [assetId, exchangeSize] of exchange) {
+      if (!this.positions.has(assetId)) {
+        imported.push(assetId);
+        this.positions.set(assetId, {
+          marketId: assetId,
+          size: exchangeSize,
+          avgPrice: 0, // unknown cost basis; excluded from unrealized PnL until set
+          side: exchangeSize >= 0 ? 'long' : 'short',
+          timestamp: Date.now(),
+        });
+      }
+    }
+
+    if (synced.length > 0 || removed.length > 0 || imported.length > 0) {
+      this.logger.warn('Position reconciliation found drift vs exchange', {
+        synced,
+        removed,
+        imported,
+      });
+      this.persistState();
+    }
+    return { synced, removed, imported };
+  }
+
   private getTotalExposure(): number {
     return Array.from(this.positions.values()).reduce(
       (sum, pos) => sum + Math.abs(pos.size * pos.avgPrice),
@@ -390,6 +469,12 @@ export class RiskManager {
   private calculateUnrealizedPnL(): number {
     let unrealized = 0;
     for (const position of this.positions.values()) {
+      // Skip positions with no known cost basis (e.g. reconciled-in from the
+      // exchange) — without an entry price, unrealized PnL cannot be computed and
+      // must not feed the emergency-stop circuit breaker.
+      if (position.avgPrice <= 0) {
+        continue;
+      }
       const markPrice = this.marketPrices.get(position.marketId);
       if (markPrice === undefined) {
         continue;

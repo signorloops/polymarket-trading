@@ -358,4 +358,71 @@ describe('RiskManager', () => {
       }
     });
   });
+
+  describe('reconcile', () => {
+    function fill(orderId: string, size: number, avgPrice: number): OrderStatus {
+      return {
+        orderId,
+        status: 'filled',
+        filledSize: size,
+        remainingSize: 0,
+        avgPrice,
+        timestamp: Date.now(),
+      };
+    }
+
+    it('corrects in-memory size to exchange ground truth', () => {
+      const rm = new RiskManager();
+      rm.updatePosition(fill('o1', 100, 0.4), 'asset-A', 'buy');
+
+      const result = rm.reconcile([{ assetId: 'asset-A', size: 150 }]);
+
+      expect(result.synced).toEqual(['asset-A']);
+      expect(rm.getPosition('asset-A')?.size).toBe(150);
+    });
+
+    it('removes in-memory positions the exchange no longer holds', () => {
+      const rm = new RiskManager();
+      rm.updatePosition(fill('o1', 100, 0.4), 'asset-A', 'buy');
+      rm.updatePosition(fill('o2', 50, 0.3), 'asset-B', 'buy');
+
+      const result = rm.reconcile([{ assetId: 'asset-A', size: 100 }]); // B gone from exchange
+
+      expect(result.removed).toEqual(['asset-B']);
+      expect(rm.getPosition('asset-B')).toBeUndefined();
+      expect(rm.getPosition('asset-A')?.size).toBe(100);
+    });
+
+    it('imports exchange-only positions with unknown cost basis (avgPrice 0)', () => {
+      const rm = new RiskManager();
+      const result = rm.reconcile([{ assetId: 'asset-C', size: 200 }]);
+
+      expect(result.imported).toEqual(['asset-C']);
+      const pos = rm.getPosition('asset-C');
+      expect(pos?.size).toBe(200);
+      expect(pos?.avgPrice).toBe(0); // unknown cost basis
+    });
+
+    it('reports no drift when sizes already match', () => {
+      const rm = new RiskManager();
+      rm.updatePosition(fill('o1', 100, 0.4), 'asset-A', 'buy');
+
+      const result = rm.reconcile([{ assetId: 'asset-A', size: 100 }]);
+
+      expect(result.synced).toEqual([]);
+      expect(result.removed).toEqual([]);
+      expect(result.imported).toEqual([]);
+    });
+
+    it('excludes reconciled-in positions (no cost basis) from unrealized PnL', () => {
+      const rm = new RiskManager();
+      rm.reconcile([{ assetId: 'asset-X', size: 100 }]); // imported, avgPrice 0
+      rm.updateMarketPrice('asset-X', 0.5);
+
+      const metrics = rm.getRiskMetrics();
+      // Would be (0.5 - 0) * 100 = 50 if not excluded; must be 0 to avoid feeding
+      // the emergency-stop circuit breaker a fabricated gain.
+      expect(metrics.unrealizedPnL).toBe(0);
+    });
+  });
 });
