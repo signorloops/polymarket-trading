@@ -72,7 +72,7 @@ cp .env.example .env
 
 ```env
 # 网络配置
-RPC_URL= # 可选的旧 Polygon 交易追踪器
+POLYGON_RPC_URL= # 仅只读链上余额对账需要
 WS_URL=wss://ws-subscriptions-clob.polymarket.com/ws/market
 POLYMARKET_API_KEY=your_api_key
 POLYMARKET_SECRET=your_api_secret
@@ -123,6 +123,8 @@ CANARY_KILL_SWITCH_PATH=.state/canary-kill-switch.json
 
 canary CLI 会在提交前持久化意图，并对不确定提交结果安全失败。kill-switch 文件缺失时真实提交也会被阻止；只有在已审核的 canary 窗口内，才应显式执行 `npm run canary:kill-switch -- deactivate`。预检要求客户端支持订单状态、余额/授权额与 heartbeat。部分成交、完全成交和不确定结果都会标记为需要人工对账。
 `npm run canary:kill-switch -- activate "reason"` 会阻止后续真实 canary 提交；`npm run canary:cancel-all` 会基于持久化状态文件尝试撤掉所有未终态 canary 订单。
+
+真实 Canary 前先运行 `npm run user-stream:check` 与 `npm run audit:operator-readiness`。审计全程只读，会比较认证 CLOB 余额、操作员录入的 UI 余额以及 Polygon 上 pUSD/CTF 余额。多机器提交者必须配置 `ORDER_IDEMPOTENCY_DATABASE_URL`（或 `_FILE`），由 PostgreSQL 事务性抢占逻辑订单键。
 
 自动实盘仍保持禁用。Canary、余额对账、持久幂等、payoff 模型与多腿原子性的状态见 [实盘就绪门禁](docs/live-trading-readiness.md)。
 

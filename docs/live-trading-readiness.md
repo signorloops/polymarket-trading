@@ -6,22 +6,22 @@ Automatic live trading remains intentionally disabled. This document is the rele
 
 | Gate | Code status | Operational status |
 | --- | --- | --- |
-| Signed CLOB single-order canary | Implemented with a 5 USD hard cap, pre-submit intent journal, fail-closed kill switch, balance/allowance and heartbeat preflight, timeout cancellation and final-state confirmation | A real funded-account run must be performed and reviewed by the operator; any fill still requires manual balance/position reconciliation |
-| Startup balance reconciliation | Implemented for every configured conditional token plus collateral; incomplete or malformed snapshots fail without changing risk state | Run `npm run reconcile:balances` against the funded account and compare with the Polymarket UI/on-chain holdings |
-| Cross-process order idempotency | Implemented with an atomic filesystem claim in `.state/order-idempotency`; SDK POST retry is disabled and ambiguous submissions remain blocked | The state directory must be durable and shared by every submitter, with atomic create/rename/fsync semantics; use a transactional database before multi-host deployment |
+| Signed CLOB single-order canary | Implemented with a 5 USD hard cap, dynamic V2 fee lookup, authenticated user-channel readiness, zero-open-order check, intent journal, kill switch, balance/allowance and heartbeat preflight, timeout cancellation and final-state confirmation | A real funded-account run must still be performed and reviewed by the operator; any fill requires deliberate position handling |
+| Three-way balance reconciliation | `audit:operator-readiness` compares authenticated CLOB balances, operator-supplied UI evidence and Polygon pUSD/CTF balances in atomic units | Run it against the funded account before and after Canary; UI evidence cannot be inferred by the bot |
+| Cross-process order idempotency | Atomic file journal remains available for one host; PostgreSQL primary-key claims and conditional state transitions are implemented for multi-machine deployments | Configure `ORDER_IDEMPOTENCY_DATABASE_URL[_FILE]` and exercise failover against the production database before multiple submitters are enabled |
 | Partial-fill recovery | Implemented as cancel-confirm-unwind compensation; an incomplete arbitrage always opens the risk circuit breaker | Exercise with controlled test orders and verify the resulting positions independently |
-| Cross-market USD payoff | Implemented only for explicit exhaustive payoff scenarios and displayed best-ask depth, including a configured fee buffer | Each payoff scenario set needs independent event-resolution and fee review |
+| Cross-market USD payoff | Implemented only for explicit exhaustive payoff scenarios and displayed depth; dynamic V2 rate/exponent metadata is cached with a conservative stale-data fallback | Each payoff scenario set still needs independent event-resolution review |
 | Multi-leg atomic execution | Not supported by the current CLOB adapter/API | **Hard blocker.** Compensation reduces risk but is not atomic execution |
-| Order lifecycle feed | Polling and cancel confirmation are implemented; no authenticated user WebSocket is wired into the daemon | Validate polling under disconnect/rate-limit scenarios or add a user stream before unattended execution |
+| Order lifecycle feed | Authenticated user WebSocket implements private order/trade lifecycle parsing, reconnect/PONG health and per-order waiting; Canary requires a healthy channel before submit while signed REST polling remains authoritative fallback | Validate it with the funded API key and controlled order events before unattended execution |
 
 ## Required operator sequence
 
 1. Keep `liveTrading=false`. A missing canary kill-switch file is intentionally active/fail-closed; explicitly activate it with an operator reason while configuring the account.
-2. Put `.state` on a durable, shared volume, set `RISK_STATE_FILE`, and back it up.
-3. Configure real numeric token IDs, then run `npm run reconcile:balances`.
+2. Put `.state` on a durable volume, set `RISK_STATE_FILE`, and configure PostgreSQL idempotency for any multi-host setup.
+3. Configure real numeric token IDs and UI balance evidence, then run `npm run audit:operator-readiness`.
 4. Run the canary in dry-run mode and inspect its request and state record.
 5. Verify balance, allowance and heartbeat preflight, then deactivate the canary kill switch only for one explicitly confirmed, capped real canary.
-6. Confirm the order's exchange status, wallet balances, local risk state and idempotency journal agree.
+6. Re-run `audit:operator-readiness`; confirm exchange status, UI, Polygon balances, local risk state and the PostgreSQL journal agree.
 7. Re-activate the kill switch and test `canary:cancel-all`.
 8. Review every configured cross-market payoff scenario and its fee buffer with an independent reviewer.
 9. Do not remove the automatic live-trading guards until the multi-leg atomicity decision is resolved.

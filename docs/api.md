@@ -47,7 +47,7 @@ const system = new PolymarketTradingSystem({
 - `POLYMARKET_PASSPHRASE`
 - `POLYMARKET_SIGNATURE_TYPE`
 - 代理钱包模式还需要 `POLYMARKET_FUNDER_ADDRESS`
-- 真单环境需要把 `ORDER_IDEMPOTENCY_DIR` 放在持久化共享卷上
+- 单机真单可把 `ORDER_IDEMPOTENCY_DIR` 放在持久化卷上；多机器必须配置 `ORDER_IDEMPOTENCY_DATABASE_URL` 或其 `_FILE` secret
 
 签名类型为 `0=EOA`、`1=Polymarket proxy`、`2=Gnosis Safe`、`3=EIP-1271`。后三种模式需要 `POLYMARKET_FUNDER_ADDRESS`。
 
@@ -64,8 +64,10 @@ const system = new PolymarketTradingSystem({
 - 状态会持久化到 `CANARY_STATE_PATH`（默认 `.state/canary-trades.json`）
 - kill switch 会持久化到 `CANARY_KILL_SWITCH_PATH`（默认 `.state/canary-kill-switch.json`）
 
-该入口只提交一笔 `GTC` limit order，不会启动自动策略执行。真实提交前会持久化意图，并检查 kill switch、余额/allowance 与 heartbeat；kill-switch 文件缺失也会安全拒绝。若出现成交、部分成交、轮询超时或不确定提交结果，会在需要人工跟进时返回 `manualInterventionRequired=true`。
+该入口只提交一笔 `GTC` limit order，不会启动自动策略执行。真实提交前会读取动态 V2 费率、确认认证用户频道 PONG、持久化意图，并检查 kill switch、全账户未结订单、余额/allowance 与 heartbeat；kill-switch 文件缺失也会安全拒绝。若出现成交、部分成交、轮询超时或不确定提交结果，会在需要人工跟进时返回 `manualInterventionRequired=true`。
 启用 kill switch 后，真实 canary 提交会被直接拒绝。`npm run canary:cancel-all` 会尝试取消状态文件里所有未终态 canary 订单。
+
+`npm run audit:operator-readiness` 是只读审计入口：它比较 CLOB、人工 UI 证据与 Polygon pUSD/CTF 原子余额，并报告动态费率、用户频道、未结订单、真实 Canary 证据以及多腿原子性硬阻塞项。
 
 ### 方法
 

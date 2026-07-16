@@ -26,6 +26,7 @@ import {
   validatePayoffModel,
   type CrossMarketPayoffModel,
 } from './payoff-model.js';
+import type { TakerFeeSchedule } from '../api/polymarket-client.js';
 
 export interface ArbitrageOpportunity {
   id: string;
@@ -64,6 +65,7 @@ export interface ArbitrageDetectorOptions {
   maxOrderBookAgeMs?: number;
   maxSingleMarketShares?: number;
   conservativeTakerFeeRate?: number;
+  maxTakerFeeAgeMs?: number;
 }
 
 export class ArbitrageDetector {
@@ -74,6 +76,8 @@ export class ArbitrageDetector {
   private readonly maxOrderBookAgeMs: number;
   private readonly maxSingleMarketShares: number;
   private readonly conservativeTakerFeeRate: number;
+  private readonly maxTakerFeeAgeMs: number;
+  private readonly takerFeeSchedules = new Map<string, TakerFeeSchedule>();
 
   constructor(payoffModels: CrossMarketPayoffModel[] = [], options: ArbitrageDetectorOptions = {}) {
     this.polytope = new MarginalPolytope();
@@ -84,6 +88,7 @@ export class ArbitrageDetector {
     this.maxOrderBookAgeMs = options.maxOrderBookAgeMs ?? 5000;
     this.maxSingleMarketShares = options.maxSingleMarketShares ?? 100;
     this.conservativeTakerFeeRate = options.conservativeTakerFeeRate ?? 0.07;
+    this.maxTakerFeeAgeMs = options.maxTakerFeeAgeMs ?? 10 * 60 * 1000;
   }
 
   setPayoffModels(payoffModels: CrossMarketPayoffModel[]): void {
@@ -91,6 +96,26 @@ export class ArbitrageDetector {
       validatePayoffModel(model);
     }
     this.payoffModels = [...payoffModels];
+  }
+
+  /** Replace cached dynamic fee parameters after a successful public API refresh. */
+  setTakerFeeSchedules(schedules: readonly TakerFeeSchedule[]): void {
+    for (const schedule of schedules) {
+      if (
+        schedule.tokenId.trim() === '' ||
+        !Number.isFinite(schedule.rate) ||
+        schedule.rate < 0 ||
+        schedule.rate > 1 ||
+        !Number.isFinite(schedule.exponent) ||
+        schedule.exponent < 0 ||
+        schedule.exponent > 10 ||
+        !Number.isFinite(schedule.fetchedAt) ||
+        schedule.fetchedAt <= 0
+      ) {
+        throw new Error(`Invalid taker fee schedule for token ${schedule.tokenId}`);
+      }
+      this.takerFeeSchedules.set(schedule.tokenId, schedule);
+    }
   }
 
   /**
@@ -229,7 +254,18 @@ export class ArbitrageDetector {
         const book = orderBooks.get(marketId);
         const ask =
           book && !book.isStale(this.maxOrderBookAgeMs, timestamp) ? book.getBestAsk() : null;
-        return ask ? [{ marketId, askPrice: ask.price, availableSize: ask.size }] : [];
+        const fee = this.resolveTakerFeeSchedule(marketId, timestamp);
+        return ask
+          ? [
+              {
+                marketId,
+                askPrice: ask.price,
+                availableSize: ask.size,
+                takerFeeRate: fee.rate,
+                takerFeeExponent: fee.exponent,
+              },
+            ]
+          : [];
       });
       const crossMarket = findDollarPayoffArbitrage(model, quotes);
       if (!crossMarket) {
@@ -310,6 +346,7 @@ export class ArbitrageDetector {
   clear(): void {
     this.polytope.clear();
     this.lastResults.clear();
+    this.takerFeeSchedules.clear();
   }
 
   private computeGradient(mu: number[], theta: number[]): number[] {
@@ -361,12 +398,14 @@ export class ArbitrageDetector {
       const yesExecution = yesBook.calculateTakerExecutionCost(
         size,
         'buy',
-        this.conservativeTakerFeeRate
+        this.resolveTakerFeeSchedule(yes.id, timestamp).rate,
+        this.resolveTakerFeeSchedule(yes.id, timestamp).exponent
       );
       const noExecution = noBook.calculateTakerExecutionCost(
         size,
         'buy',
-        this.conservativeTakerFeeRate
+        this.resolveTakerFeeSchedule(no.id, timestamp).rate,
+        this.resolveTakerFeeSchedule(no.id, timestamp).exponent
       );
       if (yesExecution.remainingSize > 1e-8 || noExecution.remainingSize > 1e-8) continue;
 
@@ -390,6 +429,21 @@ export class ArbitrageDetector {
       });
     }
     return opportunities;
+  }
+
+  private resolveTakerFeeSchedule(
+    tokenId: string,
+    now: number
+  ): Pick<TakerFeeSchedule, 'rate' | 'exponent'> {
+    const schedule = this.takerFeeSchedules.get(tokenId);
+    if (
+      schedule &&
+      schedule.fetchedAt <= now &&
+      now - schedule.fetchedAt <= this.maxTakerFeeAgeMs
+    ) {
+      return schedule;
+    }
+    return { rate: this.conservativeTakerFeeRate, exponent: 1 };
   }
 
   private getEventsFromPolytope(): Event[] {

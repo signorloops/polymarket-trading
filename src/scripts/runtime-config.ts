@@ -1,3 +1,5 @@
+import { pathToFileURL } from 'node:url';
+
 import {
   summarizeTradingSystemConfig,
   validateTradingSystemConfigFile,
@@ -9,12 +11,16 @@ type RuntimeConfigCommand =
   | { command: 'generate'; path: string; force: boolean }
   | { command: 'validate'; path: string };
 
-function parseCommand(argv: string[]): RuntimeConfigCommand {
+export function parseCommand(argv: string[]): RuntimeConfigCommand {
   const command = argv[2];
   const args = argv.slice(3);
   const force = args.includes('--force');
   const positionalArgs = args.filter((arg) => arg !== '--force');
-  const path = positionalArgs[0] ?? './config/trading-system.json';
+  const path =
+    positionalArgs[0] ??
+    (command === 'validate'
+      ? './config/trading-system.example.json'
+      : './config/trading-system.json');
 
   if (command === 'generate') {
     return { command, path, force };
@@ -65,7 +71,9 @@ function main(): Promise<void> {
   return Promise.resolve();
 }
 
-main().catch((error: unknown) => {
-  console.error(`Runtime config command failed: ${getErrorMessage(error)}`);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error: unknown) => {
+    console.error(`Runtime config command failed: ${getErrorMessage(error)}`);
+    process.exit(1);
+  });
+}

@@ -130,6 +130,24 @@ describe('OrderBook', () => {
     });
   });
 
+  describe('calculateTakerExecutionCost', () => {
+    it('applies the V2 fee exponent at each executed price level', () => {
+      book.update([], [{ price: 0.5, size: 10 }]);
+
+      const result = book.calculateTakerExecutionCost(10, 'buy', 0.07, 2);
+
+      expect(result.grossCost).toBe(5);
+      expect(result.protocolFee).toBeCloseTo(10 * 0.07 * Math.pow(0.5 * 0.5, 2), 10);
+      expect(result.totalCost).toBeCloseTo(result.grossCost + result.protocolFee, 10);
+    });
+
+    it('rejects an unsafe fee rate or exponent', () => {
+      book.update([], [{ price: 0.5, size: 10 }]);
+      expect(() => book.calculateTakerExecutionCost(1, 'buy', 1.01, 1)).toThrow(/safe/);
+      expect(() => book.calculateTakerExecutionCost(1, 'buy', 0.07, -1)).toThrow(/safe/);
+    });
+  });
+
   describe('calculateSlippage', () => {
     it('should calculate slippage', () => {
       book.update(

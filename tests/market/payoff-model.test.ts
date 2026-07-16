@@ -44,6 +44,30 @@ describe('findDollarPayoffArbitrage', () => {
     ).toBeNull();
   });
 
+  it('uses the dynamic V2 fee exponent in the USD payoff cost', () => {
+    const opportunity = findDollarPayoffArbitrage({ ...implicationModel, feeBufferBps: 0 }, [
+      {
+        marketId: 'primary-yes',
+        askPrice: 0.4,
+        availableSize: 10,
+        takerFeeRate: 0.07,
+        takerFeeExponent: 2,
+      },
+      {
+        marketId: 'election-no',
+        askPrice: 0.5,
+        availableSize: 10,
+        takerFeeRate: 0.07,
+        takerFeeExponent: 2,
+      },
+    ]);
+
+    expect(opportunity?.feeBufferUsd).toBeCloseTo(
+      0.07 * Math.pow(0.4 * 0.6, 2) + 0.07 * Math.pow(0.5 * 0.5, 2),
+      10
+    );
+  });
+
   it('returns null when displayed depth cannot fund the complete cover', () => {
     expect(
       findDollarPayoffArbitrage(implicationModel, [

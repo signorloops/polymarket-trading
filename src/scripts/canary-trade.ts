@@ -1,4 +1,9 @@
 import { createSignedClobTradingClientFromEnv } from '../api/signed-clob-client.js';
+import { getPolymarketClient, type TakerFeeSchedule } from '../api/polymarket-client.js';
+import {
+  createPolymarketUserWebSocketFromEnv,
+  type PolymarketUserWebSocketClient,
+} from '../api/polymarket-user-ws.js';
 import { parseCanaryTradeConfigFromEnv, runCanaryTrade } from '../execution/canary-trade.js';
 import {
   CanaryKillSwitchPersistence,
@@ -11,13 +16,25 @@ async function main(): Promise<void> {
   const killSwitchPath =
     process.env.CANARY_KILL_SWITCH_PATH?.trim() ?? DEFAULT_CANARY_KILL_SWITCH_PATH;
   const killSwitch = new CanaryKillSwitchPersistence(killSwitchPath);
-  const tradingClient =
-    config.dryRun || killSwitch.loadState().active
-      ? undefined
-      : createSignedClobTradingClientFromEnv();
-  const result = await runCanaryTrade(config, tradingClient, {
-    killSwitch,
-  });
+  const realCanaryEnabled = !config.dryRun && !killSwitch.loadState().active;
+  const tradingClient = realCanaryEnabled ? createSignedClobTradingClientFromEnv() : undefined;
+  let userStream: PolymarketUserWebSocketClient | undefined;
+  let takerFeeSchedule: TakerFeeSchedule | undefined;
+  if (realCanaryEnabled) {
+    takerFeeSchedule = await getPolymarketClient().getTakerFeeSchedule(config.tokenId);
+    userStream = createPolymarketUserWebSocketFromEnv({ maxReconnectAttempts: 0 });
+    userStream.connect();
+  }
+  let result;
+  try {
+    await userStream?.waitUntilReady();
+    result = await runCanaryTrade(config, tradingClient, {
+      killSwitch,
+      ...(takerFeeSchedule ? { takerFeeSchedule } : {}),
+    });
+  } finally {
+    userStream?.disconnect();
+  }
 
   console.log(
     JSON.stringify(

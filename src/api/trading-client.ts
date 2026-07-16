@@ -25,6 +25,11 @@ export interface TradingBalanceClient extends TradingStatusClient {
   getCollateralBalance(): Promise<TradingCollateralBalance>;
 }
 
+export interface TradingOpenOrdersClient extends TradingStatusClient {
+  /** Return every currently open order for the authenticated account. */
+  getOpenOrders(): Promise<OrderResponse[]>;
+}
+
 export interface HeartbeatTradingClient extends TradingClient {
   /** Send and confirm the first heartbeat before scheduling subsequent ones. */
   startHeartbeat(intervalMs?: number): Promise<void>;

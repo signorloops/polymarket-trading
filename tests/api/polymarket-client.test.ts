@@ -228,6 +228,82 @@ describe('PolymarketClient', () => {
     });
   });
 
+  describe('getTakerFeeSchedule', () => {
+    const tokenId = '1234567890';
+    const conditionId = `0x${'a'.repeat(64)}`;
+
+    it('resolves V2 fee rate and exponent for the requested token', async () => {
+      mockAxiosInstance.get
+        .mockResolvedValueOnce({
+          data: {
+            condition_id: conditionId,
+            primary_token_id: tokenId,
+            secondary_token_id: '999',
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            c: conditionId,
+            t: [
+              { t: tokenId, o: 'Yes' },
+              { t: '999', o: 'No' },
+            ],
+            mts: 0.01,
+            r: null,
+            fd: { r: 0.07, e: 2, to: true },
+          },
+        });
+
+      const schedule = await client.getTakerFeeSchedule(tokenId);
+
+      expect(schedule).toEqual({
+        tokenId,
+        conditionId,
+        rate: 0.07,
+        exponent: 2,
+        fetchedAt: expect.any(Number),
+      });
+      expect(mockAxiosInstance.get).toHaveBeenNthCalledWith(
+        1,
+        `https://clob.polymarket.com/markets-by-token/${tokenId}`
+      );
+      expect(mockAxiosInstance.get).toHaveBeenNthCalledWith(
+        2,
+        `https://clob.polymarket.com/clob-markets/${conditionId}`
+      );
+    });
+
+    it('treats an omitted fee object as an explicit zero-fee market', async () => {
+      mockAxiosInstance.get
+        .mockResolvedValueOnce({
+          data: {
+            condition_id: conditionId,
+            primary_token_id: tokenId,
+            secondary_token_id: '999',
+          },
+        })
+        .mockResolvedValueOnce({
+          data: { c: conditionId, t: [{ t: tokenId }, { t: '999' }], mts: 0.01, r: null },
+        });
+
+      await expect(client.getTakerFeeSchedule(tokenId)).resolves.toMatchObject({
+        rate: 0,
+        exponent: 0,
+      });
+    });
+
+    it('rejects mismatched or unsafe fee metadata', async () => {
+      mockAxiosInstance.get.mockResolvedValueOnce({
+        data: {
+          condition_id: conditionId,
+          primary_token_id: 'not-the-requested-token',
+          secondary_token_id: '999',
+        },
+      });
+      await expect(client.getTakerFeeSchedule(tokenId)).rejects.toThrow(/does not match/);
+    });
+  });
+
   describe('placeOrder', () => {
     const orderRequest: OrderRequest = {
       marketId: 'market-1',

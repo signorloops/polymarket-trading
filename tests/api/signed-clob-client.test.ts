@@ -71,6 +71,7 @@ describe('SignedClobTradingClient', () => {
       }),
       cancelOrder: jest.fn().mockResolvedValue({ canceled: ['0xorder'] }),
       getOrder: jest.fn().mockRejectedValue(new Error('not indexed yet')),
+      getOpenOrders: jest.fn().mockResolvedValue([]),
       getBalanceAllowance: jest.fn().mockResolvedValue({
         balance: '0',
         allowances: {},

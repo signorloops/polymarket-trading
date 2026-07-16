@@ -239,10 +239,20 @@ export class OrderBook {
   calculateTakerExecutionCost(
     size: number,
     side: 'buy' | 'sell',
-    feeRate: number
+    feeRate: number,
+    feeExponent = 1
   ): TakerExecutionCost {
-    if (!Number.isFinite(size) || size <= 0 || !Number.isFinite(feeRate) || feeRate < 0) {
-      throw new Error('Execution size and fee rate must be finite and non-negative');
+    if (
+      !Number.isFinite(size) ||
+      size <= 0 ||
+      !Number.isFinite(feeRate) ||
+      feeRate < 0 ||
+      feeRate > 1 ||
+      !Number.isFinite(feeExponent) ||
+      feeExponent < 0 ||
+      feeExponent > 10
+    ) {
+      throw new Error('Execution size, fee rate, and fee exponent must be safe finite values');
     }
     const levels = side === 'buy' ? this.getSortedAsks() : this.getSortedBids();
     let remainingSize = size;
@@ -253,7 +263,7 @@ export class OrderBook {
       if (remainingSize <= 0) break;
       const sizeAtLevel = Math.min(remainingSize, level.size);
       grossCost += sizeAtLevel * level.price;
-      protocolFee += sizeAtLevel * feeRate * level.price * (1 - level.price);
+      protocolFee += sizeAtLevel * feeRate * Math.pow(level.price * (1 - level.price), feeExponent);
       executedSize += sizeAtLevel;
       remainingSize -= sizeAtLevel;
     }

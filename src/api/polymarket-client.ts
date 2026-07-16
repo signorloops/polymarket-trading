@@ -75,6 +75,19 @@ export interface PolymarketCredentials {
   passphrase: string;
 }
 
+/** Dynamic platform taker-fee parameters returned by the CLOB V2 market API. */
+export interface TakerFeeSchedule {
+  tokenId: string;
+  conditionId: string;
+  rate: number;
+  exponent: number;
+  fetchedAt: number;
+}
+
+export interface TakerFeeProvider {
+  getTakerFeeSchedule(tokenId: string): Promise<TakerFeeSchedule>;
+}
+
 export class PolymarketClient {
   private client: AxiosInstance;
   private logger = getLogger().child({ module: 'PolymarketClient' });
@@ -193,6 +206,24 @@ export class PolymarketClient {
       timestamp: string;
     }>('https://clob.polymarket.com/book', { params: { token_id: marketId } });
     return response.data;
+  }
+
+  /**
+   * Resolve a token to its condition and read V2 platform fee parameters.
+   * `/fee-rate` exposes the legacy/order-signing base fee and is deliberately
+   * not used as a decimal payoff-model rate.
+   */
+  async getTakerFeeSchedule(tokenId: string): Promise<TakerFeeSchedule> {
+    assertTokenId(tokenId);
+    const mappingResponse = await this.client.get<unknown>(
+      `https://clob.polymarket.com/markets-by-token/${encodeURIComponent(tokenId)}`
+    );
+    const conditionId = parseConditionIdForToken(mappingResponse.data, tokenId);
+    const marketResponse = await this.client.get<unknown>(
+      `https://clob.polymarket.com/clob-markets/${encodeURIComponent(conditionId)}`
+    );
+    const { rate, exponent } = parseClobFeeDetails(marketResponse.data, tokenId, conditionId);
+    return { tokenId, conditionId, rate, exponent, fetchedAt: Date.now() };
   }
 
   /**
@@ -368,4 +399,67 @@ function parsePriceHistory(value: unknown): { t: number; p: number }[] {
     }
     return { t: timestamp as number, p: price as number };
   });
+}
+
+function parseConditionIdForToken(value: unknown, tokenId: string): string {
+  if (!value || typeof value !== 'object') {
+    throw new Error('Polymarket token-to-market response is malformed');
+  }
+  const mapping = value as Record<string, unknown>;
+  const conditionId = mapping.condition_id;
+  const primary = mapping.primary_token_id;
+  const secondary = mapping.secondary_token_id;
+  if (
+    typeof conditionId !== 'string' ||
+    !/^0x[a-fA-F0-9]{64}$/.test(conditionId) ||
+    (primary !== tokenId && secondary !== tokenId)
+  ) {
+    throw new Error('Polymarket token-to-market response does not match the requested token');
+  }
+  return conditionId;
+}
+
+function parseClobFeeDetails(
+  value: unknown,
+  tokenId: string,
+  conditionId: string
+): { rate: number; exponent: number } {
+  if (!value || typeof value !== 'object') {
+    throw new Error('Polymarket CLOB market info response is malformed');
+  }
+  const market = value as Record<string, unknown>;
+  if (market.c !== conditionId || !Array.isArray(market.t)) {
+    throw new Error('Polymarket CLOB market info does not match the requested condition');
+  }
+  const containsToken = market.t.some(
+    (token) =>
+      token !== null &&
+      typeof token === 'object' &&
+      (token as Record<string, unknown>).t === tokenId
+  );
+  if (!containsToken) {
+    throw new Error('Polymarket CLOB market info does not contain the requested token');
+  }
+  if (market.fd === undefined) {
+    return { rate: 0, exponent: 0 };
+  }
+  if (!market.fd || typeof market.fd !== 'object') {
+    throw new Error('Polymarket CLOB market fee details are malformed');
+  }
+  const feeDetails = market.fd as Record<string, unknown>;
+  const rate = feeDetails.r ?? 0;
+  const exponent = feeDetails.e ?? 0;
+  if (
+    typeof rate !== 'number' ||
+    !Number.isFinite(rate) ||
+    rate < 0 ||
+    rate > 1 ||
+    typeof exponent !== 'number' ||
+    !Number.isFinite(exponent) ||
+    exponent < 0 ||
+    exponent > 10
+  ) {
+    throw new Error('Polymarket CLOB market fee details contain unsafe values');
+  }
+  return { rate, exponent };
 }

@@ -14,7 +14,6 @@ import {
 } from './market/arbitrage-detector.js';
 import { resetExecutionEngine } from './execution/execution-engine.js';
 import { getRiskManager, resetRiskManager } from './execution/risk-manager.js';
-import { resetTransactionTracker } from './blockchain/transaction-tracker.js';
 import { getMetricsForScraping, resetMetricsRegistry, TradingMetrics } from './utils/metrics.js';
 import { initLogger, getLogger } from './utils/logger.js';
 import { validateConfig, printConfigSummary, LOG_CONFIG, NETWORK_CONFIG } from './utils/config.js';
@@ -29,6 +28,11 @@ import { createGracefulShutdown } from './runtime/graceful-shutdown.js';
 import { isMainModule } from './runtime/entrypoint.js';
 import type { CrossMarketPayoffModel } from './market/payoff-model.js';
 import { createSignedClobTradingClientFromEnv } from './api/signed-clob-client.js';
+import {
+  getPolymarketClient,
+  type TakerFeeProvider,
+  type TakerFeeSchedule,
+} from './api/polymarket-client.js';
 import { reconcileConfiguredBalances } from './execution/balance-reconciliation.js';
 
 // Trading system constants
@@ -36,6 +40,8 @@ const MIN_SINGLE_MARKET_PROFIT_USD = 0.05;
 const MAIN_LOOP_INTERVAL_MS = 1000; // Normal cycle interval
 const ERROR_RETRY_INTERVAL_MS = 5000; // Retry interval after error
 const TOP_OPPORTUNITIES_TO_LOG = 3; // Number of top opportunities to log
+const FEE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const FEE_RETRY_INTERVAL_MS = 30 * 1000;
 
 export interface TradingSystemConfig {
   /** Enable live trading (false = paper trading) */
@@ -60,6 +66,10 @@ export interface TradingSystemStatus {
   circuitBreakerActive: boolean;
 }
 
+export interface TradingSystemDependencies {
+  feeProvider?: TakerFeeProvider;
+}
+
 export class PolymarketTradingSystem {
   private pipeline: DataPipeline;
   private detector: ArbitrageDetector;
@@ -71,8 +81,12 @@ export class PolymarketTradingSystem {
   private mainLoopPromise?: Promise<void>;
   private mainLoopAbortController: AbortController | undefined;
   private disconnectPromise: Promise<void> = Promise.resolve();
+  private nextFeeRefreshAt = 0;
 
-  constructor(config: TradingSystemConfig) {
+  constructor(
+    config: TradingSystemConfig,
+    private readonly dependencies: TradingSystemDependencies = {}
+  ) {
     this.config = config;
     this.pipeline = new DataPipeline(NETWORK_CONFIG.WS_URL, config.markets);
     this.detector = new ArbitrageDetector(config.payoffModels ?? []);
@@ -351,6 +365,8 @@ export class PolymarketTradingSystem {
           break;
         }
 
+        await this.refreshTakerFeesIfDue();
+
         // Run detection cycle
         const opportunities = this.runDetectionCycle();
 
@@ -374,6 +390,31 @@ export class PolymarketTradingSystem {
         await sleep(ERROR_RETRY_INTERVAL_MS, signal); // Wait longer on error
       }
     }
+  }
+
+  private async refreshTakerFeesIfDue(now = Date.now()): Promise<void> {
+    const provider = this.dependencies.feeProvider;
+    if (!provider || now < this.nextFeeRefreshAt) return;
+
+    const results = await mapSettledWithConcurrency(this.config.markets, 5, (marketId) =>
+      provider.getTakerFeeSchedule(marketId)
+    );
+    const schedules: TakerFeeSchedule[] = [];
+    let failed = 0;
+    for (const result of results) {
+      if (result.status === 'fulfilled') schedules.push(result.value);
+      else failed++;
+    }
+    if (schedules.length > 0) {
+      this.detector.setTakerFeeSchedules(schedules);
+    }
+    if (failed > 0) {
+      this.logger.warn('Some dynamic taker fee schedules could not be refreshed', {
+        failed,
+        refreshed: schedules.length,
+      });
+    }
+    this.nextFeeRefreshAt = now + (failed === 0 ? FEE_REFRESH_INTERVAL_MS : FEE_RETRY_INTERVAL_MS);
   }
 
   private requestStop(): void {
@@ -428,6 +469,30 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+async function mapSettledWithConcurrency<T, R>(
+  values: readonly T[],
+  concurrency: number,
+  mapper: (value: T) => Promise<R>
+): Promise<PromiseSettledResult<R>[]> {
+  const results = new Array<PromiseSettledResult<R>>(values.length);
+  let nextIndex = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+      while (nextIndex < values.length) {
+        const index = nextIndex++;
+        const value = values[index];
+        if (value === undefined) continue;
+        try {
+          results[index] = { status: 'fulfilled', value: await mapper(value) };
+        } catch (reason) {
+          results[index] = { status: 'rejected', reason };
+        }
+      }
+    })
+  );
+  return results;
+}
+
 /**
  * Reset all global state (for testing)
  */
@@ -436,7 +501,6 @@ export function resetTradingSystem(): void {
   resetArbitrageDetector();
   resetExecutionEngine();
   resetRiskManager();
-  resetTransactionTracker();
   resetMetricsRegistry();
 }
 
@@ -449,7 +513,7 @@ async function main(): Promise<void> {
   const logger = getLogger().child({ module: 'Bootstrap' });
   const config = loadTradingSystemConfigFromEnv();
   const serverConfig = parseRuntimeServerConfigFromEnv();
-  const system = new PolymarketTradingSystem(config);
+  const system = new PolymarketTradingSystem(config, { feeProvider: getPolymarketClient() });
 
   if (shouldReconcileOnStartup()) {
     const reconciliation = await reconcileConfiguredBalances(
@@ -573,6 +637,9 @@ export * from './execution/position-sizing.js';
 export * from './execution/risk-manager.js';
 export * from './execution/balance-reconciliation.js';
 export * from './execution/order-idempotency-store.js';
+export * from './execution/postgres-order-idempotency-store.js';
+export * from './execution/onchain-balance-reader.js';
+export * from './execution/operator-readiness-audit.js';
 export * from './optimization/lp-solver.js';
 export * from './optimization/ip-solver.js';
 export * from './api/index.js';

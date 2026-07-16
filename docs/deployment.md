@@ -33,8 +33,8 @@ cp .env.example .env
 
 ```env
 # === 网络配置 ===
-# Optional legacy Polygon transaction tracker (not required by the market-data daemon)
-RPC_URL=https://polygon-mainnet.example/v1/YOUR_API_KEY
+# Polygon mainnet read-only reconciliation RPC
+POLYGON_RPC_URL=https://polygon-mainnet.example/v1/YOUR_API_KEY
 WS_URL=wss://ws-subscriptions-clob.polymarket.com/ws/market
 POLYMARKET_API_KEY=your_polymarket_api_key
 POLYMARKET_SECRET=your_polymarket_api_secret
@@ -66,6 +66,10 @@ HTTP_PORT=3000
 HTTP_RISK_STATUS_TOKEN=replace-with-at-least-16-random-characters
 HTTP_METRICS_TOKEN=replace-with-at-least-16-random-characters
 ORDER_IDEMPOTENCY_DIR=.state/order-idempotency
+# Multi-machine production deployments should use PostgreSQL instead of the file journal.
+ORDER_IDEMPOTENCY_DATABASE_URL=postgres://user:password@postgres:5432/polymarket
+ORDER_IDEMPOTENCY_DATABASE_SSL=true
+ORDER_IDEMPOTENCY_DATABASE_INITIALIZE_SCHEMA=false # migrations are applied by deployment
 RISK_STATE_FILE=.state/risk-state.json
 RECONCILE_ON_STARTUP=false
 
@@ -540,7 +544,7 @@ docker compose --profile monitoring up -d --build
 
 | 变量                         | 说明                                           | 默认值                           | 必填                                   |
 | ---------------------------- | ---------------------------------------------- | -------------------------------- | -------------------------------------- |
-| `RPC_URL`                    | 可选的旧 Polygon 交易追踪 RPC                  | -                                | 否                                     |
+| `POLYGON_RPC_URL`            | Polygon 主网只读余额对账 RPC                   | -                                | operator audit 必填                    |
 | `WS_URL`                     | Polymarket WebSocket                           | -                                | 是                                     |
 | `POLYMARKET_API_KEY`         | API 密钥                                       | -                                | canary 真单/签名客户端需要             |
 | `POLYMARKET_SECRET`          | CLOB API secret                                | -                                | canary 真单必填                        |
@@ -556,6 +560,10 @@ docker compose --profile monitoring up -d --build
 | `HTTP_METRICS_TOKEN`         | metrics Bearer token（非 loopback 监听时必需） | -                                | 公网/容器监听必填                      |
 | `HTTP_METRICS_TOKEN_FILE`    | 从挂载文件读取 metrics token                   | -                                | 与内联 token 二选一                    |
 | `ORDER_IDEMPOTENCY_DIR`      | 跨进程订单唯一键日志目录                       | `.state/order-idempotency`       | 真单必需                               |
+| `ORDER_IDEMPOTENCY_DATABASE_URL` | PostgreSQL 跨机器事务幂等连接串            | -                                | 多机器真单必需                         |
+| `ORDER_IDEMPOTENCY_DATABASE_URL_FILE` | 从 secret 文件读取 PostgreSQL 连接串   | -                                | 与内联连接串二选一                     |
+| `ORDER_IDEMPOTENCY_DATABASE_SSL` | PostgreSQL TLS 开关                         | true                             | 远程数据库建议                         |
+| `ORDER_IDEMPOTENCY_DATABASE_INITIALIZE_SCHEMA` | 由进程执行幂等 DDL；外部 migration 时设 false | true                         | 否                                     |
 | `RISK_STATE_FILE`            | 仓位、PnL 与 circuit breaker 持久化文件        | -                                | 自动实盘必需                           |
 | `RECONCILE_ON_STARTUP`       | 启动前全量读取配置 token 余额并对账            | false                            | 自动实盘必需                           |
 | `CANARY_TOKEN_ID`            | 单笔 canary 的 CLOB token id                   | -                                | canary 必填                            |
@@ -565,6 +573,9 @@ docker compose --profile monitoring up -d --build
 | `CANARY_CONFIRMATION`        | canary 真实提交确认短语                        | -                                | canary 真实提交必填                    |
 | `CANARY_STATE_PATH`          | canary 状态文件路径                            | `.state/canary-trades.json`      | 否                                     |
 | `CANARY_KILL_SWITCH_PATH`    | canary kill switch 状态文件路径                | `.state/canary-kill-switch.json` | 否                                     |
+| `OPERATOR_AUDIT_TOKEN_IDS`   | CLOB/UI/链上三方对账 token id（逗号分隔）      | `CANARY_TOKEN_ID`                | operator audit 必填                    |
+| `OPERATOR_AUDIT_UI_COLLATERAL` | 操作员从 UI 读取的 pUSD 十进制余额           | -                                | 三方对账必填                           |
+| `OPERATOR_AUDIT_UI_TOKEN_BALANCES_JSON` | UI token 余额 JSON 映射              | -                                | 三方对账必填                           |
 
 ## Canary Runbook
 
@@ -596,8 +607,9 @@ npm run canary:kill-switch -- deactivate
 
 1. 先执行 `activate`
 2. 再执行 `cancel-all`
-3. 检查 `CANARY_STATE_PATH` 里是否仍有 `manualInterventionRequired=true`
-4. 只在问题确认解除后再 `deactivate`
+3. 配置 UI 余额证据并运行 `npm run audit:operator-readiness`
+4. 检查 `CANARY_STATE_PATH` 里是否仍有 `manualInterventionRequired=true`
+5. 只在问题确认解除后再 `deactivate`
 
 自动实盘的完整硬门禁和操作顺序见 [live-trading-readiness.md](./live-trading-readiness.md)。其中多腿原子成交仍是明确的硬阻塞项，补偿平仓不等于原子性。
 

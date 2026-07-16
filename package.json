@@ -49,6 +49,8 @@
     "canary:cancel-all": "npm run build && node dist/src/scripts/canary-cancel-all.js",
     "canary:kill-switch": "npm run build && node dist/src/scripts/canary-kill-switch.js",
     "reconcile:balances": "npm run build && node dist/src/scripts/reconcile-balances.js",
+    "user-stream:check": "npm run build && node dist/src/scripts/user-stream-check.js",
+    "audit:operator-readiness": "npm run build && node dist/src/scripts/operator-readiness-audit.js",
     "prepare": "husky install",
     "prepack": "npm run build"
   },
@@ -72,6 +74,7 @@
     "@jest/globals": "^30.0.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^25.3.5",
+    "@types/pg": "^8.20.0",
     "@types/ws": "^8.18.1",
     "eslint": "^10.0.3",
     "eslint-config-prettier": "^10.1.8",
@@ -79,6 +82,7 @@
     "jest": "^30.2.0",
     "knip": "^6.27.0",
     "lint-staged": "^16.3.2",
+    "pg-mem": "^3.0.14",
     "prettier": "^3.8.1",
     "ts-jest": "^29.4.6",
     "typescript": "^5.9.3",
@@ -91,6 +95,7 @@
     "dotenv": "^17.3.1",
     "javascript-lp-solver": "^1.0.3",
     "nodemailer": "^9.0.3",
+    "pg": "^8.22.0",
     "viem": "^2.55.2",
     "ws": "8.21.1",
     "zod": "^4.3.6"

@@ -101,7 +101,8 @@ export async function encryptEnvFile(
     'POLYMARKET_API_KEY',
     'POLYMARKET_SECRET',
     'POLYMARKET_PASSPHRASE',
-    'RPC_URL',
+    'POLYGON_RPC_URL',
+    'ORDER_IDEMPOTENCY_DATABASE_URL',
     'WS_URL',
   ];
   const fields = fieldsToEncrypt ?? defaultSensitiveFields;

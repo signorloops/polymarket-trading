@@ -18,13 +18,15 @@ export interface IdempotentOrderRecord {
   lastError?: string;
 }
 
+export type MaybePromise<T> = T | Promise<T>;
+
 export interface OrderIdempotencyPort {
-  claim(key: string, order: OrderRequest): IdempotentOrderRecord;
-  markSubmitted(key: string, exchangeOrderId: string): void;
-  markUnknown(key: string, error: unknown): void;
-  markTerminal?(key: string, status: 'filled' | 'cancelled' | 'rejected'): void;
-  get(key: string): IdempotentOrderRecord | undefined;
-  listUnresolved?(): IdempotentOrderRecord[];
+  claim(key: string, order: OrderRequest): MaybePromise<IdempotentOrderRecord>;
+  markSubmitted(key: string, exchangeOrderId: string): MaybePromise<void>;
+  markUnknown(key: string, error: unknown): MaybePromise<void>;
+  markTerminal?(key: string, status: 'filled' | 'cancelled' | 'rejected'): MaybePromise<void>;
+  get(key: string): MaybePromise<IdempotentOrderRecord | undefined>;
+  listUnresolved?(): MaybePromise<IdempotentOrderRecord[]>;
 }
 
 export const DEFAULT_ORDER_IDEMPOTENCY_DIRECTORY = path.join(
@@ -47,11 +49,11 @@ export class FileOrderIdempotencyStore implements OrderIdempotencyPort {
   }
 
   claim(key: string, order: OrderRequest): IdempotentOrderRecord {
-    const normalizedKey = normalizeKey(key);
+    const normalizedKey = normalizeIdempotencyKey(key);
     const now = Date.now();
     const record: IdempotentOrderRecord = {
       key: normalizedKey,
-      requestHash: hashRequest(order),
+      requestHash: hashOrderRequest(order),
       state: 'claimed',
       createdAt: now,
       updatedAt: now,
@@ -122,6 +124,14 @@ export class FileOrderIdempotencyStore implements OrderIdempotencyPort {
       if (record.state !== 'submitted' && record.state !== 'terminal') {
         throw new Error(`Cannot mark ${record.state} order ${record.key} terminal`);
       }
+      if (record.state === 'terminal') {
+        if (record.terminalStatus !== status) {
+          throw new Error(
+            `Cannot change terminal order ${record.key} from ${record.terminalStatus ?? 'unknown'} to ${status}`
+          );
+        }
+        return record;
+      }
       return {
         ...record,
         state: 'terminal',
@@ -132,7 +142,7 @@ export class FileOrderIdempotencyStore implements OrderIdempotencyPort {
   }
 
   get(key: string): IdempotentOrderRecord | undefined {
-    const filePath = this.filePath(normalizeKey(key));
+    const filePath = this.filePath(normalizeIdempotencyKey(key));
     if (!fs.existsSync(filePath)) {
       return undefined;
     }
@@ -174,7 +184,7 @@ export class FileOrderIdempotencyStore implements OrderIdempotencyPort {
     key: string,
     updater: (record: IdempotentOrderRecord) => IdempotentOrderRecord
   ): void {
-    const normalizedKey = normalizeKey(key);
+    const normalizedKey = normalizeIdempotencyKey(key);
     const filePath = this.filePath(normalizedKey);
     const lockPath = `${filePath}.lock`;
     const tempPath = `${filePath}.${String(process.pid)}.${String(Date.now())}.tmp`;
@@ -225,7 +235,7 @@ export class FileOrderIdempotencyStore implements OrderIdempotencyPort {
   }
 }
 
-function normalizeKey(key: string): string {
+export function normalizeIdempotencyKey(key: string): string {
   const normalized = key.trim();
   if (normalized.length < 8 || normalized.length > 200) {
     throw new Error('Order idempotency key must contain between 8 and 200 characters');
@@ -233,7 +243,7 @@ function normalizeKey(key: string): string {
   return normalized;
 }
 
-function hashRequest(order: OrderRequest): string {
+export function hashOrderRequest(order: OrderRequest): string {
   return createHash('sha256')
     .update(
       JSON.stringify({

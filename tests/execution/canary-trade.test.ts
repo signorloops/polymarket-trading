@@ -54,6 +54,7 @@ describe('canary trade', () => {
     getOrder: jest.Mock;
     getBalances: jest.Mock;
     getCollateralBalance: jest.Mock;
+    getOpenOrders: jest.Mock;
     startHeartbeat: jest.Mock;
     stopHeartbeat: jest.Mock;
   } {
@@ -81,6 +82,7 @@ describe('canary trade', () => {
         size: 100,
         allowances: { exchange: 100 },
       }),
+      getOpenOrders: jest.fn().mockResolvedValue([]),
       startHeartbeat: jest.fn().mockResolvedValue(undefined),
       stopHeartbeat: jest.fn(),
     };
@@ -242,6 +244,24 @@ describe('canary trade', () => {
     expect(persistence.saveRecord).toHaveBeenLastCalledWith(
       expect.objectContaining({ status: 'failed', submissionAttempted: false })
     );
+  });
+
+  it('does not submit while the authenticated account has an existing open order', async () => {
+    const client = createClient() as TradingClient & { getOpenOrders: jest.Mock };
+    client.getOpenOrders.mockResolvedValue([{ id: 'existing-order' }]);
+
+    await expect(
+      runCanaryTrade(
+        createConfig({
+          dryRun: false,
+          tradingEnabled: true,
+          confirmation: CANARY_CONFIRMATION_PHRASE,
+        }),
+        client,
+        { persistence: createPersistence(), killSwitch: createInactiveKillSwitch() }
+      )
+    ).rejects.toThrow(/zero existing open orders/);
+    expect(client.placeOrder).not.toHaveBeenCalled();
   });
 
   it('requires collateral and allowance headroom for the maximum platform fee', async () => {

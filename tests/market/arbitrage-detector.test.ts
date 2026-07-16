@@ -708,6 +708,73 @@ describe('ArbitrageDetector', () => {
   });
 
   describe('Compute Single Market Trade', () => {
+    it('uses fresh dynamic zero-fee schedules instead of the conservative fallback', () => {
+      const detector = new ArbitrageDetector([], { maxTakerFeeAgeMs: 60_000 });
+      detector.addEvent({
+        id: 'event-fees',
+        markets: [
+          { id: 'yes-fee', eventId: 'event-fees', outcome: 'YES', price: 0.48 },
+          { id: 'no-fee', eventId: 'event-fees', outcome: 'NO', price: 0.5 },
+        ],
+        outcomes: ['YES', 'NO'],
+      });
+      const books = createAskBooks({ 'yes-fee': 0.48, 'no-fee': 0.5 });
+
+      expect(detector.findAllOpportunities(books)).toHaveLength(0);
+
+      const fetchedAt = Date.now();
+      detector.setTakerFeeSchedules([
+        {
+          tokenId: 'yes-fee',
+          conditionId: `0x${'a'.repeat(64)}`,
+          rate: 0,
+          exponent: 0,
+          fetchedAt,
+        },
+        {
+          tokenId: 'no-fee',
+          conditionId: `0x${'a'.repeat(64)}`,
+          rate: 0,
+          exponent: 0,
+          fetchedAt,
+        },
+      ]);
+
+      expect(detector.findAllOpportunities(books)).toHaveLength(1);
+    });
+
+    it('falls back conservatively when dynamic fee schedules are stale', () => {
+      const detector = new ArbitrageDetector([], { maxTakerFeeAgeMs: 10 });
+      detector.addEvent({
+        id: 'event-stale-fees',
+        markets: [
+          { id: 'yes-stale', eventId: 'event-stale-fees', outcome: 'YES', price: 0.48 },
+          { id: 'no-stale', eventId: 'event-stale-fees', outcome: 'NO', price: 0.5 },
+        ],
+        outcomes: ['YES', 'NO'],
+      });
+      detector.setTakerFeeSchedules([
+        {
+          tokenId: 'yes-stale',
+          conditionId: `0x${'b'.repeat(64)}`,
+          rate: 0,
+          exponent: 0,
+          fetchedAt: Date.now() - 1000,
+        },
+        {
+          tokenId: 'no-stale',
+          conditionId: `0x${'b'.repeat(64)}`,
+          rate: 0,
+          exponent: 0,
+          fetchedAt: Date.now() - 1000,
+        },
+      ]);
+
+      expect(
+        detector.findAllOpportunities(createAskBooks({ 'yes-stale': 0.48, 'no-stale': 0.5 }))
+      ).toHaveLength(0);
+    });
+
     it('should compute buy direction when sum < 1', () => {
       const detector = new ArbitrageDetector();
 

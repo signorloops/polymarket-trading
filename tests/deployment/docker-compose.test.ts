@@ -48,6 +48,18 @@ describe('docker-compose runtime defaults', () => {
     expect(compose).toContain('./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro');
   });
 
+  it('provides opt-in PostgreSQL for transactional order idempotency', () => {
+    const compose = readFileSync(join(process.cwd(), 'docker-compose.yml'), 'utf8');
+
+    expect(compose).toContain('postgres:17.10-alpine@sha256:');
+    expect(compose).toContain('- durable-idempotency');
+    expect(compose).toContain('POSTGRES_PASSWORD_FILE: /run/secrets/idempotency_db_password');
+    expect(compose).toContain('file: ./.secrets/idempotency-db-password');
+    expect(compose).toContain(
+      './migrations/001_order_idempotency.sql:/docker-entrypoint-initdb.d/001_order_idempotency.sql:ro'
+    );
+  });
+
   it('runs the production daemon with a read-only root and no Linux capabilities', () => {
     const compose = readFileSync(join(process.cwd(), 'docker-compose.yml'), 'utf8');
 

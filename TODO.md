@@ -2,14 +2,15 @@
 
 ## 配置与部署
 
-- [ ] 配置钱包和 RPC（用于链上交易）
-  - 需要配置 `PRIVATE_KEY`（用于交易签名）
-  - 需要配置 `WALLET_ADDRESS`
-  - 需要配置 `RPC_URL`（Helius 或其他 RPC 提供商）
-- [ ] 实盘交易测试（小额）
-  - 先在测试网进行端到端测试
-  - 使用小额资金（<$10）进行主网测试
-  - 验证订单提交、取消、查询流程
+- [ ] 安全配置 CLOB Canary 与只读对账
+  - 通过文件型 secret 配置 CLOB 凭证和用于订单签名的 `PRIVATE_KEY`
+  - 配置 `WALLET_ADDRESS`/funder，并用 `POLYGON_RPC_URL` 只读查询 Polygon 主网余额
+  - 不在日志、命令行参数或版本库中保存任何密钥
+- [ ] 完成真实资金小额 Canary
+  - 使用明确的单市场、单腿、限价和极小额度执行一次主网 Canary
+  - 验证订单提交、认证用户流、查询、取消和终态持久化流程
+  - 完成 CLOB API、Polymarket UI 与 Polygon 链上余额三方对账
+  - 在 CLOB 不支持多腿原子成交期间，继续禁止自动跨市场实盘
 - [ ] 监控面板配置（Grafana 仪表板）
   - 配置 Prometheus 数据源
   - 创建交易性能仪表板

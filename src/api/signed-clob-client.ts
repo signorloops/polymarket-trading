@@ -16,6 +16,7 @@ import { createWalletClient, http, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { polygon, polygonAmoy } from 'viem/chains';
 import { getLogger } from '../utils/logger.js';
+import { getErrorMessage } from '../utils/errors.js';
 import { NETWORK_CONFIG, WALLET_CONFIG } from '../utils/config.js';
 import type { OrderRequest, OrderResponse } from './polymarket-client.js';
 import type {
@@ -28,6 +29,11 @@ import {
   FileOrderIdempotencyStore,
   type OrderIdempotencyPort,
 } from '../execution/order-idempotency-store.js';
+import {
+  getPostgresIdempotencyConfigFromEnv,
+  PostgresOrderIdempotencyStore,
+  type PostgresOrderIdempotencyConfig,
+} from '../execution/postgres-order-idempotency-store.js';
 
 export interface SignedClobClientConfig {
   host: string;
@@ -41,6 +47,7 @@ export interface SignedClobClientConfig {
   defaultTickSize?: TickSize;
   negRisk?: boolean;
   idempotencyDirectory?: string;
+  idempotencyDatabase?: PostgresOrderIdempotencyConfig;
   deferExec: boolean;
 }
 
@@ -66,6 +73,11 @@ export interface SignedClobSdkClient {
   ): Promise<unknown>;
   cancelOrder(payload: { orderID: string }): Promise<unknown>;
   getOrder(orderId: string): Promise<unknown>;
+  getOpenOrders(
+    params?: { market?: string; asset_id?: string },
+    onlyFirstPage?: boolean,
+    nextCursor?: string
+  ): Promise<OpenOrder[]>;
   getBalanceAllowance(params: {
     asset_type: AssetType;
     token_id?: string;
@@ -91,6 +103,7 @@ interface ClobCancelResponse {
 const HEX_PRIVATE_KEY_REGEX = /^0x[a-fA-F0-9]{64}$/;
 
 export function getSignedClobConfigFromEnv(): SignedClobClientConfig {
+  const idempotencyDatabase = getPostgresIdempotencyConfigFromEnv();
   return {
     host: 'https://clob.polymarket.com',
     chainId: NETWORK_CONFIG.POLYMARKET_CHAIN_ID,
@@ -115,6 +128,7 @@ export function getSignedClobConfigFromEnv(): SignedClobClientConfig {
     ...(process.env.ORDER_IDEMPOTENCY_DIR?.trim()
       ? { idempotencyDirectory: process.env.ORDER_IDEMPOTENCY_DIR.trim() }
       : {}),
+    ...(idempotencyDatabase ? { idempotencyDatabase } : {}),
     deferExec: false,
   };
 }
@@ -152,7 +166,10 @@ export class SignedClobTradingClient implements TradingBalanceClient, HeartbeatT
     this.usesInjectedSdk = sdkClient !== undefined;
     this.sdkClient = sdkClient ?? this.createSdkClient();
     this.idempotencyStore =
-      idempotencyStore ?? new FileOrderIdempotencyStore(config.idempotencyDirectory);
+      idempotencyStore ??
+      (config.idempotencyDatabase
+        ? new PostgresOrderIdempotencyStore(config.idempotencyDatabase)
+        : new FileOrderIdempotencyStore(config.idempotencyDirectory));
   }
 
   async placeOrder(order: OrderRequest): Promise<OrderResponse> {
@@ -172,10 +189,12 @@ export class SignedClobTradingClient implements TradingBalanceClient, HeartbeatT
     if (!idempotencyKey) {
       throw new Error('Signed CLOB orders require an idempotencyKey');
     }
-    this.idempotencyStore.claim(idempotencyKey, order);
     this.inflightOrders.add(orderKey);
+    let claimed = false;
 
     try {
+      await this.idempotencyStore.claim(idempotencyKey, order);
+      claimed = true;
       this.logger.info('Submitting signed CLOB order', {
         tokenID: order.marketId,
         side: order.side,
@@ -213,21 +232,31 @@ export class SignedClobTradingClient implements TradingBalanceClient, HeartbeatT
             );
 
       const mapped = this.mapOrderResponse(order, response);
-      this.idempotencyStore.markSubmitted(idempotencyKey, mapped.id);
+      await this.idempotencyStore.markSubmitted(idempotencyKey, mapped.id);
       try {
         const reconciled = await this.getOrder(mapped.id);
-        this.recordTerminalOrder(idempotencyKey, reconciled);
+        await this.recordTerminalOrder(idempotencyKey, reconciled);
         return reconciled;
       } catch (error) {
         this.logger.warn('Posted order could not yet be reconciled; returning conservative state', {
           orderId: mapped.id,
           error: error instanceof Error ? error.message : String(error),
         });
-        this.recordTerminalOrder(idempotencyKey, mapped);
+        await this.recordTerminalOrder(idempotencyKey, mapped);
         return mapped;
       }
     } catch (error) {
-      this.idempotencyStore.markUnknown(idempotencyKey, error);
+      if (claimed) {
+        try {
+          await this.idempotencyStore.markUnknown(idempotencyKey, error);
+        } catch (journalError) {
+          throw new AggregateError(
+            [error, journalError],
+            `Order submission failed and the durable idempotency journal could not record the ambiguous outcome: ${getErrorMessage(journalError)}`,
+            { cause: journalError }
+          );
+        }
+      }
       throw error;
     } finally {
       this.inflightOrders.delete(orderKey);
@@ -256,6 +285,21 @@ export class SignedClobTradingClient implements TradingBalanceClient, HeartbeatT
     }
 
     const response = (await this.sdkClient.getOrder(orderId)) as Partial<OpenOrder>;
+    return this.mapOpenOrderResponse(orderId, response);
+  }
+
+  async getOpenOrders(): Promise<OrderResponse[]> {
+    this.assertAuthenticated();
+    const responses = await this.sdkClient.getOpenOrders(undefined, false);
+    return responses.map((response) => {
+      if (!response.id || response.id.trim() === '') {
+        throw new Error('Signed CLOB open-order response omitted an order id');
+      }
+      return this.mapOpenOrderResponse(response.id, response);
+    });
+  }
+
+  private mapOpenOrderResponse(orderId: string, response: Partial<OpenOrder>): OrderResponse {
     if (response.id && response.id !== orderId) {
       throw new Error(`Signed CLOB order lookup returned mismatched id ${response.id}`);
     }
@@ -390,7 +434,7 @@ export class SignedClobTradingClient implements TradingBalanceClient, HeartbeatT
   }
 
   private async reconcileStartupJournal(): Promise<void> {
-    const records = this.idempotencyStore.listUnresolved?.() ?? [];
+    const records = (await this.idempotencyStore.listUnresolved?.()) ?? [];
     const ambiguous = records.filter(
       (record) => record.state === 'claimed' || record.state === 'unknown'
     );
@@ -408,13 +452,13 @@ export class SignedClobTradingClient implements TradingBalanceClient, HeartbeatT
           `Pre-restart order ${record.exchangeOrderId} is still ${order.status}; cancel or settle it before new trading`
         );
       }
-      this.recordTerminalOrder(record.key, order);
+      await this.recordTerminalOrder(record.key, order);
     }
   }
 
-  private recordTerminalOrder(idempotencyKey: string, order: OrderResponse): void {
+  private async recordTerminalOrder(idempotencyKey: string, order: OrderResponse): Promise<void> {
     if (order.status === 'filled' || order.status === 'cancelled' || order.status === 'rejected') {
-      this.idempotencyStore.markTerminal?.(idempotencyKey, order.status);
+      await this.idempotencyStore.markTerminal?.(idempotencyKey, order.status);
     }
   }
 

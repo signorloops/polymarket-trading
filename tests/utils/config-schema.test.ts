@@ -60,16 +60,16 @@ describe('TradingConfigSchema', () => {
 describe('NetworkConfigSchema', () => {
   it('should validate valid URLs', () => {
     const config = NetworkConfigSchema.parse({
-      RPC_URL: 'https://rpc.example.com',
+      POLYGON_RPC_URL: 'https://rpc.example.com',
       WS_URL: 'wss://ws.example.com',
     });
 
-    expect(config.RPC_URL).toBe('https://rpc.example.com');
+    expect(config.POLYGON_RPC_URL).toBe('https://rpc.example.com');
     expect(config.WS_URL).toBe('wss://ws.example.com');
   });
 
   it('should reject invalid URLs', () => {
-    expect(() => NetworkConfigSchema.parse({ RPC_URL: 'not-a-url' })).toThrow();
+    expect(() => NetworkConfigSchema.parse({ POLYGON_RPC_URL: 'not-a-url' })).toThrow();
   });
 
   it('should use default WS_URL', () => {

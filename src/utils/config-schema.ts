@@ -92,8 +92,8 @@ export type TradingConfig = z.infer<typeof TradingConfigSchema>;
  * API endpoints and connection settings
  */
 export const NetworkConfigSchema = z.object({
-  /** RPC URL for blockchain connection */
-  RPC_URL: z.string().url().optional(),
+  /** Polygon mainnet RPC used only for read-only onchain balance reconciliation. */
+  POLYGON_RPC_URL: z.string().url().optional(),
 
   /** WebSocket URL for real-time data */
   WS_URL: z.string().url().default('wss://ws-subscriptions-clob.polymarket.com/ws/market'),
@@ -208,49 +208,6 @@ export const RiskConfigSchema = z.object({
 export type RiskConfig = z.infer<typeof RiskConfigSchema>;
 
 /**
- * Blockchain configuration schema
- */
-export const BlockchainConfigSchema = z.object({
-  /** RPC URL for blockchain connection */
-  RPC_URL: z.string().url().optional(),
-
-  /** RPC provider type */
-  RPC_PROVIDER: z.enum(['helius', 'alchemy', 'custom']).default('custom'),
-
-  /** RPC request timeout in milliseconds */
-  RPC_TIMEOUT_MS: z.number().int().positive().default(30000),
-
-  /** Maximum RPC retry attempts */
-  RPC_MAX_RETRIES: z.number().int().nonnegative().default(3),
-
-  /** Base delay between RPC retries in milliseconds */
-  RPC_RETRY_DELAY_MS: z.number().int().nonnegative().default(1000),
-
-  /** Number of blocks for transaction confirmation */
-  CONFIRMATION_BLOCKS: z.number().int().positive().default(12),
-
-  /** Number of blocks for transaction finalization */
-  FINALIZATION_BLOCKS: z.number().int().positive().default(128),
-
-  /** State store type */
-  STATE_STORE_TYPE: z.enum(['file', 'redis', 'memory']).default('file'),
-
-  /** Path for file-based state store */
-  STATE_STORE_PATH: z.string().default('./data/transactions.json'),
-
-  /** Enable blockchain reorg detection */
-  ENABLE_REORG_DETECTION: z.boolean().default(true),
-
-  /** Gas price threshold for alerts (in gwei, 0 = disabled) */
-  GAS_PRICE_THRESHOLD_GWEI: z.number().nonnegative().default(0),
-
-  /** Stuck transaction threshold in milliseconds */
-  STUCK_TRANSACTION_THRESHOLD_MS: z.number().int().positive().default(300000),
-});
-
-export type BlockchainConfig = z.infer<typeof BlockchainConfigSchema>;
-
-/**
  * Complete application configuration schema
  */
 export const AppConfigSchema = z.object({
@@ -261,7 +218,6 @@ export const AppConfigSchema = z.object({
   logging: LogConfigSchema,
   kelly: KellyConfigSchema,
   risk: RiskConfigSchema,
-  blockchain: BlockchainConfigSchema,
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;
@@ -287,7 +243,7 @@ export function parseConfigFromEnv(): AppConfig {
       MIN_ORDER_BOOK_DEPTH: optionalNumberEnv('MIN_ORDER_BOOK_DEPTH'),
     }),
     network: NetworkConfigSchema.parse({
-      RPC_URL: optionalEnv('RPC_URL'),
+      POLYGON_RPC_URL: optionalEnv('POLYGON_RPC_URL'),
       WS_URL: optionalEnv('WS_URL'),
       POLYMARKET_API_KEY: optionalEnv('POLYMARKET_API_KEY'),
       POLYMARKET_SECRET: optionalEnv('POLYMARKET_SECRET'),
@@ -321,20 +277,6 @@ export function parseConfigFromEnv(): AppConfig {
       EMERGENCY_STOP_THRESHOLD: optionalNumberEnv('EMERGENCY_STOP_THRESHOLD'),
       CIRCUIT_BREAKER_ENABLED: optionalBooleanEnv('CIRCUIT_BREAKER_ENABLED'),
     }),
-    blockchain: BlockchainConfigSchema.parse({
-      RPC_URL: optionalEnv('RPC_URL') ?? optionalEnv('BLOCKCHAIN_RPC_URL'),
-      RPC_PROVIDER: optionalEnv('RPC_PROVIDER'),
-      RPC_TIMEOUT_MS: optionalNumberEnv('RPC_TIMEOUT_MS'),
-      RPC_MAX_RETRIES: optionalNumberEnv('RPC_MAX_RETRIES'),
-      RPC_RETRY_DELAY_MS: optionalNumberEnv('RPC_RETRY_DELAY_MS'),
-      CONFIRMATION_BLOCKS: optionalNumberEnv('CONFIRMATION_BLOCKS'),
-      FINALIZATION_BLOCKS: optionalNumberEnv('FINALIZATION_BLOCKS'),
-      STATE_STORE_TYPE: optionalEnv('STATE_STORE_TYPE'),
-      STATE_STORE_PATH: optionalEnv('STATE_STORE_PATH'),
-      ENABLE_REORG_DETECTION: optionalBooleanEnv('ENABLE_REORG_DETECTION'),
-      GAS_PRICE_THRESHOLD_GWEI: optionalNumberEnv('GAS_PRICE_THRESHOLD_GWEI'),
-      STUCK_TRANSACTION_THRESHOLD_MS: optionalNumberEnv('STUCK_TRANSACTION_THRESHOLD_MS'),
-    }),
   };
 }
 
@@ -350,6 +292,5 @@ export function createDefaultConfig(): AppConfig {
     logging: LogConfigSchema.parse({}),
     kelly: KellyConfigSchema.parse({}),
     risk: RiskConfigSchema.parse({}),
-    blockchain: BlockchainConfigSchema.parse({}),
   };
 }

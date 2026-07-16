@@ -35,6 +35,8 @@ export interface ExecutableAskQuote {
   availableSize: number;
   /** Protocol taker fee rate for this market. Defaults to the current maximum category rate. */
   takerFeeRate?: number;
+  /** Price-curve exponent from CLOB V2 fee details. Defaults to one. */
+  takerFeeExponent?: number;
 }
 
 export interface DollarPayoffOpportunity {
@@ -83,7 +85,13 @@ export function findDollarPayoffArbitrage(
       !Number.isFinite(quote.availableSize) ||
       quote.availableSize <= 0 ||
       (quote.takerFeeRate !== undefined &&
-        (!Number.isFinite(quote.takerFeeRate) || quote.takerFeeRate < 0 || quote.takerFeeRate > 1))
+        (!Number.isFinite(quote.takerFeeRate) ||
+          quote.takerFeeRate < 0 ||
+          quote.takerFeeRate > 1)) ||
+      (quote.takerFeeExponent !== undefined &&
+        (!Number.isFinite(quote.takerFeeExponent) ||
+          quote.takerFeeExponent < 0 ||
+          quote.takerFeeExponent > 10))
     ) {
       return null;
     }
@@ -92,7 +100,8 @@ export function findDollarPayoffArbitrage(
   const targetPayoutUsd = model.targetPayoutUsd ?? 1;
   const effectiveCosts = concreteQuotes.map((quote) => {
     const feeRate = quote.takerFeeRate ?? CONSERVATIVE_TAKER_FEE_RATE;
-    const protocolFee = feeRate * quote.askPrice * (1 - quote.askPrice);
+    const feeExponent = quote.takerFeeExponent ?? 1;
+    const protocolFee = feeRate * Math.pow(quote.askPrice * (1 - quote.askPrice), feeExponent);
     const operationalBuffer = quote.askPrice * (model.feeBufferBps / 10_000);
     return quote.askPrice + protocolFee + operationalBuffer;
   });

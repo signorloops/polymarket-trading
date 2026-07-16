@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import type { OrderRequest, OrderResponse } from '../api/polymarket-client.js';
+import type { OrderRequest, OrderResponse, TakerFeeSchedule } from '../api/polymarket-client.js';
 import type {
   HeartbeatTradingClient,
   TradingBalanceClient,
   TradingClient,
+  TradingOpenOrdersClient,
 } from '../api/trading-client.js';
 import {
   CanaryTradePersistence,
@@ -66,6 +67,8 @@ export interface CanaryTradeDependencies {
   createRunId?: (timestamp: number) => string;
   pollIntervalMs?: number;
   pollTimeoutMs?: number;
+  /** Fresh public V2 fee metadata fetched by the operator command. */
+  takerFeeSchedule?: TakerFeeSchedule;
 }
 
 const OPEN_CANARY_STATUSES = new Set<CanaryTradeRecordStatus>(['open', 'submitted']);
@@ -166,9 +169,13 @@ export async function runCanaryTrade(
     if (!isHeartbeatTradingClient(tradingClient)) {
       throw new Error('Real canary requires CLOB heartbeat support');
     }
+    if (!isTradingOpenOrdersClient(tradingClient)) {
+      throw new Error('Real canary requires authenticated open-order reconciliation support');
+    }
 
     assertNoUnresolvedCanary(persistence);
-    await assertCanaryBalances(config, tradingClient);
+    await assertNoOpenOrders(tradingClient);
+    await assertCanaryBalances(config, tradingClient, dependencies.takerFeeSchedule, now());
 
     record = createRecord({
       runId,
@@ -449,7 +456,9 @@ function assertNoUnresolvedCanary(persistence: CanaryTradePersistencePort): void
 
 async function assertCanaryBalances(
   config: CanaryTradeConfig,
-  tradingClient: TradingBalanceClient
+  tradingClient: TradingBalanceClient,
+  feeSchedule: TakerFeeSchedule | undefined,
+  now: number
 ): Promise<void> {
   const [balances, collateral] = await Promise.all([
     tradingClient.getBalances([config.tokenId]),
@@ -469,7 +478,7 @@ async function assertCanaryBalances(
   }
 
   if (config.side === 'buy') {
-    const requiredCollateral = calculateMaximumBuyCostUsd(config);
+    const requiredCollateral = calculateMaximumBuyCostUsd(config, feeSchedule, now);
     if (collateral.size + 1e-8 < requiredCollateral) {
       throw new Error('Insufficient reconciled collateral for canary buy');
     }
@@ -536,11 +545,48 @@ function isHeartbeatTradingClient(client: TradingClient): client is HeartbeatTra
   );
 }
 
+function isTradingOpenOrdersClient(client: TradingClient): client is TradingOpenOrdersClient {
+  return 'getOpenOrders' in client && typeof client.getOpenOrders === 'function';
+}
+
+async function assertNoOpenOrders(client: TradingOpenOrdersClient): Promise<void> {
+  const openOrders = await client.getOpenOrders();
+  if (openOrders.length > 0) {
+    throw new Error(
+      `Real canary requires an account with zero existing open orders; found ${String(openOrders.length)}`
+    );
+  }
+}
+
 function calculateNotionalUsd(config: CanaryTradeConfig): number {
   return config.size * config.price;
 }
 
-function calculateMaximumBuyCostUsd(config: CanaryTradeConfig): number {
+function calculateMaximumBuyCostUsd(
+  config: CanaryTradeConfig,
+  feeSchedule: TakerFeeSchedule | undefined,
+  now: number
+): number {
+  if (feeSchedule) {
+    if (
+      feeSchedule.tokenId !== config.tokenId ||
+      feeSchedule.fetchedAt > now ||
+      now - feeSchedule.fetchedAt > 10 * 60 * 1000 ||
+      !Number.isFinite(feeSchedule.rate) ||
+      feeSchedule.rate < 0 ||
+      feeSchedule.rate > 1 ||
+      !Number.isFinite(feeSchedule.exponent) ||
+      feeSchedule.exponent < 0 ||
+      feeSchedule.exponent > 10
+    ) {
+      throw new Error('Canary taker fee schedule is mismatched or stale');
+    }
+    const peakPrice = Math.min(config.price, 0.5);
+    return (
+      calculateNotionalUsd(config) +
+      config.size * feeSchedule.rate * Math.pow(peakPrice * (1 - peakPrice), feeSchedule.exponent)
+    );
+  }
   return (
     calculateNotionalUsd(config) +
     // A limit buy may fill at any better price below its limit. The platform

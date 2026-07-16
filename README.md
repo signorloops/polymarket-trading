@@ -80,7 +80,7 @@ Configure the following variables in `.env`:
 
 ```env
 # Network
-RPC_URL= # optional legacy Polygon transaction tracker
+POLYGON_RPC_URL= # required only for read-only onchain balance reconciliation
 WS_URL=wss://ws-subscriptions-clob.polymarket.com/ws/market
 POLYMARKET_API_KEY=your_api_key
 POLYMARKET_SECRET=your_api_secret
@@ -131,6 +131,8 @@ CANARY_KILL_SWITCH_PATH=.state/canary-kill-switch.json
 
 The canary CLI persists intent before submission and fails closed on ambiguous outcomes. A missing kill-switch file blocks real submission: run `npm run canary:kill-switch -- deactivate` explicitly only for the reviewed canary window. Preflight checks require exchange status, balance/allowance and heartbeat support. Partial fills, filled canaries and unresolved outcomes are marked for manual reconciliation.
 `npm run canary:kill-switch -- activate "reason"` blocks future real canary submissions, and `npm run canary:cancel-all` attempts to cancel all non-terminal canary orders from the persisted state file.
+
+Before a funded Canary, run `npm run user-stream:check` and `npm run audit:operator-readiness`. The audit is read-only and compares authenticated CLOB balances, operator-entered UI balances, and Polygon pUSD/CTF balances. Multi-host submitters must use `ORDER_IDEMPOTENCY_DATABASE_URL` (or `_FILE`) so logical-order claims are transactional in PostgreSQL.
 
 Automatic live trading is still blocked. See the [live-trading readiness gate](docs/live-trading-readiness.md) for the canary, reconciliation, persistent idempotency, payoff-model and multi-leg atomicity status.
 

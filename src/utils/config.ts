@@ -89,7 +89,7 @@ export function printConfigSummary(): void {
     timeWindowBlocks: TRADING_CONFIG.TIME_WINDOW_BLOCKS,
   });
   logger.info('Network:', {
-    rpcConfigured: !!NETWORK_CONFIG.RPC_URL,
+    polygonRpcConfigured: !!NETWORK_CONFIG.POLYGON_RPC_URL,
     wsUrl: NETWORK_CONFIG.WS_URL,
     apiKeyConfigured: !!NETWORK_CONFIG.POLYMARKET_API_KEY,
     clobChainId: NETWORK_CONFIG.POLYMARKET_CHAIN_ID,

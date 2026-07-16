@@ -63,6 +63,31 @@ services:
     profiles:
       - with-redis
 
+  # Local PostgreSQL for testing the transactional multi-machine idempotency path.
+  # Production nodes should use a managed PostgreSQL secret.
+  postgres:
+    image: postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+    container_name: polymarket-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: polymarket
+      POSTGRES_USER: polymarket
+      POSTGRES_PASSWORD_FILE: /run/secrets/idempotency_db_password
+    secrets:
+      - idempotency_db_password
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U polymarket -d polymarket']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./migrations/001_order_idempotency.sql:/docker-entrypoint-initdb.d/001_order_idempotency.sql:ro
+    networks:
+      - trading-network
+    profiles:
+      - durable-idempotency
+
   # Prometheus for monitoring (optional)
   prometheus:
     image: prom/prometheus@sha256:3c42b892cf723fa54d2f262c37a0e1f80aa8c8ddb1da7b9b0df9455a35a7f893
@@ -108,6 +133,7 @@ volumes:
   redis-data:
   prometheus-data:
   grafana-data:
+  postgres-data:
 
 networks:
   trading-network:
@@ -118,3 +144,5 @@ secrets:
     file: ./.secrets/metrics-token
   grafana_admin_password:
     file: ./.secrets/grafana-admin-password
+  idempotency_db_password:
+    file: ./.secrets/idempotency-db-password
