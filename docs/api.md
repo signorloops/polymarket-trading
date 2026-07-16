@@ -11,9 +11,10 @@ new PolymarketTradingSystem(config: TradingSystemConfig)
 ```
 
 **参数:**
-- `config.liveTrading`: `boolean` - 是否启用实盘交易
+- `config.liveTrading`: `boolean` - 实盘交易开关；当前主系统安全保护仍会拒绝 `true`，签名 CLOB 适配层需先经过独立 canary 后才能接入自动执行
 - `config.markets`: `string[]` - 监控的市场 ID 列表
 - `config.events`: `Array<{id: string, markets: Array<{id: string, outcome: 'YES' | 'NO', price: number}>}>` - 事件配置
+- `config.payoffModels`: 可选的跨市场终局 payoff 模型。必须穷举所有可行场景；每个场景的 `payouts` 与 `marketIds` 按下标对应
 
 **示例:**
 ```typescript
@@ -31,6 +32,34 @@ const system = new PolymarketTradingSystem({
   ],
 });
 ```
+
+## SignedClobTradingClient
+
+官方 Polymarket CLOB SDK 的最小适配层，用于把内部 `OrderRequest` 转成 EIP-712 signed CLOB 订单。当前仅支持显式 `GTC` limit orders。每笔订单必须带唯一 `idempotencyKey`，并在提交前原子写入持久化日志；不确定的提交结果不会自动重试。
+
+必需配置：
+- `PRIVATE_KEY`
+- `POLYMARKET_API_KEY`
+- `POLYMARKET_SECRET`
+- `POLYMARKET_PASSPHRASE`
+- `POLYMARKET_SIGNATURE_TYPE`
+- 代理钱包模式还需要 `POLYMARKET_FUNDER_ADDRESS`
+- 真单环境需要把 `ORDER_IDEMPOTENCY_DIR` 放在持久化共享卷上
+
+余额对账可以用 `npm run reconcile:balances` 独立执行，也可以设置 `RECONCILE_ON_STARTUP=true` 让 daemon 在启动 HTTP/WebSocket 前完成全量对账。
+
+## Canary Trade
+
+`npm run canary:trade` 是手动单笔验证入口，默认 `CANARY_DRY_RUN=true`。真实提交必须同时满足：
+- `CANARY_DRY_RUN=false`
+- `CANARY_TRADING_ENABLED=true`
+- `CANARY_CONFIRMATION=PLACE_ONE_REAL_POLYMARKET_CANARY_ORDER`
+- 订单 notional 不超过 `CANARY_MAX_NOTIONAL_USD` 和代码硬上限 5 USD
+- 状态会持久化到 `CANARY_STATE_PATH`（默认 `.state/canary-trades.json`）
+- kill switch 会持久化到 `CANARY_KILL_SWITCH_PATH`（默认 `.state/canary-kill-switch.json`）
+
+该入口只提交一笔 `GTC` limit order，不会启动自动策略执行。若出现部分成交或轮询超时，系统会尝试撤单，并在仍需人工跟进时返回 `manualInterventionRequired=true`。
+启用 kill switch 后，真实 canary 提交会被直接拒绝。`npm run canary:cancel-all` 会尝试取消状态文件里所有未终态 canary 订单。
 
 ### 方法
 
@@ -155,7 +184,7 @@ findAllOpportunities(): ArbitrageOpportunity[]
 设置 API 客户端。
 
 ```typescript
-setApiClient(client: PolymarketClient): void
+setApiClient(client: TradingClient): void
 ```
 
 #### executeOrder()

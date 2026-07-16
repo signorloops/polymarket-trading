@@ -75,11 +75,16 @@ cp .env.example .env
 ```env
 # 网络配置
 RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY
-WS_URL=wss://ws.polymarket.com
+WS_URL=wss://ws-subscriptions-clob.polymarket.com/ws/market
 POLYMARKET_API_KEY=your_api_key
+POLYMARKET_SECRET=your_api_secret
+POLYMARKET_PASSPHRASE=your_api_passphrase
+POLYMARKET_CHAIN_ID=137
+POLYMARKET_SIGNATURE_TYPE=0 # 0=EOA, 1=代理钱包, 2=Gnosis Safe
+POLYMARKET_FUNDER_ADDRESS=
 
 # 钱包配置
-PRIVATE_KEY=your_private_key
+PRIVATE_KEY= # 已有签名 CLOB 适配层；实盘编排默认仍禁用
 WALLET_ADDRESS=your_wallet_address
 
 # 算法参数
@@ -99,6 +104,51 @@ MAX_EXPOSURE=10000
 EMERGENCY_STOP_THRESHOLD=500
 ```
 
+## 手动 Canary 交易
+
+`npm run canary:trade` 是单笔 canary 入口。默认 dry-run，不会启用自动实盘交易。
+
+真实提交必须同时设置所有闸门：
+
+```env
+CANARY_TOKEN_ID=1234567890
+CANARY_SIDE=buy
+CANARY_SIZE=1
+CANARY_PRICE=0.01
+CANARY_MAX_NOTIONAL_USD=5
+CANARY_DRY_RUN=false
+CANARY_TRADING_ENABLED=true
+CANARY_CONFIRMATION=PLACE_ONE_REAL_POLYMARKET_CANARY_ORDER
+CANARY_STATE_PATH=.state/canary-trades.json
+CANARY_KILL_SWITCH_PATH=.state/canary-kill-switch.json
+```
+
+canary CLI 会把状态写入 `CANARY_STATE_PATH`。如果订单出现部分成交或轮询超时，系统会尝试撤掉剩余挂单；只要还需要人工处理，返回结果里就会显式标记 `manualInterventionRequired`。
+`npm run canary:kill-switch -- activate "reason"` 会阻止后续真实 canary 提交，直到执行 `deactivate`；`npm run canary:cancel-all` 会基于持久化状态文件尝试撤掉所有未终态 canary 订单。
+
+自动实盘仍保持禁用。Canary、余额对账、持久幂等、payoff 模型与多腿原子性的状态见 [实盘就绪门禁](docs/live-trading-readiness.md)。
+
+## Runtime Config CLI
+
+用内置模板生成 daemon 配置：
+
+```bash
+npm run runtime-config:generate -- ./config/trading-system.json
+```
+
+启动前校验 daemon 配置：
+
+```bash
+npm run runtime-config:validate -- ./config/trading-system.json
+```
+
+发布前可以对构建后的 daemon 进程和 Docker 镜像做一次冒烟验证：
+
+```bash
+npm run smoke:daemon
+npm run smoke:docker
+```
+
 ## 使用
 
 ### 基础用法
@@ -107,7 +157,7 @@ EMERGENCY_STOP_THRESHOLD=500
 import { PolymarketTradingSystem } from './src/index.js';
 
 const config = {
-  liveTrading: false, // 设置为 true 开启实盘交易
+  liveTrading: false, // 当前有安全保护，暂不支持实盘交易
   markets: [],
   events: [
     {
@@ -149,9 +199,9 @@ import { frankWolfe, linearMinimizationOracle } from './src/core/frank-wolfe.js'
 
 const result = frankWolfe(
   initialPoint,
-  objectiveFn,  // 目标函数（如 KL 散度）
-  gradientFn,   // 梯度函数
-  lmoFn,        // 线性最小化 oracle
+  objectiveFn, // 目标函数（如 KL 散度）
+  gradientFn, // 梯度函数
+  lmoFn, // 线性最小化 oracle
   { maxIterations: 150, tolerance: 1e-6 }
 );
 
@@ -176,8 +226,8 @@ console.log(`间隙: ${result.gap}`);
 import { bregmanProjection } from './src/core/bregman-projection.js';
 
 const result = bregmanProjection(
-  priceVector,     // 当前市场价格
-  constraints,     // 多面体约束
+  priceVector, // 当前市场价格
+  constraints, // 多面体约束
   maxIterations,
   tolerance
 );
@@ -192,11 +242,11 @@ console.log(`散度: ${result.divergence}`);
 import { calculatePositionSize } from './src/execution/position-sizing.js';
 
 const result = calculatePositionSize({
-  probability: 0.6,    // 获胜概率
-  price: 0.5,          // 市场价格
-  capital: 10000,      // 可用资金
-  orderBook,           // 订单簿
-  side: 'buy',         // 交易方向
+  probability: 0.6, // 获胜概率
+  price: 0.5, // 市场价格
+  capital: 10000, // 可用资金
+  orderBook, // 订单簿
+  side: 'buy', // 交易方向
 });
 
 console.log(`推荐仓位: ${result.size}`);
@@ -279,6 +329,7 @@ f = (b*p - q) / b * sqrt(p)
 ```
 
 其中：
+
 - f = 资金占比
 - b = 赔率
 - p = 获胜概率
@@ -341,6 +392,8 @@ docker build -t polymarket-trading .
 docker run -d \
   --name polymarket-trading \
   --env-file .env \
+  -v $(pwd)/config:/app/config:ro \
+  -v $(pwd)/.state:/app/.state \
   -p 3000:3000 \
   polymarket-trading
 ```
@@ -352,6 +405,7 @@ docker-compose up -d
 ```
 
 包含：
+
 - 交易服务
 - Prometheus 监控
 - Grafana 仪表盘
@@ -368,11 +422,17 @@ docker-compose up -d
 
 ### Grafana 仪表盘
 
-访问 `http://localhost:3000` 查看：
-- 实时套利机会
-- 交易历史
-- 风险指标
-- 系统性能
+交易守护进程接口：
+
+- `http://localhost:3000/health`
+- `http://localhost:3000/ready`
+- `http://localhost:3000/metrics`（非 loopback 监听时必须使用 Bearer 鉴权）
+- `http://localhost:3000/api/risk/status`（仅在配置 `HTTP_RISK_STATUS_TOKEN` 后开放，
+  请求需携带 `Authorization: Bearer <token>`）
+
+Grafana 仪表盘：
+
+- `http://localhost:3001`
 
 ### 日志级别
 
@@ -381,7 +441,8 @@ docker-compose up -d
 LOG_LEVEL=debug npm run dev
 
 # 生产模式
-LOG_LEVEL=warn npm start
+npm run build
+TRADING_SYSTEM_CONFIG_PATH=./config/trading-system.example.json LOG_LEVEL=warn npm start
 ```
 
 ## 更新日志

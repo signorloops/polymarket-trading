@@ -83,11 +83,16 @@ Configure the following variables in `.env`:
 ```env
 # Network
 RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY
-WS_URL=wss://ws.polymarket.com
+WS_URL=wss://ws-subscriptions-clob.polymarket.com/ws/market
 POLYMARKET_API_KEY=your_api_key
+POLYMARKET_SECRET=your_api_secret
+POLYMARKET_PASSPHRASE=your_api_passphrase
+POLYMARKET_CHAIN_ID=137
+POLYMARKET_SIGNATURE_TYPE=0 # 0=EOA, 1=proxy, 2=Gnosis Safe
+POLYMARKET_FUNDER_ADDRESS=
 
 # Wallet
-PRIVATE_KEY=your_private_key
+PRIVATE_KEY= # signed CLOB adapter available; live orchestration remains disabled by default
 WALLET_ADDRESS=your_wallet_address
 
 # Algorithm parameters
@@ -107,6 +112,51 @@ MAX_EXPOSURE=10000
 EMERGENCY_STOP_THRESHOLD=500
 ```
 
+## Manual Canary Trade
+
+`npm run canary:trade` is a single-order canary entrypoint. It defaults to dry-run and does not enable automatic live trading.
+
+Real submission requires all gates:
+
+```env
+CANARY_TOKEN_ID=1234567890
+CANARY_SIDE=buy
+CANARY_SIZE=1
+CANARY_PRICE=0.01
+CANARY_MAX_NOTIONAL_USD=5
+CANARY_DRY_RUN=false
+CANARY_TRADING_ENABLED=true
+CANARY_CONFIRMATION=PLACE_ONE_REAL_POLYMARKET_CANARY_ORDER
+CANARY_STATE_PATH=.state/canary-trades.json
+CANARY_KILL_SWITCH_PATH=.state/canary-kill-switch.json
+```
+
+The canary CLI persists state to `CANARY_STATE_PATH`. If an order partially fills or times out, it will try to cancel the remainder and expose `manualInterventionRequired` in the result when a human still needs to step in.
+`npm run canary:kill-switch -- activate "reason"` blocks future real canary submissions until `deactivate`, and `npm run canary:cancel-all` attempts to cancel all non-terminal canary orders from the persisted state file.
+
+Automatic live trading is still blocked. See the [live-trading readiness gate](docs/live-trading-readiness.md) for the canary, reconciliation, persistent idempotency, payoff-model and multi-leg atomicity status.
+
+## Runtime Config CLI
+
+Generate a daemon config from the built-in template:
+
+```bash
+npm run runtime-config:generate -- ./config/trading-system.json
+```
+
+Validate a daemon config before startup:
+
+```bash
+npm run runtime-config:validate -- ./config/trading-system.json
+```
+
+Smoke-test the built daemon process and Docker image before shipping:
+
+```bash
+npm run smoke:daemon
+npm run smoke:docker
+```
+
 ## Usage
 
 ### Basic Usage
@@ -115,7 +165,7 @@ EMERGENCY_STOP_THRESHOLD=500
 import { PolymarketTradingSystem } from './src/index.js';
 
 const config = {
-  liveTrading: false, // set true for live trading
+  liveTrading: false, // live trading is currently disabled by safety guard
   markets: [],
   events: [
     {
@@ -157,9 +207,9 @@ import { frankWolfe, linearMinimizationOracle } from './src/core/frank-wolfe.js'
 
 const result = frankWolfe(
   initialPoint,
-  objectiveFn,  // objective function (e.g. KL divergence)
-  gradientFn,   // gradient function
-  lmoFn,        // linear minimization oracle
+  objectiveFn, // objective function (e.g. KL divergence)
+  gradientFn, // gradient function
+  lmoFn, // linear minimization oracle
   { maxIterations: 150, tolerance: 1e-6 }
 );
 
@@ -184,8 +234,8 @@ console.log(`Gap: ${result.gap}`);
 import { bregmanProjection } from './src/core/bregman-projection.js';
 
 const result = bregmanProjection(
-  priceVector,     // current market prices
-  constraints,     // polytope constraints
+  priceVector, // current market prices
+  constraints, // polytope constraints
   maxIterations,
   tolerance
 );
@@ -200,11 +250,11 @@ console.log(`Divergence: ${result.divergence}`);
 import { calculatePositionSize } from './src/execution/position-sizing.js';
 
 const result = calculatePositionSize({
-  probability: 0.6,    // win probability
-  price: 0.5,          // market price
-  capital: 10000,      // available capital
-  orderBook,           // order book
-  side: 'buy',         // trade direction
+  probability: 0.6, // win probability
+  price: 0.5, // market price
+  capital: 10000, // available capital
+  orderBook, // order book
+  side: 'buy', // trade direction
 });
 
 console.log(`Recommended size: ${result.size}`);
@@ -285,6 +335,7 @@ f = (b*p - q) / b * sqrt(p)
 ```
 
 Where:
+
 - `f` = capital fraction
 - `b` = odds
 - `p` = win probability
@@ -347,6 +398,8 @@ docker build -t polymarket-trading .
 docker run -d \
   --name polymarket-trading \
   --env-file .env \
+  -v $(pwd)/config:/app/config:ro \
+  -v $(pwd)/.state:/app/.state \
   -p 3000:3000 \
   polymarket-trading
 ```
@@ -358,6 +411,7 @@ docker-compose up -d
 ```
 
 Includes:
+
 - trading service
 - Prometheus monitoring
 - Grafana dashboard
@@ -374,11 +428,17 @@ Includes:
 
 ### Grafana Dashboard
 
-Visit `http://localhost:3000` to view:
-- real-time arbitrage opportunities
-- trading history
-- risk metrics
-- system performance
+Trading daemon endpoints:
+
+- `http://localhost:3000/health`
+- `http://localhost:3000/ready`
+- `http://localhost:3000/metrics` (Bearer auth is mandatory when binding outside loopback)
+- `http://localhost:3000/api/risk/status` (hidden unless `HTTP_RISK_STATUS_TOKEN` is set;
+  send it as `Authorization: Bearer <token>`)
+
+Grafana dashboard:
+
+- `http://localhost:3001`
 
 ### Log Levels
 
@@ -388,7 +448,7 @@ LOG_LEVEL=debug npm run dev
 
 # Production
 npm run build
-LOG_LEVEL=warn node dist/index.js
+TRADING_SYSTEM_CONFIG_PATH=./config/trading-system.example.json LOG_LEVEL=warn npm start
 ```
 
 ## Changelog

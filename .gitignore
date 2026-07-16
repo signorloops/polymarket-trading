@@ -18,6 +18,10 @@ logs/
 *.log
 npm-debug.log*
 
+# Runtime state
+.state/
+.secrets/
+
 # Coverage
 coverage/
 .nyc_output/

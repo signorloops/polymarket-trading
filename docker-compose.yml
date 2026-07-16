@@ -10,9 +10,19 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      TRADING_SYSTEM_CONFIG_PATH: /app/config/trading-system.json
+      HTTP_HOST: 0.0.0.0
+      HTTP_METRICS_TOKEN_FILE: /run/secrets/metrics_token
+    ports:
+      - "3000:3000"
     volumes:
+      - ./config:/app/config:ro
       - ./logs:/app/logs
       - ./data:/app/data
+      - state-data:/app/.state
+    secrets:
+      - metrics_token
     networks:
       - trading-network
     logging:
@@ -59,6 +69,8 @@ services:
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus-data:/prometheus
+    secrets:
+      - metrics_token
     ports:
       - "9090:9090"
     networks:
@@ -76,13 +88,14 @@ services:
       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
       - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
     ports:
-      - "3000:3000"
+      - "3001:3000"
     networks:
       - trading-network
     profiles:
       - monitoring
 
 volumes:
+  state-data:
   redis-data:
   prometheus-data:
   grafana-data:
@@ -90,3 +103,7 @@ volumes:
 networks:
   trading-network:
     driver: bridge
+
+secrets:
+  metrics_token:
+    file: ./.secrets/metrics-token

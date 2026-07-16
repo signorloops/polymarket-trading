@@ -6,8 +6,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci
+# Install dependencies without executing third-party lifecycle scripts.
+RUN npm ci --ignore-scripts
 
 # Copy source code
 COPY . .
@@ -23,12 +23,13 @@ WORKDIR /app
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs
 RUN adduser -S nodejs -u 1001
+RUN mkdir -p /app/.state && chown -R nodejs:nodejs /app/.state
 
 # Copy package files
 COPY package*.json ./
 
 # Install production dependencies only
-RUN npm ci --only=production && npm cache clean --force
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
 # Copy built files from builder
 COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
@@ -40,8 +41,8 @@ USER nodejs
 EXPOSE 3000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "console.log('health check')" || exit 1
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:3000/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
 
 # Start the application
-CMD ["node", "dist/index.js"]
+CMD ["node", "dist/src/index.js"]

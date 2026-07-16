@@ -10,6 +10,8 @@ This document describes how to set up and use the monitoring system for the Poly
 - **Grafana**: Visualization and dashboards
 - **Node.js Metrics**: Application-level metrics exposed via `/metrics` endpoint
 
+When the daemon binds outside loopback, `/metrics` requires a bearer token. Docker Compose mounts the same token into the daemon and Prometheus from `.secrets/metrics-token`.
+
 ## Metrics Exposed
 
 ### Business Metrics
@@ -94,7 +96,7 @@ docker-compose --profile monitoring up -d
 open http://localhost:9090
 
 # Access Grafana Dashboard
-open http://localhost:3000
+open http://localhost:3001
 # Default credentials: admin/admin
 ```
 
@@ -122,7 +124,7 @@ Configure alerts in Grafana for:
 ### No metrics showing
 1. Check if the trading bot is running: `docker-compose ps`
 2. Verify Prometheus targets: http://localhost:9090/targets
-3. Check metrics endpoint: `curl http://localhost:8080/metrics`
+3. Check metrics endpoint: `curl -H "Authorization: Bearer $HTTP_METRICS_TOKEN" http://localhost:3000/metrics`
 
 ### Grafana not loading
 1. Check Grafana logs: `docker-compose logs grafana`
