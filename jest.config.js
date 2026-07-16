@@ -21,14 +21,13 @@ export default {
   collectCoverageFrom: ['src/**/*.ts', '!src/**/*.d.ts'],
   coverageThreshold: {
     global: {
-      branches: 50,
-      functions: 50,
-      lines: 50,
-      statements: 50,
+      branches: 70,
+      functions: 80,
+      lines: 80,
+      statements: 80,
     },
   },
   verbose: true,
   workerIdleMemoryLimit: '512MB',
   maxWorkers: 2,
-  forceExit: true,
 };

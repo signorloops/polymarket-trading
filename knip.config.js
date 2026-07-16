@@ -1,6 +1,6 @@
 export default {
-  entry: ['src/index.ts', 'benchmarks/*.ts'],
+  entry: ['src/scripts/*.ts', 'benchmarks/*.ts'],
   project: ['src/**/*.ts'],
-  ignoreBinaries: ['knip'],
+  ignoreExportsUsedInFile: true,
   exclude: ['types'],
 };
