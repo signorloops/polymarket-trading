@@ -306,4 +306,38 @@ describe('AlertNotificationService dispatch isolation', () => {
     await service.send(notification);
     expect(failing.send).toHaveBeenCalledTimes(2);
   });
+
+  it('redacts credential values from metadata before dispatching to any channel', async () => {
+    const captured: AlertNotification[] = [];
+    const channel = makeMockChannel(async (n) => {
+      captured.push(n);
+      return true;
+    });
+    const service = new AlertNotificationService({
+      ...baseConfig,
+      routing: { info: [], warning: [], critical: ['mock'] },
+    });
+    inject(service, 'mock', channel);
+
+    await service.send({
+      level: 'critical',
+      title: 'order failed',
+      message: 'upstream 401',
+      timestamp: new Date(),
+      metadata: {
+        orderId: 'abc',
+        apiKey: 'AK-SECRET',
+        nested: { authorization: 'Bearer x', config: { password: 'hunter2' } },
+      },
+    });
+
+    expect(captured).toHaveLength(1);
+    const md = captured[0]?.metadata;
+    expect(md?.apiKey).toBe('[REDACTED]');
+    expect(md?.orderId).toBe('abc'); // non-secret preserved
+    const serialized = JSON.stringify(md);
+    expect(serialized).not.toContain('AK-SECRET');
+    expect(serialized).not.toContain('hunter2');
+    expect(serialized).not.toContain('Bearer x');
+  });
 });

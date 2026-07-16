@@ -15,6 +15,7 @@ import { EmailChannel } from './channels/email-channel.js';
 import { PagerDutyChannel } from './channels/pagerduty-channel.js';
 import { createSingleton } from '../utils/singleton.js';
 import { getLogger } from '../utils/logger.js';
+import { redactSecrets } from '../utils/redact.js';
 
 function parseAlertLevel(value: string | undefined): AlertLevel {
   if (value === 'info' || value === 'warning' || value === 'critical') {
@@ -144,8 +145,15 @@ export class AlertNotificationService {
       return this.createHistoryEntry(notification, [], []);
     }
 
+    // Redact credential values from metadata BEFORE it reaches any external
+    // channel. Slack/Email/PagerDuty/Discord all stringify metadata verbatim
+    // (PagerDuty even spreads it into custom_details), including nested objects —
+    // so an axios error or request config in metadata would exfiltrate
+    // authorization headers / API keys off-box. Sanitize once here.
+    const safeNotification = this.sanitizeNotification(notification);
+
     // Get routing for this level
-    const routing = this.config.routing[notification.level];
+    const routing = this.config.routing[safeNotification.level];
 
     // Dispatch to every routed, enabled channel CONCURRENTLY with a per-channel
     // timeout. A sequential await loop lets one hung channel (Slack/Discord/
@@ -161,7 +169,7 @@ export class AlertNotificationService {
 
     const results = await Promise.all(
       enabledChannels.map(async ([channelName, channel]) => {
-        const ok = await this.sendToChannelWithTimeout(channel, notification);
+        const ok = await this.sendToChannelWithTimeout(channel, safeNotification);
         if (!ok) {
           this.logger.warn('Alert channel send failed or timed out', { channel: channelName });
         }
@@ -176,11 +184,11 @@ export class AlertNotificationService {
     // full outage would suppress all retries within the dedup window, silently
     // dropping the alert entirely.
     if (sentTo.length > 0) {
-      this.recordAlert(notification);
+      this.recordAlert(safeNotification);
     }
 
     // Add to history
-    const entry = this.createHistoryEntry(notification, sentTo, failedTo);
+    const entry = this.createHistoryEntry(safeNotification, sentTo, failedTo);
     this.addToHistory(entry);
 
     return entry;
@@ -299,6 +307,20 @@ export class AlertNotificationService {
 
     const windowMs = this.config.dedupWindowMinutes * 60 * 1000;
     return Date.now() - lastSent < windowMs;
+  }
+
+  /**
+   * Return a copy of `notification` with credential values redacted from its
+   * metadata (recursively). Notifications without metadata are returned as-is.
+   */
+  private sanitizeNotification(notification: AlertNotification): AlertNotification {
+    if (!notification.metadata) {
+      return notification;
+    }
+    return {
+      ...notification,
+      metadata: redactSecrets(notification.metadata) as Record<string, unknown>,
+    };
   }
 
   /**

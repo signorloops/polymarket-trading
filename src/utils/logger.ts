@@ -3,13 +3,9 @@
  */
 
 import { createSingleton } from './singleton.js';
+import { redactSecrets } from './redact.js';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
-
-// Keys whose values must never be logged (trading credentials, signing keys, etc.).
-// Substring match, case-insensitive — over-redaction is safer than leakage.
-const SECRET_KEY_RE =
-  /(secret|password|passwd|passphrase|api[_-]?key|api[_-]?secret|private[_-]?key|authorization|access[_-]?token|auth[_-]?token|bearer|mnemonic)/i;
 
 interface LogEntry {
   timestamp: string;
@@ -80,26 +76,6 @@ export class Logger {
     return Logger.LEVEL_PRIORITY[level] >= Logger.LEVEL_PRIORITY[this.level];
   }
 
-  /**
-   * Recursively clone a log context, replacing values whose key looks like a
-   * credential/signing secret with '[REDACTED]'. Guards against leaking keys
-   * nested inside logged objects (e.g. an axios error carrying an Authorization
-   * header, or a config snapshot with PRIVATE_KEY). Never throws.
-   */
-  private redactSecrets(value: unknown, seen: WeakSet<object> = new WeakSet()): unknown {
-    if (value === null || typeof value !== 'object') return value;
-    if (seen.has(value)) return '[Circular]';
-    seen.add(value);
-    if (Array.isArray(value)) {
-      return value.map((v) => this.redactSecrets(v, seen));
-    }
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value)) {
-      out[k] = SECRET_KEY_RE.test(k) ? '[REDACTED]' : this.redactSecrets(v, seen);
-    }
-    return out;
-  }
-
   private formatLogEntry(entry: LogEntry, structured: boolean): string {
     if (structured) {
       // JSON structured logging for production
@@ -125,10 +101,7 @@ export class Logger {
       timestamp: new Date().toISOString(),
       level,
       message,
-      context: this.redactSecrets({ ...this.context, ...additionalContext }) as Record<
-        string,
-        unknown
-      >,
+      context: redactSecrets({ ...this.context, ...additionalContext }) as Record<string, unknown>,
     };
 
     const formatted = this.formatLogEntry(entry, this.structured);
