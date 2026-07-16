@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293
 
 WORKDIR /app
 
@@ -8,8 +8,8 @@ RUN apk add --no-cache git
 # Copy package files
 COPY package*.json ./
 
-# Install all dependencies (including devDependencies)
-RUN npm install
+# Install the locked dependency graph without third-party lifecycle scripts.
+RUN npm ci --ignore-scripts
 
 # Expose port for debugging
 EXPOSE 9229

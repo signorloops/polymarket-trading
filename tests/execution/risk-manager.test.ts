@@ -45,7 +45,7 @@ describe('RiskManager', () => {
     });
 
     it('should reject trade exceeding max exposure', () => {
-      const result = riskManager.checkTrade('market-1', 50000, 'buy', 50000);
+      const result = riskManager.checkTrade('market-1', 50000, 'buy', 25000);
 
       expect(result.allowed).toBe(false);
       expect(result.riskLevel).toBe('high');
@@ -78,14 +78,37 @@ describe('RiskManager', () => {
         status: 'filled',
         filledSize: 200,
         remainingSize: 0,
-        avgPrice: 2,
+        avgPrice: 0.2,
         timestamp: Date.now(),
       };
       riskManager.updatePosition(baseStatus, 'market-base', 'buy');
 
-      // Additional trade notional is 50 (size 10 at unit value 5).
-      const result = riskManager.checkTrade('market-new', 10, 'buy', 50);
+      // Additional trade notional is $5 (size 10 at $0.50 per share).
+      const result = riskManager.checkTrade('market-new', 10, 'buy', 5);
       expect(result.allowed).toBe(true);
+    });
+
+    it('decrements reconciled collateral after fills and reserves conservative fee headroom', () => {
+      riskManager.setCollateralBalance(10);
+      expect(riskManager.checkTrade('market-1', 10, 'buy', 5).allowed).toBe(true);
+
+      riskManager.updatePosition(
+        {
+          orderId: 'buy-1',
+          status: 'filled',
+          filledSize: 10,
+          remainingSize: 0,
+          avgPrice: 0.5,
+          timestamp: Date.now(),
+        },
+        'market-1',
+        'buy'
+      );
+
+      expect(riskManager.checkTrade('market-2', 10, 'buy', 5)).toMatchObject({
+        allowed: false,
+        reason: expect.stringMatching(/collateral/i),
+      });
     });
   });
 
@@ -156,6 +179,85 @@ describe('RiskManager', () => {
 
       const position = riskManager.getPosition('market-1');
       expect(position).toBeUndefined();
+    });
+
+    it('realizes PnL on a partial reduction without changing the cost basis', () => {
+      riskManager.updatePosition(
+        {
+          orderId: 'buy',
+          status: 'filled',
+          filledSize: 100,
+          remainingSize: 0,
+          avgPrice: 0.4,
+          timestamp: Date.now(),
+        },
+        'market-1',
+        'buy'
+      );
+      riskManager.updatePosition(
+        {
+          orderId: 'sell',
+          status: 'filled',
+          filledSize: 25,
+          remainingSize: 0,
+          avgPrice: 0.6,
+          timestamp: Date.now(),
+        },
+        'market-1',
+        'sell'
+      );
+
+      expect(riskManager.getPosition('market-1')).toMatchObject({ size: 75, avgPrice: 0.4 });
+      expect(riskManager.getRiskMetrics().dailyPnL).toBeCloseTo(5, 8);
+    });
+
+    it('fails closed instead of inventing a short position on an unexpected sell fill', () => {
+      riskManager.updatePosition(
+        {
+          orderId: 'unexpected-sell',
+          status: 'filled',
+          filledSize: 5,
+          remainingSize: 0,
+          avgPrice: 0.6,
+          timestamp: Date.now(),
+        },
+        'market-1',
+        'sell'
+      );
+
+      expect(riskManager.getPosition('market-1')).toBeUndefined();
+      expect(riskManager.isCircuitBreakerActive()).toBe(true);
+    });
+
+    it('closes known inventory and trips the breaker when a sell fill exceeds it', () => {
+      riskManager.updatePosition(
+        {
+          orderId: 'buy',
+          status: 'filled',
+          filledSize: 10,
+          remainingSize: 0,
+          avgPrice: 0.4,
+          timestamp: Date.now(),
+        },
+        'market-1',
+        'buy'
+      );
+      riskManager.updatePosition(
+        {
+          orderId: 'oversell',
+          status: 'filled',
+          filledSize: 12,
+          remainingSize: 0,
+          avgPrice: 0.5,
+          timestamp: Date.now(),
+        },
+        'market-1',
+        'sell'
+      );
+
+      expect(riskManager.getPosition('market-1')).toBeUndefined();
+      expect(riskManager.getRiskMetrics().dailyPnL).toBeCloseTo(1, 8);
+      expect(riskManager.isCircuitBreakerActive()).toBe(true);
     });
 
     it('should handle partial fills', () => {
@@ -301,6 +403,28 @@ describe('RiskManager', () => {
     });
   });
 
+  it('returns defensive position snapshots that cannot mutate risk state', () => {
+    riskManager.updatePosition(
+      {
+        orderId: 'buy',
+        status: 'filled',
+        filledSize: 5,
+        remainingSize: 0,
+        avgPrice: 0.4,
+        timestamp: Date.now(),
+      },
+      'market-1',
+      'buy'
+    );
+
+    const position = riskManager.getPosition('market-1');
+    const positions = riskManager.getPositions();
+    if (position) position.size = 999;
+    if (positions[0]) positions[0].size = 888;
+
+    expect(riskManager.getPosition('market-1')?.size).toBe(5);
+  });
+
   describe('resetDailyPnL', () => {
     it('should reset daily PnL', () => {
       riskManager.resetDailyPnL();
@@ -403,6 +527,7 @@ describe('RiskManager', () => {
 
       expect(result.synced).toEqual(['asset-A']);
       expect(rm.getPosition('asset-A')?.size).toBe(150);
+      expect(rm.getPosition('asset-A')?.avgPrice).toBe(0);
     });
 
     it('removes in-memory positions the exchange no longer holds', () => {
@@ -447,6 +572,16 @@ describe('RiskManager', () => {
       // Would be (0.5 - 0) * 100 = 50 if not excluded; must be 0 to avoid feeding
       // the emergency-stop circuit breaker a fabricated gain.
       expect(metrics.unrealizedPnL).toBe(0);
+    });
+
+    it('does not fabricate realized PnL when reducing an imported unknown-basis position', () => {
+      const rm = new RiskManager();
+      rm.reconcile([{ assetId: 'asset-X', size: 100 }]);
+
+      rm.updatePosition(fill('sell-1', 40, 0.6), 'asset-X', 'sell');
+
+      expect(rm.getPosition('asset-X')).toMatchObject({ size: 60, avgPrice: 0 });
+      expect(rm.getRiskMetrics().dailyPnL).toBe(0);
     });
   });
 });

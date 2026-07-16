@@ -18,15 +18,36 @@ import { getLogger } from '../utils/logger.js';
 import { redactSecrets } from '../utils/redact.js';
 
 function parseAlertLevel(value: string | undefined): AlertLevel {
-  if (value === 'info' || value === 'warning' || value === 'critical') {
-    return value;
+  if (value === undefined) {
+    return 'info';
   }
-  return 'info';
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'info' || normalized === 'warning' || normalized === 'critical') {
+    return normalized;
+  }
+  throw new Error('ALERTS_MIN_LEVEL must be "info", "warning", or "critical"');
 }
 
-function parsePositiveInt(value: string | undefined, fallback: number): number {
-  const parsed = Number.parseInt(value ?? '', 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+function parsePositiveInt(
+  value: string | undefined,
+  fallback: number,
+  name: string,
+  maximum = Number.MAX_SAFE_INTEGER
+): number {
+  if (value === undefined) return fallback;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0 || parsed > maximum) {
+    throw new Error(`${name} must be a positive integer no greater than ${String(maximum)}`);
+  }
+  return parsed;
+}
+
+function parseBoolean(value: string | undefined, fallback: boolean, name: string): boolean {
+  if (value === undefined) return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true') return true;
+  if (normalized === 'false') return false;
+  throw new Error(`${name} must be "true" or "false"`);
 }
 
 function parseCsvList(value: string | undefined): string[] {
@@ -61,6 +82,11 @@ export class AlertNotificationService {
    */
   static fromEnv(): AlertNotificationService {
     const channels: AlertConfig['channels'] = {};
+    const smtpUser = process.env.SMTP_USER?.trim();
+    const smtpPassword = process.env.SMTP_PASS;
+    if ((smtpUser && !smtpPassword) || (!smtpUser && smtpPassword)) {
+      throw new Error('SMTP_USER and SMTP_PASS must be configured together');
+    }
 
     if (process.env.SLACK_WEBHOOK_URL) {
       channels.slack = {
@@ -82,13 +108,13 @@ export class AlertNotificationService {
       channels.email = {
         smtp: {
           host: process.env.SMTP_HOST,
-          port: parsePositiveInt(process.env.SMTP_PORT, 587),
-          secure: process.env.SMTP_SECURE === 'true',
-          ...(process.env.SMTP_USER && process.env.SMTP_PASS
+          port: parsePositiveInt(process.env.SMTP_PORT, 587, 'SMTP_PORT', 65_535),
+          secure: parseBoolean(process.env.SMTP_SECURE, false, 'SMTP_SECURE'),
+          ...(smtpUser && smtpPassword
             ? {
                 auth: {
-                  user: process.env.SMTP_USER,
-                  pass: process.env.SMTP_PASS,
+                  user: smtpUser,
+                  pass: smtpPassword,
                 },
               }
             : {}),
@@ -105,10 +131,18 @@ export class AlertNotificationService {
     }
 
     const config: AlertConfig = {
-      enabled: process.env.ALERTS_ENABLED !== 'false',
+      enabled: parseBoolean(process.env.ALERTS_ENABLED, true, 'ALERTS_ENABLED'),
       minLevel: parseAlertLevel(process.env.ALERTS_MIN_LEVEL),
-      dedupWindowMinutes: parsePositiveInt(process.env.ALERTS_DEDUP_WINDOW_MINUTES, 5),
-      channelTimeoutMs: parsePositiveInt(process.env.ALERTS_CHANNEL_TIMEOUT_MS, 10000),
+      dedupWindowMinutes: parsePositiveInt(
+        process.env.ALERTS_DEDUP_WINDOW_MINUTES,
+        5,
+        'ALERTS_DEDUP_WINDOW_MINUTES'
+      ),
+      channelTimeoutMs: parsePositiveInt(
+        process.env.ALERTS_CHANNEL_TIMEOUT_MS,
+        10000,
+        'ALERTS_CHANNEL_TIMEOUT_MS'
+      ),
       channels,
       routing: {
         info: parseCsvList(process.env.ALERT_ROUTING_INFO),

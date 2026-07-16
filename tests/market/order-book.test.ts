@@ -123,6 +123,11 @@ describe('OrderBook', () => {
       expect(vwap.executedSize).toBe(50);
       expect(vwap.remainingSize).toBe(50);
     });
+
+    it('rejects invalid trade sizes instead of returning NaN analytics', () => {
+      expect(() => book.calculateVWAP(Number.NaN, 'buy')).toThrow(/Trade size/);
+      expect(() => book.calculateVWAP(0, 'sell')).toThrow(/Trade size/);
+    });
   });
 
   describe('calculateSlippage', () => {
@@ -146,6 +151,24 @@ describe('OrderBook', () => {
 
       const slippage = book.calculateSlippage(100, 'buy');
       expect(slippage).toBe(Infinity);
+    });
+  });
+
+  describe('getMaxExecutableSize', () => {
+    it('solves the partial-level VWAP limit exactly', () => {
+      // mid = (0.49 + 0.50) / 2 = 0.495; with the default 2% tolerance,
+      // the maximum buy VWAP is 0.5049.
+      book.update(
+        [{ price: 0.49, size: 100 }],
+        [
+          { price: 0.5, size: 10 },
+          { price: 0.55, size: 10 },
+        ]
+      );
+
+      const threshold = 0.495 * 1.02;
+      const partialSize = (threshold * 10 - 10 * 0.5) / (0.55 - threshold);
+      expect(book.getMaxExecutableSize('buy')).toBeCloseTo(10 + partialSize, 10);
     });
   });
 });

@@ -105,6 +105,27 @@ describe('Logger', () => {
     expect(line).toContain('[Circular]');
   });
 
+  it('preserves reserved envelope fields and safely serializes bigint/error context', () => {
+    const spy = jest.fn();
+    console.error = spy;
+    const logger = new Logger('info', false, {}, true);
+
+    expect(() =>
+      logger.error('real message', {
+        level: 'forged',
+        message: 'forged',
+        amount: 10n,
+        error: new Error('exchange failed'),
+      })
+    ).not.toThrow();
+
+    const parsed = JSON.parse(spy.mock.calls[0]?.[0] as string) as Record<string, unknown>;
+    expect(parsed.level).toBe('error');
+    expect(parsed.message).toBe('real message');
+    expect(parsed.amount).toBe('10');
+    expect(parsed.error).toMatchObject({ name: 'Error', message: 'exchange failed' });
+  });
+
   it('respects log level (skips lower levels)', () => {
     const infoSpy = jest.fn();
     const debugSpy = jest.fn();

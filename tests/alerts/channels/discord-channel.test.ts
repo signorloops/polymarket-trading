@@ -178,6 +178,20 @@ describe('DiscordChannel', () => {
       expect(fields[1].value.length).toBeLessThanOrEqual(1024);
       expect(fields[1].inline).toBe(false);
     });
+
+    it('redacts secret metadata when used without the alert service', async () => {
+      let capturedBody = '';
+      globalThis.fetch = jest.fn<typeof fetch>().mockImplementation(async (_url, init) => {
+        capturedBody = (init?.body as string) ?? '';
+        return new Response(null, { status: 204 });
+      });
+
+      const channel = new DiscordChannel({ webhookUrl: mockWebhookUrl });
+      await channel.send(makeNotification({ metadata: { authToken: 'TOP-SECRET' } }));
+
+      expect(capturedBody).not.toContain('TOP-SECRET');
+      expect(capturedBody).toContain('[REDACTED]');
+    });
   });
 
   describe('test', () => {

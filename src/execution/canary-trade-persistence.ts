@@ -5,6 +5,7 @@ import { getErrorMessage } from '../utils/errors.js';
 
 export type CanaryTradeRecordStatus =
   | 'dry-run'
+  | 'intent'
   | 'submitted'
   | 'open'
   | 'partial'
@@ -12,6 +13,7 @@ export type CanaryTradeRecordStatus =
   | 'cancelled'
   | 'rejected'
   | 'timed_out'
+  | 'unknown'
   | 'failed';
 
 export interface CanaryTradeRecord {
@@ -20,6 +22,7 @@ export interface CanaryTradeRecord {
   updatedAt: number;
   dryRun: boolean;
   submitted: boolean;
+  submissionAttempted?: boolean;
   tokenId: string;
   side: 'buy' | 'sell';
   size: number;
@@ -49,6 +52,7 @@ export const DEFAULT_CANARY_STATE_FILE_PATH = path.join(
 
 export interface CanaryTradePersistencePort {
   saveRecord(record: CanaryTradeRecord): void;
+  loadRecords?(): CanaryTradeRecord[];
 }
 
 export class CanaryTradePersistence implements CanaryTradePersistencePort {
@@ -60,13 +64,19 @@ export class CanaryTradePersistence implements CanaryTradePersistencePort {
     if (!this.stateFilePath) {
       return;
     }
+    if (!isCanaryTradeRecord(record)) {
+      throw new Error('Cannot persist an invalid canary trade record');
+    }
 
-    const records = this.loadRecords();
-    const nextRecords = upsertRecord(records, record);
-
+    const lockPath = `${this.stateFilePath}.lock`;
+    let lock: number | undefined;
+    let tempPath: string | undefined;
     try {
-      fs.mkdirSync(path.dirname(this.stateFilePath), { recursive: true });
-      const tempPath = `${this.stateFilePath}.tmp`;
+      fs.mkdirSync(path.dirname(this.stateFilePath), { recursive: true, mode: 0o700 });
+      lock = fs.openSync(lockPath, 'wx', 0o600);
+      const records = this.loadRecords();
+      const nextRecords = upsertRecord(records, record);
+      tempPath = `${this.stateFilePath}.${String(process.pid)}.${String(Date.now())}.tmp`;
       fs.writeFileSync(
         tempPath,
         JSON.stringify(
@@ -74,9 +84,16 @@ export class CanaryTradePersistence implements CanaryTradePersistencePort {
           null,
           2
         ),
-        'utf8'
+        { encoding: 'utf8', mode: 0o600 }
       );
+      const temp = fs.openSync(tempPath, 'r');
+      try {
+        fs.fsyncSync(temp);
+      } finally {
+        fs.closeSync(temp);
+      }
       fs.renameSync(tempPath, this.stateFilePath);
+      fsyncDirectory(path.dirname(this.stateFilePath));
     } catch (error) {
       this.logger.error('Failed to persist canary trade state', {
         file: this.stateFilePath,
@@ -85,6 +102,22 @@ export class CanaryTradePersistence implements CanaryTradePersistencePort {
       throw new Error(`Failed to persist canary trade state: ${getErrorMessage(error)}`, {
         cause: error,
       });
+    } finally {
+      if (tempPath) {
+        try {
+          fs.rmSync(tempPath, { force: true });
+        } catch {
+          // Preserve the persistence result.
+        }
+      }
+      if (lock !== undefined) {
+        fs.closeSync(lock);
+        try {
+          fs.unlinkSync(lockPath);
+        } catch {
+          // Preserve the persistence result.
+        }
+      }
     }
   }
 
@@ -106,7 +139,11 @@ export class CanaryTradePersistence implements CanaryTradePersistencePort {
         'records' in parsed &&
         Array.isArray((parsed as PersistedCanaryTrades).records)
       ) {
-        return (parsed as PersistedCanaryTrades).records.filter(isCanaryTradeRecord);
+        const records = (parsed as PersistedCanaryTrades).records;
+        if (!records.every(isCanaryTradeRecord)) {
+          throw new Error('Canary trade state file contains an invalid record');
+        }
+        return records;
       }
       throw new Error('Canary trade state file has an invalid schema');
     } catch (error) {
@@ -143,15 +180,18 @@ function isCanaryTradeRecord(value: unknown): value is CanaryTradeRecord {
   const record = value as Partial<CanaryTradeRecord>;
   return (
     typeof record.runId === 'string' &&
+    record.runId.trim() !== '' &&
     typeof record.requestedAt === 'number' &&
     Number.isFinite(record.requestedAt) &&
     record.requestedAt >= 0 &&
     typeof record.updatedAt === 'number' &&
     Number.isFinite(record.updatedAt) &&
-    record.updatedAt >= 0 &&
+    record.updatedAt >= record.requestedAt &&
     typeof record.dryRun === 'boolean' &&
     typeof record.submitted === 'boolean' &&
+    (record.submissionAttempted === undefined || typeof record.submissionAttempted === 'boolean') &&
     typeof record.tokenId === 'string' &&
+    /^\d+$/.test(record.tokenId) &&
     (record.side === 'buy' || record.side === 'sell') &&
     typeof record.size === 'number' &&
     Number.isFinite(record.size) &&
@@ -163,7 +203,11 @@ function isCanaryTradeRecord(value: unknown): value is CanaryTradeRecord {
     typeof record.notionalUsd === 'number' &&
     Number.isFinite(record.notionalUsd) &&
     record.notionalUsd > 0 &&
+    Math.abs(record.notionalUsd - record.size * record.price) <= 1e-8 &&
     isCanaryTradeRecordStatus(record.status) &&
+    (record.orderId === undefined ||
+      (typeof record.orderId === 'string' && record.orderId.trim() !== '')) &&
+    (record.lastError === undefined || typeof record.lastError === 'string') &&
     (record.cancelAttempted === undefined || typeof record.cancelAttempted === 'boolean') &&
     (record.cancelSucceeded === undefined || typeof record.cancelSucceeded === 'boolean') &&
     (record.cancelConfirmed === undefined || typeof record.cancelConfirmed === 'boolean') &&
@@ -171,13 +215,29 @@ function isCanaryTradeRecord(value: unknown): value is CanaryTradeRecord {
     (record.manualInterventionRequired === undefined ||
       typeof record.manualInterventionRequired === 'boolean') &&
     (record.manualInterventionReason === undefined ||
-      typeof record.manualInterventionReason === 'string')
+      typeof record.manualInterventionReason === 'string') &&
+    (!record.submitted || record.orderId !== undefined) &&
+    (record.status !== 'dry-run' || (record.dryRun && !record.submitted)) &&
+    (!requiresConfirmedOrder(record.status) || (record.submitted && record.orderId !== undefined))
+  );
+}
+
+function requiresConfirmedOrder(status: CanaryTradeRecordStatus): boolean {
+  return (
+    status === 'submitted' ||
+    status === 'open' ||
+    status === 'partial' ||
+    status === 'filled' ||
+    status === 'cancelled' ||
+    status === 'rejected' ||
+    status === 'timed_out'
   );
 }
 
 function isCanaryTradeRecordStatus(value: unknown): value is CanaryTradeRecordStatus {
   return (
     value === 'dry-run' ||
+    value === 'intent' ||
     value === 'submitted' ||
     value === 'open' ||
     value === 'partial' ||
@@ -185,6 +245,16 @@ function isCanaryTradeRecordStatus(value: unknown): value is CanaryTradeRecordSt
     value === 'cancelled' ||
     value === 'rejected' ||
     value === 'timed_out' ||
+    value === 'unknown' ||
     value === 'failed'
   );
+}
+
+function fsyncDirectory(directory: string): void {
+  const descriptor = fs.openSync(directory, 'r');
+  try {
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
 }

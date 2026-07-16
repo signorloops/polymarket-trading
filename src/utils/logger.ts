@@ -79,17 +79,24 @@ export class Logger {
   private formatLogEntry(entry: LogEntry, structured: boolean): string {
     if (structured) {
       // JSON structured logging for production
-      return JSON.stringify({
+      return this.stringify({
+        ...entry.context,
+        // Reserved envelope fields must not be replaceable by caller context.
         timestamp: entry.timestamp,
         level: entry.level,
         message: entry.message,
-        ...entry.context,
       });
     }
 
     // Human-readable format for development
-    const contextStr = entry.context ? ' ' + JSON.stringify(entry.context) : '';
+    const contextStr = entry.context ? ' ' + this.stringify(entry.context) : '';
     return `[${entry.timestamp}] ${entry.level.toUpperCase()}: ${entry.message}${contextStr}`;
+  }
+
+  private stringify(value: unknown): string {
+    return JSON.stringify(value, (_key, item: unknown) =>
+      typeof item === 'bigint' ? item.toString() : item
+    );
   }
 
   private log(level: LogLevel, message: string, additionalContext?: Record<string, unknown>): void {

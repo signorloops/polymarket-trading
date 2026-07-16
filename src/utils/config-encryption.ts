@@ -3,6 +3,7 @@
  */
 
 import fs from 'fs/promises';
+import path from 'node:path';
 import { getLogger } from './logger.js';
 import { getErrorMessage } from './errors.js';
 import { isEncrypted, encryptValue, decryptValue } from './crypto-utils.js';
@@ -130,19 +131,12 @@ export async function encryptEnvFile(
       }
       if (!fields.includes(trimmedKey)) return line;
 
-      try {
-        const encryptedValue = encryptValue(value.trim());
-        encrypted++;
-        return `${key}=${encryptedValue}`;
-      } catch {
-        logger.warn(`Failed to encrypt ${trimmedKey}, leaving as-is`);
-        skipped++;
-        return line;
-      }
+      const encryptedValue = encryptValue(value.trim());
+      encrypted++;
+      return `${key}=${encryptedValue}`;
     });
 
-    await fs.writeFile(filePath, processedLines.join('\n'), 'utf8');
-    await setSecurePermissions(filePath);
+    await writeFileAtomically(filePath, processedLines.join('\n'));
     logger.info(`Encrypted ${String(encrypted)} values in ${filePath}, skipped ${String(skipped)}`);
     return { encrypted, skipped };
   } catch (error) {
@@ -172,22 +166,39 @@ export async function decryptEnvFile(filePath: string): Promise<{
         return line;
       }
 
-      try {
-        const decryptedValue = decryptValue(value.trim());
-        decrypted++;
-        return `${key}=${decryptedValue}`;
-      } catch {
-        logger.warn(`Failed to decrypt value for ${key.trim()}, leaving as-is`);
-        skipped++;
-        return line;
-      }
+      const decryptedValue = decryptValue(value.trim());
+      decrypted++;
+      return `${key}=${decryptedValue}`;
     });
 
-    await fs.writeFile(filePath, processedLines.join('\n'), 'utf8');
+    await writeFileAtomically(filePath, processedLines.join('\n'));
     logger.info(`Decrypted ${String(decrypted)} values in ${filePath}, skipped ${String(skipped)}`);
     return { decrypted, skipped };
   } catch (error) {
     logger.error(`Failed to decrypt env file ${filePath}`, { error: getErrorMessage(error) });
     throw error;
+  }
+}
+
+async function writeFileAtomically(filePath: string, content: string): Promise<void> {
+  const directory = path.dirname(filePath);
+  const tempPath = `${filePath}.${String(process.pid)}.${String(Date.now())}.tmp`;
+  let handle: fs.FileHandle | undefined;
+  try {
+    handle = await fs.open(tempPath, 'wx', 0o600);
+    await handle.writeFile(content, 'utf8');
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    await fs.rename(tempPath, filePath);
+    const directoryHandle = await fs.open(directory, 'r');
+    try {
+      await directoryHandle.sync();
+    } finally {
+      await directoryHandle.close();
+    }
+  } finally {
+    await handle?.close().catch(() => undefined);
+    await fs.rm(tempPath, { force: true }).catch(() => undefined);
   }
 }

@@ -12,8 +12,21 @@ export interface TradingStatusClient extends TradingClient {
 export interface TradingBalance {
   assetId: string;
   size: number;
+  allowances?: Record<string, number>;
+}
+
+export interface TradingCollateralBalance {
+  size: number;
+  allowances: Record<string, number>;
 }
 
 export interface TradingBalanceClient extends TradingStatusClient {
   getBalances(assetIds: readonly string[]): Promise<TradingBalance[]>;
+  getCollateralBalance(): Promise<TradingCollateralBalance>;
+}
+
+export interface HeartbeatTradingClient extends TradingClient {
+  /** Send and confirm the first heartbeat before scheduling subsequent ones. */
+  startHeartbeat(intervalMs?: number): Promise<void>;
+  stopHeartbeat(): void;
 }

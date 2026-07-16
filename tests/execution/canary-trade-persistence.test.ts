@@ -79,6 +79,19 @@ describe('CanaryTradePersistence', () => {
     );
   });
 
+  it('fails closed when any record in an existing journal is invalid', () => {
+    fs.writeFileSync(
+      statePath,
+      JSON.stringify({
+        records: [{ runId: 'truncated-record' }],
+        savedAt: Date.now(),
+      }),
+      'utf8'
+    );
+
+    expect(() => new CanaryTradePersistence(statePath).loadRecords()).toThrow(/invalid record/);
+  });
+
   it('throws when state cannot be persisted', () => {
     const parentAsFile = path.join(tempDir, 'not-a-directory');
     fs.writeFileSync(parentAsFile, 'blocker', 'utf8');

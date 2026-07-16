@@ -14,90 +14,57 @@ When the daemon binds outside loopback, `/metrics` requires a bearer token. Dock
 
 ## Metrics Exposed
 
-### Business Metrics
+The current registry exports only the metrics below. Prometheus adds `_bucket`, `_sum`, and `_count` series for histograms.
 
 | Metric | Type | Description |
-|--------|------|-------------|
-| `arbitrage_opportunities_found_total` | Counter | Total number of arbitrage opportunities detected |
-| `arbitrage_opportunities_executed_total` | Counter | Total number of executed arbitrages |
-| `arbitrage_profit_usd_total` | Gauge | Total profit in USD |
-| `arbitrage_opportunity_duration_seconds` | Histogram | Time from detection to execution |
-| `position_size_usd` | Gauge | Current position size |
-| `daily_pnl_usd` | Gauge | Daily profit/loss |
-
-### Algorithm Performance Metrics
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `frank_wolfe_iterations` | Histogram | Number of iterations for convergence |
-| `frank_wolfe_gap` | Gauge | Optimality gap |
-| `frank_wolfe_converged` | Counter | Convergence count |
-| `frank_wolfe_duration_ms` | Histogram | Algorithm execution time |
-| `bregman_projection_iterations` | Histogram | Bregman projection iterations |
-| `bregman_projection_duration_ms` | Histogram | Projection execution time |
-| `order_book_operations_total` | Counter | Order book operations (insert/update/delete) |
-| `order_book_operation_duration_ms` | Histogram | Order book operation latency |
-
-### Order Execution Metrics
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `orders_submitted_total` | Counter | Total orders submitted |
-| `orders_filled_total` | Counter | Total orders filled |
-| `orders_partial_filled_total` | Counter | Partial fills |
-| `orders_cancelled_total` | Counter | Cancelled orders |
-| `orders_failed_total` | Counter | Failed orders |
-| `order_latency_ms` | Histogram | Order execution latency |
-| `order_fill_ratio` | Gauge | Fill ratio (filled/total) |
-
-### Risk Management Metrics
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `risk_checks_total` | Counter | Total risk checks |
-| `risk_checks_blocked_total` | Counter | Blocked by risk manager |
-| `daily_loss_usd` | Gauge | Current daily loss |
-| `current_exposure_usd` | Gauge | Current market exposure |
-| `circuit_breaker_open` | Gauge | Circuit breaker status (0/1) |
-| `emergency_stop_triggered` | Counter | Emergency stop count |
-| `position_limit_hit_total` | Counter | Position limit violations |
-
-### System Health Metrics
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `websocket_connected` | Gauge | WebSocket connection status (0/1) |
-| `websocket_reconnects_total` | Counter | WebSocket reconnections |
-| `websocket_messages_received_total` | Counter | Messages received |
-| `api_requests_total` | Counter | API requests |
-| `api_errors_total` | Counter | API errors |
-| `api_latency_ms` | Histogram | API latency |
-| `memory_usage_bytes` | Gauge | Memory usage |
-| `gc_pause_ms` | Histogram | GC pause duration |
-| `event_loop_lag_ms` | Gauge | Event loop lag |
-
-### Data Pipeline Metrics
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `market_data_updates_total` | Counter | Market data updates |
-| `order_book_updates_total` | Counter | Order book updates |
-| `trade_events_total` | Counter | Trade events received |
-| `price_changes_total` | Counter | Price change events |
-| `data_processing_lag_ms` | Histogram | Processing lag |
+| --- | --- | --- |
+| `trading_orders_submitted_total` | Counter | Orders submitted |
+| `trading_orders_filled_total` | Counter | Orders recorded as successful |
+| `trading_orders_failed_total` | Counter | Failed orders |
+| `trading_orders_cancelled_total` | Counter | Confirmed cancellations |
+| `trading_position_size` | Gauge | Current position size |
+| `trading_position_pnl` | Gauge | Unrealized position P&L |
+| `trading_total_exposure` | Gauge | Total exposure |
+| `trading_daily_pnl` | Gauge | Current UTC trading-day realized P&L |
+| `trading_unrealized_pnl` | Gauge | Current unrealized P&L |
+| `trading_max_drawdown` | Gauge | Current UTC trading-day max drawdown |
+| `trading_circuit_breaker_open` | Gauge | Circuit breaker state (1=open) |
+| `trading_arbitrage_opportunities_total` | Counter | Opportunities recorded |
+| `trading_arbitrage_executed_total` | Counter | Successful executions |
+| `trading_arbitrage_failed_total` | Counter | Failed executions |
+| `trading_arbitrage_profit_total` | Counter | Settled USD profit only; execution does not fabricate P&L |
+| `trading_order_execution_seconds` | Histogram | Order execution duration |
+| `trading_frank_wolfe_iterations` | Histogram | Frank-Wolfe iteration count |
+| `trading_frank_wolfe_gap` | Histogram | Frank-Wolfe optimality gap |
+| `trading_orderbook_updates_total` | Counter | Order-book updates |
+| `trading_websocket_reconnects_total` | Counter | WebSocket reconnects |
+| `trading_websocket_errors_total` | Counter | WebSocket errors |
+| `trading_websocket_connected` | Gauge | Market WebSocket state (1=connected) |
+| `trading_orderbook_update_latency_ms` | Histogram | Order-book update latency |
+| `trading_arbitrage_detection_latency_ms` | Histogram | Detection-cycle latency |
+| `trading_arbitrage_execution_latency_ms` | Histogram | Multi-leg execution and recovery latency |
+| `trading_ws_message_processing_ms` | Histogram | WebSocket processing time |
+| `trading_order_execution_latency_ms` | Histogram | Submission-to-confirmation latency |
+| `trading_risk_check_latency_ms` | Histogram | Risk-check latency |
 
 ## Starting Monitoring
 
 ```bash
+# Create the file-backed secrets required by Compose.
+mkdir -p .secrets
+openssl rand -hex 32 > .secrets/metrics-token
+openssl rand -hex 32 > .secrets/grafana-admin-password
+chmod 600 .secrets/metrics-token .secrets/grafana-admin-password
+
 # Start all services including monitoring
-docker-compose --profile monitoring up -d
+docker compose --profile monitoring up -d
 
 # Access Prometheus UI
 open http://localhost:9090
 
 # Access Grafana Dashboard
 open http://localhost:3001
-# Default credentials: admin/admin
+# Username: admin; password: contents of .secrets/grafana-admin-password
 ```
 
 ## Grafana Dashboard
@@ -113,20 +80,22 @@ The dashboard includes panels for:
 ## Alerts
 
 Configure alerts in Grafana for:
-- Daily loss threshold exceeded
-- Circuit breaker triggered
-- WebSocket disconnection
-- High order latency
-- Low success rate
+
+- `trading_daily_pnl` below the reviewed daily-loss threshold
+- `trading_circuit_breaker_open == 1`
+- `trading_websocket_connected == 0`
+- sustained growth in `trading_websocket_errors_total`
+- high quantiles of `trading_order_execution_latency_ms_bucket`
+- a high failed-to-submitted order rate
 
 ## Troubleshooting
 
 ### No metrics showing
-1. Check if the trading bot is running: `docker-compose ps`
+1. Check if the trading bot is running: `docker compose ps`
 2. Verify Prometheus targets: http://localhost:9090/targets
 3. Check metrics endpoint: `curl -H "Authorization: Bearer $HTTP_METRICS_TOKEN" http://localhost:3000/metrics`
 
 ### Grafana not loading
-1. Check Grafana logs: `docker-compose logs grafana`
+1. Check Grafana logs: `docker compose logs grafana`
 2. Verify datasource configuration
 3. Check dashboard JSON syntax

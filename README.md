@@ -2,23 +2,21 @@
 
 English (Default) | [中文](./README.zh-CN.md)
 
-A high-frequency arbitrage trading system built on the Marginal Polytope and Frank-Wolfe optimization algorithm.
+An arbitrage research and paper-trading system built on the Marginal Polytope and Frank-Wolfe optimization algorithm.
 
 ## Project Status
 
-[![Tests](https://img.shields.io/badge/tests-942%20passed-brightgreen)]()
-[![Coverage](https://img.shields.io/badge/coverage-93%25-brightgreen)]()
-[![Lint](https://img.shields.io/badge/lint-passing-brightgreen)]()
-[![Build](https://img.shields.io/badge/build-passing-brightgreen)]()
+[![CI](https://github.com/signorloops/polymarket-trading/actions/workflows/ci.yml/badge.svg)](https://github.com/signorloops/polymarket-trading/actions/workflows/ci.yml)
+[![Security](https://github.com/signorloops/polymarket-trading/actions/workflows/security.yml/badge.svg)](https://github.com/signorloops/polymarket-trading/actions/workflows/security.yml)
 
 - ✅ **Code quality**: ESLint with 0 errors, TypeScript strict mode
-- ✅ **Test coverage**: 93%+ statement coverage, 82%+ branch coverage, 942 tests
-- ✅ **Performance optimization**: Microsecond-level latency in core algorithms
+- ✅ **Automated verification**: Type checking, lint, formatting, dead-code checks, tests, build and smoke tests run in CI
+- ✅ **Performance tooling**: Dedicated benchmarks for the math, optimizer and order-book paths
 - ✅ **Documentation**: API docs, architecture guide, deployment guide
 
 ## Core Features
 
-- **Marginal polytope arbitrage detection**: Detect cross-market arbitrage via convex optimization
+- **Auditable opportunity detection**: Executable single-market covers use fresh order-book depth and fees; cross-market USD opportunities require explicit exhaustive payoff scenarios
 - **Bregman projection**: Compute optimal trade vectors using KL / generalized KL divergence
 - **Frank-Wolfe algorithm**: Real-objective line search (golden-section) with feasible constrained updates
 - **Real-time data processing**: WebSocket data pipeline and order book reconstruction (SkipList, O(log n))
@@ -82,13 +80,13 @@ Configure the following variables in `.env`:
 
 ```env
 # Network
-RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY
+RPC_URL= # optional legacy Polygon transaction tracker
 WS_URL=wss://ws-subscriptions-clob.polymarket.com/ws/market
 POLYMARKET_API_KEY=your_api_key
 POLYMARKET_SECRET=your_api_secret
 POLYMARKET_PASSPHRASE=your_api_passphrase
 POLYMARKET_CHAIN_ID=137
-POLYMARKET_SIGNATURE_TYPE=0 # 0=EOA, 1=proxy, 2=Gnosis Safe
+POLYMARKET_SIGNATURE_TYPE=0 # 0=EOA, 1=proxy, 2=Gnosis Safe, 3=EIP-1271
 POLYMARKET_FUNDER_ADDRESS=
 
 # Wallet
@@ -99,7 +97,7 @@ WALLET_ADDRESS=your_wallet_address
 ALPHA=0.9
 INITIAL_EPSILON=0.1
 MAX_ITERATIONS=150
-MIN_PROFIT_THRESHOLD=0.05
+MIN_PROFIT_THRESHOLD=0.05 # dimensionless KL diagnostic threshold, not USD profit
 
 # Trading parameters
 MAX_POSITION_PCT=0.5
@@ -131,8 +129,8 @@ CANARY_STATE_PATH=.state/canary-trades.json
 CANARY_KILL_SWITCH_PATH=.state/canary-kill-switch.json
 ```
 
-The canary CLI persists state to `CANARY_STATE_PATH`. If an order partially fills or times out, it will try to cancel the remainder and surface `manualInterventionRequired` in the result when human follow-up is still needed.
-`npm run canary:kill-switch -- activate "reason"` blocks future real canary submissions until `deactivate`, and `npm run canary:cancel-all` attempts to cancel all non-terminal canary orders from the persisted state file.
+The canary CLI persists intent before submission and fails closed on ambiguous outcomes. A missing kill-switch file blocks real submission: run `npm run canary:kill-switch -- deactivate` explicitly only for the reviewed canary window. Preflight checks require exchange status, balance/allowance and heartbeat support. Partial fills, filled canaries and unresolved outcomes are marked for manual reconciliation.
+`npm run canary:kill-switch -- activate "reason"` blocks future real canary submissions, and `npm run canary:cancel-all` attempts to cancel all non-terminal canary orders from the persisted state file.
 
 Automatic live trading is still blocked. See the [live-trading readiness gate](docs/live-trading-readiness.md) for the canary, reconciliation, persistent idempotency, payoff-model and multi-leg atomicity status.
 
@@ -179,21 +177,21 @@ const config = {
 };
 
 const system = new PolymarketTradingSystem(config);
-await system.initialize();
-await system.start();
+system.initialize();
+system.start();
 ```
 
 ### Run a Detection Cycle
 
 ```typescript
 // Run one arbitrage detection cycle
-const opportunities = await system.runDetectionCycle();
+const opportunities = system.runDetectionCycle();
 console.log(`Found ${opportunities.length} arbitrage opportunities`);
 
 // Execute opportunities
 for (const opp of opportunities) {
   if (opp.guaranteedProfit > 0.05) {
-    await system.executeOpportunity(opp);
+    system.executeOpportunity(opp);
   }
 }
 ```
@@ -395,19 +393,27 @@ docker build -t polymarket-trading .
 ### Run Container
 
 ```bash
+mkdir -p .secrets
+openssl rand -hex 32 > .secrets/metrics-token
 docker run -d \
   --name polymarket-trading \
   --env-file .env \
+  -e HTTP_HOST=0.0.0.0 \
+  -e HTTP_METRICS_TOKEN_FILE=/run/secrets/metrics-token \
   -v $(pwd)/config:/app/config:ro \
-  -v $(pwd)/.state:/app/.state \
-  -p 3000:3000 \
+  -v $(pwd)/.secrets/metrics-token:/run/secrets/metrics-token:ro \
+  --mount source=polymarket-state,target=/app/.state \
+  -p 127.0.0.1:3000:3000 \
   polymarket-trading
 ```
 
 ### Docker Compose
 
 ```bash
-docker-compose up -d
+mkdir -p .secrets
+openssl rand -hex 32 > .secrets/metrics-token
+openssl rand -hex 32 > .secrets/grafana-admin-password
+docker compose --profile monitoring up -d
 ```
 
 Includes:
@@ -420,11 +426,11 @@ Includes:
 
 ### Prometheus Metrics
 
-- `arbitrage_opportunities_total`: total detected arbitrage opportunities
-- `trade_executions_total`: total trade executions
-- `position_size_usd`: current position size
-- `pnl_usd`: cumulative PnL
-- `risk_manager_status`: risk manager status
+- `trading_arbitrage_opportunities_total`: recorded opportunities
+- `trading_orders_submitted_total`: submitted orders
+- `trading_position_size`: current position size
+- `trading_position_pnl`: unrealized position P&L
+- `trading_total_exposure`: current total exposure
 
 ### Grafana Dashboard
 
@@ -459,7 +465,7 @@ TRADING_SYSTEM_CONFIG_PATH=./config/trading-system.example.json LOG_LEVEL=warn n
 - ✅ Completed API integration (Polymarket REST + WebSocket)
 - ✅ Refactored code (frank-wolfe.ts 414 lines -> 242 lines)
 - ✅ Performance optimizations (SkipList, Float64ArrayPool, sparse constraints)
-- ✅ Test coverage reached 93%+ (942 tests)
+- ✅ Added automated tests and CI quality gates
 - ✅ Added Docker support
 - ✅ Added Prometheus/Grafana monitoring
 

@@ -4,6 +4,8 @@
 
 import { IncomingWebhook } from '@slack/webhook';
 import type { IncomingWebhookSendArguments } from '@slack/webhook';
+import { getLogger } from '../../utils/logger.js';
+import { redactSecrets } from '../../utils/redact.js';
 import {
   type AlertNotification,
   type NotificationChannel,
@@ -29,6 +31,7 @@ export class SlackChannel implements NotificationChannel {
 
   private client: IncomingWebhook | null = null;
   private config: SlackConfig | null = null;
+  private readonly logger = getLogger().child({ module: 'SlackChannel' });
 
   constructor(config?: SlackConfig) {
     if (config?.webhookUrl) {
@@ -49,17 +52,18 @@ export class SlackChannel implements NotificationChannel {
     }
 
     try {
-      const blocks = this.buildBlocks(notification);
+      const safeNotification = this.sanitizeNotification(notification);
+      const blocks = this.buildBlocks(safeNotification);
       const payload: IncomingWebhookSendArguments = {
         username: this.config?.username ?? 'Polymarket Alerts',
         icon_emoji: this.config?.iconEmoji ?? ':warning:',
         blocks,
         attachments: [
           {
-            color: LEVEL_COLORS[notification.level],
-            fields: this.buildFields(notification.metadata),
-            footer: `Source: ${notification.source ?? 'unknown'}`,
-            ts: String(Math.floor(notification.timestamp.getTime() / 1000)),
+            color: LEVEL_COLORS[safeNotification.level],
+            fields: this.buildFields(safeNotification.metadata),
+            footer: `Source: ${safeNotification.source ?? 'unknown'}`,
+            ts: String(Math.floor(safeNotification.timestamp.getTime() / 1000)),
           },
         ],
         ...(this.config?.channel ? { channel: this.config.channel } : {}),
@@ -68,8 +72,8 @@ export class SlackChannel implements NotificationChannel {
       await this.client.send(payload);
 
       return true;
-    } catch (error) {
-      console.error('[SlackChannel] Failed to send notification:', error);
+    } catch {
+      this.logger.error('Slack notification delivery failed');
       return false;
     }
   }
@@ -88,8 +92,8 @@ export class SlackChannel implements NotificationChannel {
         username: this.config?.username ?? 'Polymarket Alerts',
       });
       return true;
-    } catch (error) {
-      console.error('[SlackChannel] Test failed:', error);
+    } catch {
+      this.logger.error('Slack connectivity test failed');
       return false;
     }
   }
@@ -171,5 +175,14 @@ export class SlackChannel implements NotificationChannel {
       return '```' + JSON.stringify(value, null, 2).slice(0, 100) + '```';
     }
     return typeof value === 'string' ? value : String(value as number | boolean);
+  }
+
+  private sanitizeNotification(notification: AlertNotification): AlertNotification {
+    return notification.metadata
+      ? {
+          ...notification,
+          metadata: redactSecrets(notification.metadata) as Record<string, unknown>,
+        }
+      : notification;
   }
 }

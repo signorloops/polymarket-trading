@@ -30,6 +30,9 @@ export abstract class Metric {
   private cardinalityWarned = false;
 
   constructor(name: string, description: string) {
+    if (!/^[a-zA-Z_:][a-zA-Z0-9_:]*$/.test(name)) {
+      throw new Error(`Invalid Prometheus metric name: ${name}`);
+    }
     this.name = name;
     this.description = description;
   }
@@ -69,9 +72,34 @@ export abstract class Metric {
   }
 
   protected serializeLabels(labels: MetricLabels): string {
+    return JSON.stringify(Object.entries(this.normalizeLabels(labels)));
+  }
+
+  protected normalizeLabels(labels: MetricLabels): MetricLabels {
+    const normalized: MetricLabels = {};
+    for (const [key, value] of Object.entries(labels).sort(([left], [right]) =>
+      left.localeCompare(right)
+    )) {
+      if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key) || typeof value !== 'string') {
+        throw new Error(`Invalid Prometheus label: ${key}`);
+      }
+      normalized[key] = value;
+    }
+    return normalized;
+  }
+
+  protected formatLabels(labels: MetricLabels): string {
     return Object.entries(labels)
-      .map(([k, v]) => `${k}="${v}"`)
+      .map(([key, value]) => `${key}="${this.escapeLabelValue(value)}"`)
       .join(',');
+  }
+
+  protected formatHelp(): string {
+    return this.description.replace(/\\/g, '\\\\').replace(/\n/g, '\\n');
+  }
+
+  private escapeLabelValue(value: string): string {
+    return value.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/"/g, '\\"');
   }
 
   abstract toPrometheusFormat(): string;
@@ -84,6 +112,9 @@ export class Counter extends Metric {
   private values: Map<string, MetricPoint> = new Map();
 
   inc(labels: MetricLabels = {}, value = 1): void {
+    if (!Number.isFinite(value) || value < 0) {
+      throw new Error('Prometheus counter increments must be finite and non-negative');
+    }
     const key = this.serializeLabels(labels);
     const existing = this.values.get(key);
     if (existing) {
@@ -93,7 +124,7 @@ export class Counter extends Metric {
       this.values.set(key, {
         value,
         timestamp: Date.now(),
-        labels,
+        labels: this.normalizeLabels(labels),
       });
     }
   }
@@ -104,11 +135,9 @@ export class Counter extends Metric {
   }
 
   toPrometheusFormat(): string {
-    const lines = [`# HELP ${this.name} ${this.description}`, `# TYPE ${this.name} counter`];
+    const lines = [`# HELP ${this.name} ${this.formatHelp()}`, `# TYPE ${this.name} counter`];
     for (const [, point] of this.values) {
-      const labelStr = Object.entries(point.labels)
-        .map(([k, v]) => `${k}="${v}"`)
-        .join(',');
+      const labelStr = this.formatLabels(point.labels);
       lines.push(`${this.name}{${labelStr}} ${String(point.value)}`);
     }
     return lines.join('\n');
@@ -122,12 +151,15 @@ export class Gauge extends Metric {
   private values: Map<string, MetricPoint> = new Map();
 
   set(labels: MetricLabels = {}, value: number): void {
+    if (!Number.isFinite(value)) {
+      throw new Error('Prometheus gauge values must be finite');
+    }
     const key = this.serializeLabels(labels);
     if (!this.values.has(key) && !this.withinCardinality(this.values, key)) return;
     this.values.set(key, {
       value,
       timestamp: Date.now(),
-      labels,
+      labels: this.normalizeLabels(labels),
     });
   }
 
@@ -150,12 +182,14 @@ export class Gauge extends Metric {
     return this.values.get(key)?.value ?? 0;
   }
 
+  clear(): void {
+    this.values.clear();
+  }
+
   toPrometheusFormat(): string {
-    const lines = [`# HELP ${this.name} ${this.description}`, `# TYPE ${this.name} gauge`];
+    const lines = [`# HELP ${this.name} ${this.formatHelp()}`, `# TYPE ${this.name} gauge`];
     for (const [, point] of this.values) {
-      const labelStr = Object.entries(point.labels)
-        .map(([k, v]) => `${k}="${v}"`)
-        .join(',');
+      const labelStr = this.formatLabels(point.labels);
       lines.push(`${this.name}{${labelStr}} ${String(point.value)}`);
     }
     return lines.join('\n');
@@ -170,6 +204,7 @@ export class Histogram extends Metric {
   private counts: Map<string, number[]> = new Map();
   private sums: Map<string, number> = new Map();
   private counts_total: Map<string, number> = new Map();
+  private labelSets: Map<string, MetricLabels> = new Map();
 
   constructor(
     name: string,
@@ -181,6 +216,9 @@ export class Histogram extends Metric {
   }
 
   observe(labels: MetricLabels = {}, value: number): void {
+    if (!Number.isFinite(value)) {
+      throw new Error('Prometheus histogram observations must be finite');
+    }
     const key = this.serializeLabels(labels);
 
     if (!this.counts.has(key)) {
@@ -188,6 +226,7 @@ export class Histogram extends Metric {
       this.counts.set(key, new Array<number>(this.buckets.length).fill(0));
       this.sums.set(key, 0);
       this.counts_total.set(key, 0);
+      this.labelSets.set(key, this.normalizeLabels(labels));
     }
 
     const bucketCounts = this.counts.get(key);
@@ -207,42 +246,32 @@ export class Histogram extends Metric {
   }
 
   toPrometheusFormat(): string {
-    const lines = [`# HELP ${this.name} ${this.description}`, `# TYPE ${this.name} histogram`];
+    const lines = [`# HELP ${this.name} ${this.formatHelp()}`, `# TYPE ${this.name} histogram`];
 
     for (const [key, bucketCounts] of this.counts) {
-      const labelEntries: [string, string][] = key
-        .split(',')
-        .filter((s) => s)
-        .map((s) => {
-          const [k, v] = s.split('=');
-          return [k ?? '', v?.replace(/"/g, '') ?? ''];
-        });
+      const baseLabels = this.labelSets.get(key) ?? {};
 
       for (let i = 0; i < this.buckets.length; i++) {
         const bucketValue = this.buckets[i];
         const bucketCount = bucketCounts[i];
         if (bucketValue === undefined || bucketCount === undefined) continue;
-        const labels = [...labelEntries, ['le', bucketValue.toString()] as [string, string]]
-          .map(([k, v]) => `${k}="${v}"`)
-          .join(',');
+        const labels = this.formatLabels({ ...baseLabels, le: bucketValue.toString() });
         lines.push(`${this.name}_bucket{${labels}} ${String(bucketCount)}`);
       }
 
-      const infLabels = [...labelEntries, ['le', '+Inf'] as [string, string]]
-        .map(([k, v]) => `${k}="${v}"`)
-        .join(',');
+      const infLabels = this.formatLabels({ ...baseLabels, le: '+Inf' });
       const totalCount = this.counts_total.get(key);
       if (totalCount !== undefined) {
         lines.push(`${this.name}_bucket{${infLabels}} ${String(totalCount)}`);
       }
 
-      const baseLabels = labelEntries.map(([k, v]) => `${k}="${v}"`).join(',');
+      const baseLabelString = this.formatLabels(baseLabels);
       const sumValue = this.sums.get(key);
       if (sumValue !== undefined) {
-        lines.push(`${this.name}_sum{${baseLabels}} ${String(sumValue)}`);
+        lines.push(`${this.name}_sum{${baseLabelString}} ${String(sumValue)}`);
       }
       if (totalCount !== undefined) {
-        lines.push(`${this.name}_count{${baseLabels}} ${String(totalCount)}`);
+        lines.push(`${this.name}_count{${baseLabelString}} ${String(totalCount)}`);
       }
     }
 

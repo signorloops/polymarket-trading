@@ -39,6 +39,14 @@ describe('FileOrderIdempotencyStore', () => {
       state: 'submitted',
       exchangeOrderId: 'exchange-1',
     });
+    expect(store.listUnresolved().map((record) => record.key)).toContain('submitted-order');
+
+    store.markTerminal('submitted-order', 'filled');
+    expect(store.get('submitted-order')).toMatchObject({
+      state: 'terminal',
+      terminalStatus: 'filled',
+    });
+    expect(store.listUnresolved().map((record) => record.key)).not.toContain('submitted-order');
 
     store.claim('ambiguous-order', order);
     store.markUnknown('ambiguous-order', new Error('socket reset'));

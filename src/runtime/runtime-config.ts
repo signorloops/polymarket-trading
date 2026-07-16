@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { isIP } from 'node:net';
 import { dirname } from 'node:path';
 
 import { z } from 'zod';
@@ -26,7 +27,7 @@ const CrossMarketPayoffModelSchema = z.object({
     .array(
       z.object({
         id: z.string().min(1),
-        payouts: z.array(z.number().nonnegative()).min(2),
+        payouts: z.array(z.number().min(0).max(1)).min(2),
       })
     )
     .min(2),
@@ -41,8 +42,41 @@ const TradingSystemRuntimeConfigSchema = z
   })
   .superRefine((config, ctx) => {
     const configuredMarketIds = new Set(config.markets);
+    if (configuredMarketIds.size !== config.markets.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'top-level markets list contains duplicate ids',
+        path: ['markets'],
+      });
+    }
 
-    for (const event of config.events) {
+    const eventIds = new Set<string>();
+    const marketOwners = new Map<string, string>();
+
+    for (const [eventIndex, event] of config.events.entries()) {
+      if (eventIds.has(event.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `duplicate event id ${event.id}`,
+          path: ['events', eventIndex, 'id'],
+        });
+      }
+      eventIds.add(event.id);
+      const localMarketIds = new Set(event.markets.map((market) => market.id));
+      const outcomes = new Set(event.markets.map((market) => market.outcome));
+      if (
+        event.markets.length !== 2 ||
+        localMarketIds.size !== 2 ||
+        outcomes.size !== 2 ||
+        !outcomes.has('YES') ||
+        !outcomes.has('NO')
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `event ${event.id} must contain exactly one YES and one NO market`,
+          path: ['events', eventIndex, 'markets'],
+        });
+      }
       for (const market of event.markets) {
         if (!configuredMarketIds.has(market.id)) {
           ctx.addIssue({
@@ -51,6 +85,25 @@ const TradingSystemRuntimeConfigSchema = z
             path: ['markets'],
           });
         }
+        const owner = marketOwners.get(market.id);
+        if (owner && owner !== event.id) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `market ${market.id} belongs to multiple events (${owner}, ${event.id})`,
+            path: ['events', eventIndex, 'markets'],
+          });
+        }
+        marketOwners.set(market.id, event.id);
+      }
+    }
+
+    for (const [marketIndex, marketId] of config.markets.entries()) {
+      if (!marketOwners.has(marketId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `top-level market ${marketId} is not assigned to an event`,
+          path: ['markets', marketIndex],
+        });
       }
     }
 
@@ -59,7 +112,16 @@ const TradingSystemRuntimeConfigSchema = z
         event.markets.map((market) => [market.id, event.id] as const)
       )
     );
+    const payoffModelIds = new Set<string>();
     for (const [modelIndex, model] of (config.payoffModels ?? []).entries()) {
+      if (payoffModelIds.has(model.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `duplicate payoff model id ${model.id}`,
+          path: ['payoffModels', modelIndex, 'id'],
+        });
+      }
+      payoffModelIds.add(model.id);
       if (new Set(model.marketIds).size !== model.marketIds.length) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -88,6 +150,7 @@ const TradingSystemRuntimeConfigSchema = z
         });
       }
       const scenarioIds = new Set<string>();
+      const payoutVectors = new Set<string>();
       for (const [scenarioIndex, scenario] of model.scenarios.entries()) {
         if (scenarioIds.has(scenario.id)) {
           ctx.addIssue({
@@ -97,6 +160,15 @@ const TradingSystemRuntimeConfigSchema = z
           });
         }
         scenarioIds.add(scenario.id);
+        const payoutKey = scenario.payouts.join('|');
+        if (payoutVectors.has(payoutKey)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `payoff model ${model.id} contains duplicate terminal payout vectors`,
+            path: ['payoffModels', modelIndex, 'scenarios', scenarioIndex, 'payouts'],
+          });
+        }
+        payoutVectors.add(payoutKey);
         if (scenario.payouts.length !== model.marketIds.length) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
@@ -111,7 +183,7 @@ const TradingSystemRuntimeConfigSchema = z
 const RuntimeServerConfigSchema = z
   .object({
     host: z.string().min(1).default('127.0.0.1'),
-    port: z.number().int().positive().default(3000),
+    port: z.number().int().positive().max(65_535).default(3000),
     riskStatusToken: z.string().min(16).optional(),
     metricsToken: z.string().min(16).optional(),
   })
@@ -337,10 +409,8 @@ function readOptionalSecret(
 
 function isLoopbackHost(host: string): boolean {
   const normalized = host.trim().toLowerCase();
-  return (
-    normalized === 'localhost' ||
-    normalized === '::1' ||
-    normalized === '[::1]' ||
-    normalized.startsWith('127.')
-  );
+  if (normalized === 'localhost' || normalized === '::1' || normalized === '[::1]') {
+    return true;
+  }
+  return isIP(normalized) === 4 && normalized.split('.')[0] === '127';
 }

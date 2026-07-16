@@ -2,8 +2,9 @@ import { jest } from '@jest/globals';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Chain, SignatureType } from '@polymarket/clob-client';
+import { Chain, SignatureTypeV2 } from '@polymarket/clob-client-v2';
 import type { SignedClobClientConfig, SignedClobSdkClient } from '../../src/api/index.js';
+import { FileOrderIdempotencyStore } from '../../src/execution/order-idempotency-store.js';
 
 jest.unstable_mockModule('../../src/utils/logger.js', () => ({
   getLogger: jest.fn(() => ({
@@ -22,7 +23,7 @@ jest.unstable_mockModule('../../src/utils/config.js', () => ({
     POLYMARKET_SECRET: 'env-secret',
     POLYMARKET_PASSPHRASE: 'env-passphrase',
     POLYMARKET_CHAIN_ID: Chain.POLYGON,
-    POLYMARKET_SIGNATURE_TYPE: SignatureType.POLY_PROXY,
+    POLYMARKET_SIGNATURE_TYPE: SignatureTypeV2.POLY_PROXY,
     POLYMARKET_FUNDER_ADDRESS: '0x1111111111111111111111111111111111111111',
     POLYMARKET_DEFAULT_TICK_SIZE: '0.01',
     POLYMARKET_NEG_RISK: false,
@@ -44,7 +45,7 @@ describe('SignedClobTradingClient', () => {
       apiKey: 'api-key',
       secret: 'secret',
       passphrase: 'passphrase',
-      signatureType: SignatureType.EOA,
+      signatureType: SignatureTypeV2.EOA,
       defaultTickSize: '0.01',
       negRisk: false,
       idempotencyDirectory: mkdtempSync(join(tmpdir(), 'signed-clob-idempotency-')),
@@ -61,11 +62,20 @@ describe('SignedClobTradingClient', () => {
         status: 'live',
         errorMsg: '',
       }),
-      cancelOrder: jest.fn().mockResolvedValue({ success: true }),
+      createAndPostMarketOrder: jest.fn().mockResolvedValue({
+        success: true,
+        orderID: '0xorder',
+        status: 'matched',
+        takingAmount: '5',
+        makingAmount: '2.1',
+      }),
+      cancelOrder: jest.fn().mockResolvedValue({ canceled: ['0xorder'] }),
+      getOrder: jest.fn().mockRejectedValue(new Error('not indexed yet')),
       getBalanceAllowance: jest.fn().mockResolvedValue({
         balance: '0',
-        allowance: '0',
+        allowances: {},
       }),
+      postHeartbeat: jest.fn().mockResolvedValue({ heartbeat_id: 'heartbeat-1' }),
       ...overrides,
     } as unknown as SignedClobSdkClient;
   }
@@ -163,7 +173,7 @@ describe('SignedClobTradingClient', () => {
   it('rejects proxy wallet signing without a funder address', async () => {
     const sdk = createSdk();
     const client = new SignedClobTradingClient(
-      createConfig({ signatureType: SignatureType.POLY_PROXY }),
+      createConfig({ signatureType: SignatureTypeV2.POLY_PROXY }),
       sdk
     );
 
@@ -181,20 +191,33 @@ describe('SignedClobTradingClient', () => {
     expect(sdk.createAndPostOrder).not.toHaveBeenCalled();
   });
 
-  it('rejects unsupported market orders', async () => {
+  it('maps FOK market orders to the V2 SDK', async () => {
     const sdk = createSdk();
     const client = new SignedClobTradingClient(createConfig(), sdk);
 
     await expect(
       client.placeOrder({
-        idempotencyKey: 'unsupported-market-order',
+        idempotencyKey: 'supported-market-order',
         marketId: '1234567890',
         side: 'buy',
         size: 5,
         price: 0.42,
         orderType: 'market',
+        timeInForce: 'FOK',
       })
-    ).rejects.toThrow(/market orders are not enabled/);
+    ).resolves.toMatchObject({ status: 'filled', filledSize: 5 });
+    expect(sdk.createAndPostMarketOrder).toHaveBeenCalledWith(
+      {
+        tokenID: '1234567890',
+        price: 0.42,
+        side: 'BUY',
+        amount: 2.1,
+        orderType: 'FOK',
+      },
+      { tickSize: '0.01', negRisk: false },
+      'FOK',
+      false
+    );
   });
 
   it('submits cancellation through the signed CLOB SDK', async () => {
@@ -237,16 +260,65 @@ describe('SignedClobTradingClient', () => {
     const sdk = createSdk({
       getBalanceAllowance: jest
         .fn()
-        .mockResolvedValueOnce({ balance: '2500000', allowance: '0' })
-        .mockResolvedValueOnce({ balance: '125000', allowance: '0' }),
+        .mockResolvedValueOnce({ balance: '2500000', allowances: { exchange: '1000000' } })
+        .mockResolvedValueOnce({ balance: '125000', allowances: {} }),
     });
     const client = new SignedClobTradingClient(createConfig(), sdk);
 
     await expect(client.getBalances(['123', '456', '123'])).resolves.toEqual([
-      { assetId: '123', size: 2.5 },
-      { assetId: '456', size: 0.125 },
+      { assetId: '123', size: 2.5, allowances: { exchange: 1 } },
+      { assetId: '456', size: 0.125, allowances: {} },
     ]);
     expect(sdk.getBalanceAllowance).toHaveBeenCalledTimes(2);
+  });
+
+  it('confirms the first heartbeat before starting the keepalive loop', async () => {
+    const sdk = createSdk();
+    const client = new SignedClobTradingClient(createConfig(), sdk);
+
+    await client.startHeartbeat(1_000);
+
+    expect(sdk.postHeartbeat).toHaveBeenCalledTimes(1);
+    client.stopHeartbeat();
+  });
+
+  it('rejects heartbeat startup when the exchange does not confirm it', async () => {
+    const sdk = createSdk({
+      postHeartbeat: jest.fn().mockResolvedValue({
+        heartbeat_id: '',
+        error_msg: 'heartbeat rejected',
+      }),
+    });
+    const client = new SignedClobTradingClient(createConfig(), sdk);
+
+    await expect(client.startHeartbeat()).rejects.toThrow(/heartbeat rejected/);
+    client.stopHeartbeat();
+  });
+
+  it('does not resurrect a heartbeat timer when stopped during the initial request', async () => {
+    jest.useFakeTimers();
+    let resolveHeartbeat: ((value: { heartbeat_id: string }) => void) | undefined;
+    const sdk = createSdk({
+      postHeartbeat: jest.fn().mockImplementation(
+        () =>
+          new Promise<{ heartbeat_id: string }>((resolve) => {
+            resolveHeartbeat = resolve;
+          })
+      ),
+    });
+    const client = new SignedClobTradingClient(createConfig(), sdk);
+    try {
+      const starting = client.startHeartbeat(1_000);
+      client.stopHeartbeat();
+      resolveHeartbeat?.({ heartbeat_id: 'hb-1' });
+      await starting;
+      await jest.advanceTimersByTimeAsync(2_000);
+
+      expect(sdk.postHeartbeat).toHaveBeenCalledTimes(1);
+    } finally {
+      client.stopHeartbeat();
+      jest.useRealTimers();
+    }
   });
 
   it('rejects an order lookup response with a missing or unknown side', async () => {
@@ -274,11 +346,82 @@ describe('SignedClobTradingClient', () => {
       apiKey: 'env-api-key',
       secret: 'env-secret',
       passphrase: 'env-passphrase',
-      signatureType: SignatureType.POLY_PROXY,
+      signatureType: SignatureTypeV2.POLY_PROXY,
       funderAddress: '0x1111111111111111111111111111111111111111',
       defaultTickSize: '0.01',
       negRisk: false,
       deferExec: false,
+    });
+  });
+
+  it('fails closed on an ambiguous pre-restart journal claim', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'signed-clob-restart-'));
+    const store = new FileOrderIdempotencyStore(directory);
+    store.claim('old-ambiguous-order', {
+      marketId: '1234567890',
+      side: 'buy',
+      size: 1,
+      price: 0.4,
+    });
+    const sdk = createSdk();
+    const client = new SignedClobTradingClient(
+      createConfig({ idempotencyDirectory: directory }),
+      sdk
+    );
+
+    await expect(
+      client.placeOrder({
+        idempotencyKey: 'new-order-after-restart',
+        marketId: '1234567890',
+        side: 'buy',
+        size: 1,
+        price: 0.4,
+      })
+    ).rejects.toThrow(/ambiguous pre-restart/);
+    expect(sdk.createAndPostOrder).not.toHaveBeenCalled();
+  });
+
+  it('reconciles a terminal pre-restart order before accepting a new one', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'signed-clob-restart-'));
+    const store = new FileOrderIdempotencyStore(directory);
+    store.claim('old-submitted-order', {
+      marketId: '1234567890',
+      side: 'buy',
+      size: 1,
+      price: 0.4,
+    });
+    store.markSubmitted('old-submitted-order', 'old-exchange-order');
+    const sdk = createSdk({
+      getOrder: jest.fn().mockImplementation((orderId: string) =>
+        Promise.resolve({
+          id: orderId,
+          asset_id: '1234567890',
+          side: 'BUY',
+          original_size: '1',
+          size_matched: '1',
+          price: '0.4',
+          status: 'matched',
+          created_at: 1_766_016_000,
+        })
+      ),
+    });
+    const client = new SignedClobTradingClient(
+      createConfig({ idempotencyDirectory: directory }),
+      sdk
+    );
+
+    await expect(
+      client.placeOrder({
+        idempotencyKey: 'new-order-after-terminal',
+        marketId: '1234567890',
+        side: 'buy',
+        size: 1,
+        price: 0.4,
+      })
+    ).resolves.toMatchObject({ status: 'filled' });
+    expect(store.get('old-submitted-order')).toMatchObject({
+      state: 'terminal',
+      terminalStatus: 'filled',
     });
   });
 });

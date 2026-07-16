@@ -23,4 +23,38 @@ describe('docker-compose runtime defaults', () => {
     expect(compose).toContain('file: ./.secrets/metrics-token');
     expect(prometheus).toContain('bearer_token_file: /run/secrets/metrics_token');
   });
+
+  it('binds every published administrative port to loopback', () => {
+    const compose = readFileSync(join(process.cwd(), 'docker-compose.yml'), 'utf8');
+
+    expect(compose).toContain('"127.0.0.1:3000:3000"');
+    expect(compose).toContain('"127.0.0.1:9090:9090"');
+    expect(compose).toContain('"127.0.0.1:3001:3000"');
+    expect(compose).not.toMatch(/^\s+-\s+"?(?:3000|3001|9090):/m);
+  });
+
+  it('pins service images and requires a file-backed Grafana password', () => {
+    const compose = readFileSync(join(process.cwd(), 'docker-compose.yml'), 'utf8');
+
+    expect(compose).not.toMatch(/^\s+image:\s+[^\n@]+(?::latest)?\s*$/m);
+    expect(compose).toContain(
+      'GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password'
+    );
+    expect(compose).toContain('GF_AUTH_ANONYMOUS_ENABLED: "false"');
+    expect(compose).toContain('file: ./.secrets/grafana-admin-password');
+    expect(compose).toContain(
+      './monitoring/grafana/provisioning:/etc/grafana/provisioning/dashboards:ro'
+    );
+    expect(compose).toContain('./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro');
+  });
+
+  it('runs the production daemon with a read-only root and no Linux capabilities', () => {
+    const compose = readFileSync(join(process.cwd(), 'docker-compose.yml'), 'utf8');
+
+    expect(compose).toContain('read_only: true');
+    expect(compose).toContain('no-new-privileges:true');
+    expect(compose).toContain('cap_drop:');
+    expect(compose).toContain('- ALL');
+    expect(compose).toContain('/tmp:size=64m,mode=1777');
+  });
 });

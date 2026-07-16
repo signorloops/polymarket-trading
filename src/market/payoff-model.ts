@@ -1,6 +1,7 @@
 import { solveLP } from '../optimization/lp-solver.js';
 
 const NUMERICAL_TOLERANCE = 1e-8;
+const CONSERVATIVE_TAKER_FEE_RATE = 0.07;
 
 /**
  * An explicit exhaustive terminal state for a group of related markets.
@@ -32,6 +33,8 @@ export interface ExecutableAskQuote {
   marketId: string;
   askPrice: number;
   availableSize: number;
+  /** Protocol taker fee rate for this market. Defaults to the current maximum category rate. */
+  takerFeeRate?: number;
 }
 
 export interface DollarPayoffOpportunity {
@@ -78,15 +81,21 @@ export function findDollarPayoffArbitrage(
       quote.askPrice <= 0 ||
       quote.askPrice >= 1 ||
       !Number.isFinite(quote.availableSize) ||
-      quote.availableSize <= 0
+      quote.availableSize <= 0 ||
+      (quote.takerFeeRate !== undefined &&
+        (!Number.isFinite(quote.takerFeeRate) || quote.takerFeeRate < 0 || quote.takerFeeRate > 1))
     ) {
       return null;
     }
   }
 
   const targetPayoutUsd = model.targetPayoutUsd ?? 1;
-  const feeMultiplier = 1 + model.feeBufferBps / 10_000;
-  const effectiveCosts = concreteQuotes.map((quote) => quote.askPrice * feeMultiplier);
+  const effectiveCosts = concreteQuotes.map((quote) => {
+    const feeRate = quote.takerFeeRate ?? CONSERVATIVE_TAKER_FEE_RATE;
+    const protocolFee = feeRate * quote.askPrice * (1 - quote.askPrice);
+    const operationalBuffer = quote.askPrice * (model.feeBufferBps / 10_000);
+    return quote.askPrice + protocolFee + operationalBuffer;
+  });
   const solution = solveLP({
     objective: effectiveCosts,
     inequalityMatrix: model.scenarios.map((scenario) => scenario.payouts.map((value) => -value)),
@@ -154,6 +163,7 @@ export function validatePayoffModel(model: CrossMarketPayoffModel): void {
   }
 
   const scenarioIds = new Set<string>();
+  const payoutVectors = new Set<string>();
   for (const scenario of model.scenarios) {
     if (scenario.id.trim() === '' || scenarioIds.has(scenario.id)) {
       throw new Error(`Payoff model ${model.id} has a missing or duplicate scenario id`);
@@ -162,9 +172,14 @@ export function validatePayoffModel(model: CrossMarketPayoffModel): void {
     if (scenario.payouts.length !== model.marketIds.length) {
       throw new Error(`Payoff model ${model.id} scenario ${scenario.id} has the wrong dimension`);
     }
-    if (scenario.payouts.some((payout) => !Number.isFinite(payout) || payout < 0)) {
+    if (scenario.payouts.some((payout) => !Number.isFinite(payout) || payout < 0 || payout > 1)) {
       throw new Error(`Payoff model ${model.id} scenario ${scenario.id} has an invalid payout`);
     }
+    const payoutKey = scenario.payouts.join('|');
+    if (payoutVectors.has(payoutKey)) {
+      throw new Error(`Payoff model ${model.id} contains duplicate terminal payout vectors`);
+    }
+    payoutVectors.add(payoutKey);
   }
 
   const target = model.targetPayoutUsd ?? 1;

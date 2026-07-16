@@ -30,10 +30,9 @@ export class CanaryKillSwitchPersistence implements CanaryKillSwitchStatePort {
 
   loadState(): CanaryKillSwitchState {
     if (!this.stateFilePath || !fs.existsSync(this.stateFilePath)) {
-      return {
-        active: false,
-        updatedAt: 0,
-      };
+      return this.createFailClosedState(
+        'Kill switch state file is missing; explicitly deactivate it before a real canary'
+      );
     }
 
     try {
@@ -63,12 +62,29 @@ export class CanaryKillSwitchPersistence implements CanaryKillSwitchStatePort {
     if (!this.stateFilePath) {
       throw new Error('Canary kill switch state path is required');
     }
+    if (!isCanaryKillSwitchState(state)) {
+      throw new Error('Canary kill switch state has an invalid schema');
+    }
 
+    const lockPath = `${this.stateFilePath}.lock`;
+    let lock: number | undefined;
+    let tempPath: string | undefined;
     try {
-      fs.mkdirSync(path.dirname(this.stateFilePath), { recursive: true });
-      const tempPath = `${this.stateFilePath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify(state, null, 2), 'utf8');
+      fs.mkdirSync(path.dirname(this.stateFilePath), { recursive: true, mode: 0o700 });
+      lock = fs.openSync(lockPath, 'wx', 0o600);
+      tempPath = `${this.stateFilePath}.${String(process.pid)}.${String(Date.now())}.tmp`;
+      fs.writeFileSync(tempPath, JSON.stringify(state, null, 2), {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
+      const temp = fs.openSync(tempPath, 'r');
+      try {
+        fs.fsyncSync(temp);
+      } finally {
+        fs.closeSync(temp);
+      }
       fs.renameSync(tempPath, this.stateFilePath);
+      fsyncDirectory(path.dirname(this.stateFilePath));
     } catch (error) {
       this.logger.error('Failed to persist canary kill switch state', {
         file: this.stateFilePath,
@@ -77,6 +93,22 @@ export class CanaryKillSwitchPersistence implements CanaryKillSwitchStatePort {
       throw new Error(`Failed to persist canary kill switch state: ${getErrorMessage(error)}`, {
         cause: error,
       });
+    } finally {
+      if (tempPath) {
+        try {
+          fs.rmSync(tempPath, { force: true });
+        } catch {
+          // Preserve the persistence result.
+        }
+      }
+      if (lock !== undefined) {
+        fs.closeSync(lock);
+        try {
+          fs.unlinkSync(lockPath);
+        } catch {
+          // Preserve the persistence result.
+        }
+      }
     }
   }
 
@@ -90,6 +122,15 @@ export class CanaryKillSwitchPersistence implements CanaryKillSwitchStatePort {
       updatedAt: this.now(),
       reason,
     };
+  }
+}
+
+function fsyncDirectory(directory: string): void {
+  const descriptor = fs.openSync(directory, 'r');
+  try {
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
   }
 }
 

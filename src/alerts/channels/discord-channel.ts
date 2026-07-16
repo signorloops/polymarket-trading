@@ -8,6 +8,8 @@ import type {
   DiscordConfig,
   NotificationChannel,
 } from '../types.js';
+import { getLogger } from '../../utils/logger.js';
+import { redactSecrets } from '../../utils/redact.js';
 
 /**
  * Color mapping for alert levels (Discord uses integer colors)
@@ -27,6 +29,7 @@ export class DiscordChannel implements NotificationChannel {
 
   private webhookUrl: string | null = null;
   private username: string;
+  private readonly logger = getLogger().child({ module: 'DiscordChannel' });
 
   constructor(config?: DiscordConfig) {
     if (config?.webhookUrl) {
@@ -48,7 +51,12 @@ export class DiscordChannel implements NotificationChannel {
     }
 
     try {
-      const payload = this.buildPayload(notification);
+      const payload = this.buildPayload({
+        ...notification,
+        ...(notification.metadata
+          ? { metadata: redactSecrets(notification.metadata) as Record<string, unknown> }
+          : {}),
+      });
 
       const response = await fetch(this.webhookUrl, {
         method: 'POST',
@@ -59,14 +67,13 @@ export class DiscordChannel implements NotificationChannel {
       });
 
       if (!response.ok) {
-        throw new Error(
-          `Discord webhook failed: ${String(response.status)} ${response.statusText}`
-        );
+        this.logger.warn('Discord webhook rejected notification', { status: response.status });
+        return false;
       }
 
       return true;
-    } catch (error) {
-      console.error('[DiscordChannel] Failed to send notification:', error);
+    } catch {
+      this.logger.error('Discord notification delivery failed');
       return false;
     }
   }
@@ -92,8 +99,8 @@ export class DiscordChannel implements NotificationChannel {
       });
 
       return response.ok;
-    } catch (error) {
-      console.error('[DiscordChannel] Test failed:', error);
+    } catch {
+      this.logger.error('Discord connectivity test failed');
       return false;
     }
   }

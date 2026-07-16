@@ -70,6 +70,13 @@ export const TradingMetrics = {
   positionSize: new Gauge('trading_position_size', 'Current position size'),
   positionPnl: new Gauge('trading_position_pnl', 'Unrealized P&L'),
   totalExposure: new Gauge('trading_total_exposure', 'Total exposure across all positions'),
+  dailyPnl: new Gauge('trading_daily_pnl', 'Current UTC trading-day realized P&L in USD'),
+  unrealizedPnl: new Gauge('trading_unrealized_pnl', 'Current unrealized P&L in USD'),
+  maxDrawdown: new Gauge('trading_max_drawdown', 'Current UTC trading-day max drawdown in USD'),
+  circuitBreakerOpen: new Gauge(
+    'trading_circuit_breaker_open',
+    'Risk circuit breaker state (1=open, 0=closed)'
+  ),
 
   // Arbitrage metrics
   arbitrageOpportunitiesFound: new Counter(
@@ -113,6 +120,10 @@ export const TradingMetrics = {
     'WebSocket reconnection count'
   ),
   websocketErrors: new Counter('trading_websocket_errors_total', 'WebSocket error count'),
+  websocketConnected: new Gauge(
+    'trading_websocket_connected',
+    'Market WebSocket connection state (1=connected, 0=disconnected)'
+  ),
 
   // Latency metrics (P50/P95/P99 tracking)
   orderBookUpdateLatency: new Histogram(
@@ -122,8 +133,13 @@ export const TradingMetrics = {
   ),
   arbitrageDetectionLatency: new Histogram(
     'trading_arbitrage_detection_latency_ms',
-    'Time from opportunity detection to execution start in milliseconds',
+    'Duration of one arbitrage detection cycle in milliseconds',
     [1, 5, 10, 25, 50, 100, 250, 500, 1000]
+  ),
+  arbitrageExecutionLatency: new Histogram(
+    'trading_arbitrage_execution_latency_ms',
+    'Multi-leg arbitrage execution and recovery latency in milliseconds',
+    [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000]
   ),
   wsMessageProcessingTime: new Histogram(
     'trading_ws_message_processing_ms',

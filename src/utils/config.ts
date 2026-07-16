@@ -16,21 +16,10 @@ if (result.error) {
   getLogger().warn('No .env file found, using default configuration');
 }
 
-// Parse and validate configuration
-let config: AppConfig;
-try {
-  config = parseConfigFromEnv();
-} catch (error) {
-  const logger = getLogger();
-  logger.error('Configuration validation failed', { error });
-  // Fall back to defaults in development
-  if (process.env.NODE_ENV !== 'production') {
-    logger.warn('Using default configuration');
-    config = createDefaultConfig();
-  } else {
-    throw error;
-  }
-}
+// Invalid environment values must always fail closed. Silently replacing the
+// entire configuration with defaults can hide a typo in a canary or operator
+// command and makes the process run with settings the operator never approved.
+const config = parseConfigFromEnv();
 
 /**
  * Algorithm parameters for Frank-Wolfe and Bregman projection

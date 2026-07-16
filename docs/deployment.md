@@ -33,7 +33,8 @@ cp .env.example .env
 
 ```env
 # === 网络配置 ===
-RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_HELIUS_API_KEY
+# Optional legacy Polygon transaction tracker (not required by the market-data daemon)
+RPC_URL=https://polygon-mainnet.example/v1/YOUR_API_KEY
 WS_URL=wss://ws-subscriptions-clob.polymarket.com/ws/market
 POLYMARKET_API_KEY=your_polymarket_api_key
 POLYMARKET_SECRET=your_polymarket_api_secret
@@ -72,7 +73,7 @@ RECONCILE_ON_STARTUP=false
 ALPHA=0.9
 INITIAL_EPSILON=0.1
 MAX_ITERATIONS=150
-MIN_PROFIT_THRESHOLD=0.05
+MIN_PROFIT_THRESHOLD=0.05 # 无量纲 KL 诊断阈值，不是美元利润
 CONVERGENCE_THRESHOLD=0.000001
 
 # === 交易参数 ===
@@ -138,7 +139,14 @@ docker run -d \
   --env-file .env \
   -v $(pwd)/config:/app/config:ro \
   --mount source=polymarket-state,target=/app/.state \
-  -p 3000:3000 \
+  -e HTTP_HOST=0.0.0.0 \
+  -e HTTP_METRICS_TOKEN_FILE=/run/secrets/metrics-token \
+  -v $(pwd)/.secrets/metrics-token:/run/secrets/metrics-token:ro \
+  -p 127.0.0.1:3000:3000 \
+  --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+  --cap-drop ALL \
+  --security-opt no-new-privileges \
   --restart unless-stopped \
   polymarket-trading:latest
 ```
@@ -154,7 +162,11 @@ docker logs -f polymarket-trading
 #### 1. 启动完整栈
 
 ```bash
-docker-compose up -d
+mkdir -p .secrets
+openssl rand -hex 32 > .secrets/metrics-token
+openssl rand -hex 32 > .secrets/grafana-admin-password
+chmod 600 .secrets/metrics-token .secrets/grafana-admin-password
+docker compose --profile monitoring up -d
 ```
 
 这将启动：
@@ -166,32 +178,32 @@ docker-compose up -d
 #### 2. 查看服务状态
 
 ```bash
-docker-compose ps
+docker compose ps
 ```
 
 #### 3. 查看日志
 
 ```bash
 # 所有服务
-docker-compose logs -f
+docker compose logs -f
 
 # 仅交易服务
-docker-compose logs -f trading-bot
+docker compose logs -f trading-bot
 
 # 仅监控服务
-docker-compose logs -f prometheus grafana
+docker compose logs -f prometheus grafana
 ```
 
 #### 4. 停止服务
 
 ```bash
-docker-compose down
+docker compose down
 ```
 
 #### 5. 重启服务
 
 ```bash
-docker-compose restart
+docker compose restart
 ```
 
 ## 生产环境部署
@@ -221,9 +233,8 @@ sudo apt install -y nodejs
 curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker $USER
 
-# 安装 Docker Compose
-sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-sudo chmod +x /usr/local/bin/docker-compose
+# Docker 官方安装脚本会安装 Compose plugin；验证版本
+docker compose version
 ```
 
 #### 2. 部署应用
@@ -241,8 +252,14 @@ nano .env  # 编辑配置
 mkdir -p config .state
 cp config/trading-system.example.json config/trading-system.json
 
+# 生成 Compose 所需的本地文件密钥（.secrets 已被 Git 忽略）
+mkdir -p .secrets
+openssl rand -hex 32 > .secrets/metrics-token
+openssl rand -hex 32 > .secrets/grafana-admin-password
+chmod 600 .secrets/metrics-token .secrets/grafana-admin-password
+
 # 使用 Docker Compose 启动
-docker-compose --profile monitoring up -d
+docker compose --profile monitoring up -d
 ```
 
 #### 3. 配置 Nginx 反向代理 (可选)
@@ -261,8 +278,9 @@ server {
         proxy_cache_bypass $http_upgrade;
     }
 
-    location /metrics {
-        proxy_pass http://localhost:3000/metrics;
+    # Metrics stay on the private Docker/loopback network for Prometheus.
+    location = /metrics {
+        return 404;
     }
 }
 ```
@@ -288,8 +306,8 @@ Requires=docker.service
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/opt/polymarket-trading
-ExecStart=/usr/local/bin/docker-compose up -d
-ExecStop=/usr/local/bin/docker-compose down
+ExecStart=/usr/bin/docker compose --profile monitoring up -d
+ExecStop=/usr/bin/docker compose down
 TimeoutStartSec=0
 
 [Install]
@@ -317,7 +335,7 @@ sudo systemctl status polymarket-trading
 #### 1. 访问 Grafana
 
 URL: `http://localhost:3001`
-默认账号: `admin/admin`
+账号为 `admin`，密码读取自 `.secrets/grafana-admin-password`；Compose 禁用了匿名访问与自行注册。
 
 #### 2. 配置数据源
 
@@ -387,7 +405,7 @@ find "$BACKUP_DIR" -name "*.tar.gz" -mtime +30 -delete
 cp $BACKUP_DIR/env_20240217_120000 .env
 
 # 重启服务
-docker-compose restart
+docker compose restart
 ```
 
 ## 故障排查
@@ -398,7 +416,7 @@ docker-compose restart
 
 ```bash
 # 检查日志
-docker-compose logs trading
+docker compose logs trading-bot
 
 # 检查端口冲突
 sudo lsof -i :3000
@@ -425,7 +443,7 @@ sudo swapon /swapfile
 curl -I https://ws-subscriptions-clob.polymarket.com
 
 # 检查日志中的重连信息
-docker-compose logs -f trading-bot | grep -i "reconnect"
+docker compose logs -f trading-bot | grep -i "reconnect"
 ```
 
 #### 4. 交易未执行
@@ -442,10 +460,10 @@ curl -H "Authorization: Bearer $HTTP_RISK_STATUS_TOKEN" \
 
 ```bash
 # 启用调试日志
-LOG_LEVEL=debug docker-compose up
+LOG_LEVEL=debug docker compose up
 
 # 进入容器调试
-docker-compose exec trading sh
+docker compose exec trading-bot sh
 ```
 
 ## 安全最佳实践
@@ -466,7 +484,8 @@ docker-compose exec trading sh
 ```bash
 mkdir -p .secrets
 openssl rand -hex 32 > .secrets/metrics-token
-chmod 600 .secrets/metrics-token
+openssl rand -hex 32 > .secrets/grafana-admin-password
+chmod 600 .secrets/metrics-token .secrets/grafana-admin-password
 curl -H "Authorization: Bearer $(cat .secrets/metrics-token)" \
   http://localhost:3000/metrics
 ```
@@ -500,10 +519,10 @@ git pull origin main
 npm install
 
 # 4. 重建镜像
-docker-compose build --no-cache
+docker compose build --no-cache
 
 # 5. 重启服务
-docker-compose up -d
+docker compose --profile monitoring up -d
 
 # 6. 验证升级
 curl http://localhost:3000/health
@@ -514,38 +533,38 @@ curl http://localhost:3000/health
 ```bash
 # 恢复到上一个版本
 git checkout HEAD~1
-docker-compose up -d --build
+docker compose --profile monitoring up -d --build
 ```
 
 ## 环境变量参考
 
-| 变量                         | 说明                                            | 默认值                           | 必填                                   |
-| ---------------------------- | ----------------------------------------------- | -------------------------------- | -------------------------------------- |
-| `RPC_URL`                    | Solana RPC 节点                                 | -                                | 是                                     |
-| `WS_URL`                     | Polymarket WebSocket                            | -                                | 是                                     |
-| `POLYMARKET_API_KEY`         | API 密钥                                        | -                                | canary 真单/签名客户端需要             |
-| `POLYMARKET_SECRET`          | CLOB API secret                                 | -                                | canary 真单必填                        |
-| `POLYMARKET_PASSPHRASE`      | CLOB API passphrase                             | -                                | canary 真单必填                        |
-| `POLYMARKET_CHAIN_ID`        | CLOB 签名链 ID                                  | 137                              | 否                                     |
-| `POLYMARKET_SIGNATURE_TYPE`  | CLOB 签名类型：0=EOA, 1=代理钱包, 2=Gnosis Safe | 0                                | canary 真单必填                        |
-| `POLYMARKET_FUNDER_ADDRESS`  | Polymarket profile/proxy funder 地址            | -                                | 代理钱包必填                           |
-| `TRADING_SYSTEM_CONFIG_PATH` | 守护进程配置文件路径                            | -                                | production daemon 必填                 |
-| `TRADING_SYSTEM_CONFIG_JSON` | 守护进程 JSON 配置                              | -                                | 与 `TRADING_SYSTEM_CONFIG_PATH` 二选一 |
-| `HTTP_HOST`                  | HTTP 监听地址（本地默认仅 loopback）             | 127.0.0.1                        | 否                                     |
-| `HTTP_PORT`                  | health/metrics HTTP 端口                        | 3000                             | 否                                     |
-| `HTTP_RISK_STATUS_TOKEN`     | 风险状态接口 Bearer token（至少 16 字符）        | -（接口关闭）                    | 否                                     |
-| `HTTP_METRICS_TOKEN`         | metrics Bearer token（非 loopback 监听时必需）   | -                                | 公网/容器监听必填                      |
-| `HTTP_METRICS_TOKEN_FILE`    | 从挂载文件读取 metrics token                    | -                                | 与内联 token 二选一                    |
-| `ORDER_IDEMPOTENCY_DIR`      | 跨进程订单唯一键日志目录                        | `.state/order-idempotency`       | 真单必需                               |
-| `RISK_STATE_FILE`            | 仓位、PnL 与 circuit breaker 持久化文件          | -                                | 自动实盘必需                           |
-| `RECONCILE_ON_STARTUP`       | 启动前全量读取配置 token 余额并对账              | false                            | 自动实盘必需                           |
-| `CANARY_TOKEN_ID`            | 单笔 canary 的 CLOB token id                    | -                                | canary 必填                            |
-| `CANARY_MAX_NOTIONAL_USD`    | 单笔 canary notional 上限，代码硬上限 5 USD     | 5                                | 否                                     |
-| `CANARY_DRY_RUN`             | canary dry-run 开关                             | true                             | 否                                     |
-| `CANARY_TRADING_ENABLED`     | canary 真实提交开关                             | false                            | canary 真实提交必填                    |
-| `CANARY_CONFIRMATION`        | canary 真实提交确认短语                         | -                                | canary 真实提交必填                    |
-| `CANARY_STATE_PATH`          | canary 状态文件路径                             | `.state/canary-trades.json`      | 否                                     |
-| `CANARY_KILL_SWITCH_PATH`    | canary kill switch 状态文件路径                 | `.state/canary-kill-switch.json` | 否                                     |
+| 变量                         | 说明                                           | 默认值                           | 必填                                   |
+| ---------------------------- | ---------------------------------------------- | -------------------------------- | -------------------------------------- |
+| `RPC_URL`                    | 可选的旧 Polygon 交易追踪 RPC                  | -                                | 否                                     |
+| `WS_URL`                     | Polymarket WebSocket                           | -                                | 是                                     |
+| `POLYMARKET_API_KEY`         | API 密钥                                       | -                                | canary 真单/签名客户端需要             |
+| `POLYMARKET_SECRET`          | CLOB API secret                                | -                                | canary 真单必填                        |
+| `POLYMARKET_PASSPHRASE`      | CLOB API passphrase                            | -                                | canary 真单必填                        |
+| `POLYMARKET_CHAIN_ID`        | CLOB 签名链 ID                                 | 137                              | 否                                     |
+| `POLYMARKET_SIGNATURE_TYPE`  | CLOB 签名：0=EOA, 1=代理, 2=Safe, 3=EIP-1271   | 0                                | canary 真单必填                        |
+| `POLYMARKET_FUNDER_ADDRESS`  | Polymarket profile/proxy funder 地址           | -                                | 代理钱包必填                           |
+| `TRADING_SYSTEM_CONFIG_PATH` | 守护进程配置文件路径                           | -                                | production daemon 必填                 |
+| `TRADING_SYSTEM_CONFIG_JSON` | 守护进程 JSON 配置                             | -                                | 与 `TRADING_SYSTEM_CONFIG_PATH` 二选一 |
+| `HTTP_HOST`                  | HTTP 监听地址（本地默认仅 loopback）           | 127.0.0.1                        | 否                                     |
+| `HTTP_PORT`                  | health/metrics HTTP 端口                       | 3000                             | 否                                     |
+| `HTTP_RISK_STATUS_TOKEN`     | 风险状态接口 Bearer token（至少 16 字符）      | -（接口关闭）                    | 否                                     |
+| `HTTP_METRICS_TOKEN`         | metrics Bearer token（非 loopback 监听时必需） | -                                | 公网/容器监听必填                      |
+| `HTTP_METRICS_TOKEN_FILE`    | 从挂载文件读取 metrics token                   | -                                | 与内联 token 二选一                    |
+| `ORDER_IDEMPOTENCY_DIR`      | 跨进程订单唯一键日志目录                       | `.state/order-idempotency`       | 真单必需                               |
+| `RISK_STATE_FILE`            | 仓位、PnL 与 circuit breaker 持久化文件        | -                                | 自动实盘必需                           |
+| `RECONCILE_ON_STARTUP`       | 启动前全量读取配置 token 余额并对账            | false                            | 自动实盘必需                           |
+| `CANARY_TOKEN_ID`            | 单笔 canary 的 CLOB token id                   | -                                | canary 必填                            |
+| `CANARY_MAX_NOTIONAL_USD`    | 单笔 canary notional 上限，代码硬上限 5 USD    | 5                                | 否                                     |
+| `CANARY_DRY_RUN`             | canary dry-run 开关                            | true                             | 否                                     |
+| `CANARY_TRADING_ENABLED`     | canary 真实提交开关                            | false                            | canary 真实提交必填                    |
+| `CANARY_CONFIRMATION`        | canary 真实提交确认短语                        | -                                | canary 真实提交必填                    |
+| `CANARY_STATE_PATH`          | canary 状态文件路径                            | `.state/canary-trades.json`      | 否                                     |
+| `CANARY_KILL_SWITCH_PATH`    | canary kill switch 状态文件路径                | `.state/canary-kill-switch.json` | 否                                     |
 
 ## Canary Runbook
 

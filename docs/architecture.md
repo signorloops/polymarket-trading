@@ -2,7 +2,7 @@
 
 ## 系统概述
 
-Polymarket 套利交易系统是一个基于边际多面体理论和凸优化的高频交易系统。系统采用模块化设计，核心组件松耦合，便于测试和扩展。
+Polymarket 套利系统是一个基于边际多面体理论和凸优化的研究与模拟交易系统。系统采用模块化设计，核心组件松耦合，便于测试和扩展。
 
 ## 架构图
 
@@ -11,7 +11,7 @@ Polymarket 套利交易系统是一个基于边际多面体理论和凸优化的
 │                         数据输入层                               │
 ├─────────────────────────────────────────────────────────────────┤
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │
-│  │ Polymarket REST │  │ Polymarket WS   │  │  Helius RPC     │  │
+│  │ Polymarket REST │  │ Polymarket WS   │  │ Polygon RPC*    │  │
 │  │    API Client   │  │   WebSocket     │  │   (区块链)       │  │
 │  └────────┬────────┘  └────────┬────────┘  └─────────────────┘  │
 └───────────┼────────────────────┼────────────────────────────────┘
@@ -131,10 +131,12 @@ Polymarket 套利交易系统是一个基于边际多面体理论和凸优化的
 ├─────────────────────────────────────────────────────────────────┤
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
 │  │   Logger    │  │  Metrics    │  │ Prometheus  │             │
-│  │  (Pino)     │  │  (自定义)    │  │  (导出)     │             │
+│  │  (自定义)    │  │  (自定义)    │  │  (导出)     │             │
 │  └─────────────┘  └─────────────┘  └─────────────┘             │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+`Polygon RPC*` 仅供已废弃的交易追踪学习模块使用；市场数据守护进程和 CLOB V2 适配层不依赖 RPC。
 
 ## 核心算法详解
 
@@ -143,6 +145,7 @@ Polymarket 套利交易系统是一个基于边际多面体理论和凸优化的
 **用途**: 在边际多面体上最小化 KL 散度
 
 **算法流程**:
+
 ```
 1. 初始化 μ_0 ∈ M
 2. for t = 0 to T:
@@ -155,6 +158,7 @@ Polymarket 套利交易系统是一个基于边际多面体理论和凸优化的
 ```
 
 **优化**:
+
 - Float64Array 对象池减少内存分配
 - 真实目标函数线搜索（line-search + golden-section）
 - 稀疏约束处理加速 LMO
@@ -167,6 +171,7 @@ Polymarket 套利交易系统是一个基于边际多面体理论和凸优化的
 **用途**: 将价格向量投影到边际多面体
 
 **算法**: 迭代比例拟合 (IPF)
+
 ```
 1. 初始化 μ = uniform distribution
 2. repeat:
@@ -178,6 +183,7 @@ Polymarket 套利交易系统是一个基于边际多面体理论和凸优化的
 ```
 
 **优化**:
+
 - 只处理非零系数（稀疏约束）
 - 原地操作避免数组拷贝
 - 提前终止检查
@@ -187,6 +193,7 @@ Polymarket 套利交易系统是一个基于边际多面体理论和凸优化的
 **用途**: 高性能订单簿管理
 
 **结构**:
+
 ```
 Level 3:  head ────────► node4 ─────────────► null
 Level 2:  head ──► node2 ──► node4 ──► node6 ──► null
@@ -194,6 +201,7 @@ Level 1:  head ──► node1 ──► node2 ──► node4 ──► node5 �
 ```
 
 **复杂度**:
+
 - 插入: O(log n)
 - 删除: O(log n)
 - 查找: O(log n)
@@ -201,20 +209,24 @@ Level 1:  head ──► node1 ──► node2 ──► node4 ──► node5 �
 - 深度维护: O(1) 增量更新（非全量重算）
 
 **对比排序数组**:
-- 插入: O(n log n) → O(log n) **提升 100x**
-- 删除: O(n) → O(log n) **提升 100x**
+
+- 插入: O(n) → 期望 O(log n)
+- 删除: O(n) → 期望 O(log n)
 
 ### 4. 跨市场约束与求解器
 
 **DependencyGraph 约束构建**:
+
 - `addMarket()` 自动补全/更新 event 节点，避免“仅添加 market 时缺失事件等式约束”。
 - 构建约束矩阵时使用 `marketId -> index` 映射，避免重复 `indexOf` 查找。
 
 **目标函数与可行初值**:
+
 - 跨市场套利使用广义 KL 散度，适配未归一化非负向量。
 - 初始点按事件等式约束构造可行 `mu`，避免一开始落在不可行域。
 
 **LP/IP 求解**:
+
 - LP 与 MILP 优先走 `javascript-lp-solver`。
 - 保留输入维度校验、求解后可行性校验。
 - IP 在后端不可用或失败时回退到分支定界。
@@ -269,12 +281,13 @@ core/                     market/                    execution/
 ### 1. 内存优化
 
 **Float64Array Pool**:
+
 ```typescript
 // 重用缓冲区，避免频繁分配
 const pool = new Float64ArrayPool(n, 10);
-const buffer = pool.acquire();  // 从池中获取
+const buffer = pool.acquire(); // 从池中获取
 // ... 使用 ...
-pool.release(buffer);  // 归还池中
+pool.release(buffer); // 归还池中
 ```
 
 **效果**: 减少 90% 的 GC 停顿时间
@@ -282,34 +295,34 @@ pool.release(buffer);  // 归还池中
 ### 2. 算法优化
 
 **稀疏约束处理**:
+
 ```typescript
 // 只存储非零系数
 interface SparseConstraint {
-  indices: number[];      // 非零索引
+  indices: number[]; // 非零索引
   coefficients: number[]; // 非零系数
   rhs: number;
 }
 ```
 
-**效果**: 约束处理速度提升 3-5x
+**效果**: 减少零系数遍历；实际增益应以 `npm run benchmark` 在目标硬件上的结果为准。
 
 ### 3. 数据结构优化
 
 **SkipList vs 排序数组**:
 
-| 操作 | 排序数组 | SkipList | 提升 |
-|------|---------|----------|------|
-| 插入 | O(n log n) | O(log n) | 100x |
-| 删除 | O(n) | O(log n) | 100x |
-| 查找 | O(log n) | O(log n) | 相同 |
+| 操作 | 排序数组 | SkipList      | 提升                 |
+| ---- | -------- | ------------- | -------------------- |
+| 插入 | O(n)     | 期望 O(log n) | 取决于深度分布与规模 |
+| 删除 | O(n)     | 期望 O(log n) | 取决于深度分布与规模 |
+| 查找 | O(log n) | 期望 O(log n) | 同阶                 |
 
 ### 4. 并发优化
 
 **并行订单执行**:
+
 ```typescript
-await Promise.all(
-  legs.map(leg => this.executeOrder(leg))
-);
+await Promise.all(legs.map((leg) => this.executeOrder(leg)));
 ```
 
 ## 扩展性设计
@@ -317,6 +330,7 @@ await Promise.all(
 ### 添加新策略
 
 1. 实现 `BaseStrategy` 接口:
+
 ```typescript
 class MyStrategy extends BaseStrategy {
   analyze(marketData: MarketData[]): TradingSignal | null {
@@ -326,6 +340,7 @@ class MyStrategy extends BaseStrategy {
 ```
 
 2. 注册到 StrategyManager:
+
 ```typescript
 strategyManager.registerStrategy(new MyStrategy());
 ```
@@ -333,14 +348,16 @@ strategyManager.registerStrategy(new MyStrategy());
 ### 添加新数据源
 
 1. 实现数据适配器:
+
 ```typescript
 class NewExchangeAdapter {
-  async connect(): Promise<void> { }
-  subscribe(handler: DataHandler): void { }
+  async connect(): Promise<void> {}
+  subscribe(handler: DataHandler): void {}
 }
 ```
 
 2. 集成到 DataPipeline:
+
 ```typescript
 pipeline.addAdapter(new NewExchangeAdapter());
 ```
@@ -372,16 +389,19 @@ pipeline.addAdapter(new NewExchangeAdapter());
 ## 监控指标
 
 ### 业务指标
+
 - `arbitrage_opportunities_total`: 套利机会检测数
 - `trade_executions_total`: 交易执行数
 - `pnl_usd`: 累计盈亏
 
 ### 系统指标
+
 - `algorithm_latency_ms`: 算法执行延迟
 - `memory_usage_mb`: 内存使用
 - `gc_pause_ms`: GC 停顿时间
 
 ### 风险指标
+
 - `position_exposure_usd`: 当前敞口
 - `daily_loss_usd`: 当日损失
 - `risk_manager_blocks_total`: 风险拦截次数

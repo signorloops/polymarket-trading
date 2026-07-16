@@ -19,6 +19,13 @@ export function redactSecrets(value: unknown, seen: WeakSet<object> = new WeakSe
   if (value === null || typeof value !== 'object') return value;
   if (seen.has(value)) return '[Circular]';
   seen.add(value);
+  if (value instanceof Error) {
+    return {
+      name: value.name,
+      message: value.message,
+      ...(value.cause === undefined ? {} : { cause: redactSecrets(value.cause, seen) }),
+    };
+  }
   if (Array.isArray(value)) {
     return value.map((v) => redactSecrets(v, seen));
   }

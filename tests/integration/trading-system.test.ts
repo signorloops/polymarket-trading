@@ -92,6 +92,9 @@ describe('Trading System Integration', () => {
 
       const system = new PolymarketTradingSystem(config);
       await system.initialize();
+      const books = getOrderBookManager();
+      books.updateBook('market-yes', [], [{ price: 0.5, size: 100 }], Date.now(), 'snapshot');
+      books.updateBook('market-no', [], [{ price: 0.4, size: 100 }], Date.now(), 'snapshot');
 
       // Run detection cycle
       const opportunities = await system.runDetectionCycle();
@@ -178,7 +181,7 @@ describe('Trading System Integration', () => {
       });
 
       // Try to create position exceeding limit
-      const result = riskManager.checkTrade('market-1', 2000, 'buy', 2000);
+      const result = riskManager.checkTrade('market-1', 3000, 'buy', 1500);
 
       expect(result.allowed).toBe(false);
       expect(result.riskLevel).toBe('high');
@@ -741,7 +744,7 @@ describe('Trading System Integration', () => {
       expect(() => system.initialize()).not.toThrow();
     });
 
-    it('should reject live trading configuration until CLOB execution is implemented', async () => {
+    it('should reject live trading configuration while automatic execution remains gated', async () => {
       const config: TradingSystemConfig = {
         liveTrading: true,
         markets: ['market-1'],
@@ -754,7 +757,7 @@ describe('Trading System Integration', () => {
       };
 
       const system = new PolymarketTradingSystem(config);
-      expect(() => system.initialize()).toThrow(/Live trading is disabled/);
+      expect(() => system.initialize()).toThrow(/Automatic live trading is disabled/);
     });
 
     it('should prevent multiple start calls', async () => {
@@ -1008,7 +1011,7 @@ describe('Trading System Integration', () => {
       expect(result).toBe(true);
     });
 
-    it('should reject cross-market execution until a dollar payoff model exists', async () => {
+    it('rejects automatic cross-market execution while multi-leg safety gates remain closed', async () => {
       const config: TradingSystemConfig = {
         liveTrading: false,
         markets: ['market-a', 'market-b', 'market-c'],

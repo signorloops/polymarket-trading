@@ -5,6 +5,8 @@
 import nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
 import type { AlertLevel, AlertNotification, EmailConfig, NotificationChannel } from '../types.js';
+import { getLogger } from '../../utils/logger.js';
+import { redactSecrets } from '../../utils/redact.js';
 
 /**
  * Email notification channel
@@ -15,6 +17,7 @@ export class EmailChannel implements NotificationChannel {
 
   private transporter: Transporter | null = null;
   private config: EmailConfig | null = null;
+  private readonly logger = getLogger().child({ module: 'EmailChannel' });
 
   constructor(config?: EmailConfig) {
     if (config?.smtp.host && config.from && config.to.length > 0) {
@@ -44,21 +47,22 @@ export class EmailChannel implements NotificationChannel {
     }
 
     try {
-      const html = this.buildHtml(notification);
-      const text = this.buildText(notification);
+      const safeNotification = this.sanitizeNotification(notification);
+      const html = this.buildHtml(safeNotification);
+      const text = this.buildText(safeNotification);
 
       await this.transporter.sendMail({
         from: this.config.from,
         to: this.config.to.join(', '),
-        subject: `[${notification.level.toUpperCase()}] ${notification.title}`,
+        subject: `[${safeNotification.level.toUpperCase()}] ${safeNotification.title}`,
         text,
         html,
-        priority: this.getPriority(notification.level),
+        priority: this.getPriority(safeNotification.level),
       });
 
       return true;
-    } catch (error) {
-      console.error('[EmailChannel] Failed to send notification:', error);
+    } catch {
+      this.logger.error('Email notification delivery failed');
       return false;
     }
   }
@@ -74,8 +78,8 @@ export class EmailChannel implements NotificationChannel {
     try {
       await this.transporter.verify();
       return true;
-    } catch (error) {
-      console.error('[EmailChannel] Test failed:', error);
+    } catch {
+      this.logger.error('Email connectivity test failed');
       return false;
     }
   }
@@ -255,5 +259,14 @@ Time: ${notification.timestamp.toISOString()}
       return value.description ?? 'Symbol';
     }
     return '[Function]';
+  }
+
+  private sanitizeNotification(notification: AlertNotification): AlertNotification {
+    return notification.metadata
+      ? {
+          ...notification,
+          metadata: redactSecrets(notification.metadata) as Record<string, unknown>,
+        }
+      : notification;
   }
 }

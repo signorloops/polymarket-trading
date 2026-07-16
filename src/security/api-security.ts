@@ -78,7 +78,8 @@ export class ApiKeyManager {
    */
   getCurrentCredentials(): ApiCredentials | null {
     if (!this.currentKeyId) return null;
-    return this.credentials.get(this.currentKeyId) ?? null;
+    const credentials = this.credentials.get(this.currentKeyId);
+    return credentials ? { ...credentials } : null;
   }
 
   /**
@@ -188,6 +189,12 @@ export class RateLimiter {
   private logger = getLogger().child({ module: 'RateLimiter' });
 
   constructor(maxRequests = 100, windowMs = 60000) {
+    if (!Number.isInteger(maxRequests) || maxRequests <= 0) {
+      throw new Error('Rate limiter maxRequests must be a positive integer');
+    }
+    if (!Number.isFinite(windowMs) || windowMs <= 0) {
+      throw new Error('Rate limiter windowMs must be greater than zero');
+    }
     this.maxRequests = maxRequests;
     this.windowMs = windowMs;
   }
@@ -211,6 +218,13 @@ export class RateLimiter {
     const entry = this.limits.get(key);
 
     if (!entry || now > entry.resetTime) {
+      if (!entry && this.limits.size >= RateLimiter.MAX_ENTRIES) {
+        this.logger.warn('RateLimiter rejected a new key at capacity', {
+          size: this.limits.size,
+          cap: RateLimiter.MAX_ENTRIES,
+        });
+        return false;
+      }
       // New window
       this.limits.set(key, {
         count: 1,
@@ -250,7 +264,7 @@ export class RateLimiter {
    */
   getRemaining(key: string): number {
     const entry = this.limits.get(key);
-    if (!entry) return this.maxRequests;
+    if (!entry || Date.now() > entry.resetTime) return this.maxRequests;
     return Math.max(0, this.maxRequests - entry.count);
   }
 

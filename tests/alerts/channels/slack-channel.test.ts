@@ -104,6 +104,15 @@ describe('SlackChannel', () => {
       expect(fields[0].value).toBe('us-east');
     });
 
+    it('redacts secret metadata when used without the alert service', async () => {
+      const channel = new SlackChannel({ webhookUrl: mockWebhookUrl });
+      await channel.send(makeNotification({ metadata: { apiKey: 'TOP-SECRET' } }));
+
+      const payload = JSON.stringify(mockWebhookSend.mock.calls[0]);
+      expect(payload).not.toContain('TOP-SECRET');
+      expect(payload).toContain('[REDACTED]');
+    });
+
     it('should include blocks with header and section', async () => {
       const channel = new SlackChannel({ webhookUrl: mockWebhookUrl });
       await channel.send(makeNotification({ level: 'info', title: 'Info Alert' }));

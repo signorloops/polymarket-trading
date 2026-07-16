@@ -3,7 +3,7 @@
  */
 
 import { getLogger } from '../utils/logger.js';
-import { TradingMetrics, recordTrade, recordArbitrage } from '../utils/metrics.js';
+import { TradingMetrics, recordTrade } from '../utils/metrics.js';
 import { sendAlert } from '../alerts/index.js';
 import type { OrderStatus, TradeLeg, TradeOrder, ExecutionResult } from './types.js';
 
@@ -29,17 +29,14 @@ export function recordOrderMetrics(
 }
 
 /**
- * Record arbitrage execution result and detection latency.
+ * Record a multi-leg execution result and end-to-end execution/recovery latency.
  */
 export function recordArbitrageMetrics(
-  arbitrageId: string,
+  _arbitrageId: string,
   result: ExecutionResult,
-  detectionLatencyMs: number
+  executionLatencyMs: number
 ): void {
-  TradingMetrics.arbitrageDetectionLatency.observe(
-    { arbitrage_id: arbitrageId },
-    detectionLatencyMs
-  );
+  TradingMetrics.arbitrageExecutionLatency.observe({}, executionLatencyMs);
 
   // Arbitrage profit is NOT known at execution time — it realizes only at market
   // resolution, and ExecutionResult carries no per-leg side to compute signed cash
@@ -47,7 +44,11 @@ export function recordArbitrageMetrics(
   // "profit" that polluted the arbitrageProfit gauge and any alerting on it.
   // Execution is still observable (arbitrageExecuted counter + totalFilled); real
   // realized P&L must be computed at settlement, not invented here.
-  recordArbitrage(arbitrageId, 0, result.success, 0);
+  if (result.success) {
+    TradingMetrics.arbitrageExecuted.inc({ type: 'multi-leg' });
+  } else {
+    TradingMetrics.arbitrageFailed.inc({ type: 'multi-leg' });
+  }
 }
 
 /**
@@ -90,10 +91,10 @@ export function legsToOrders(legs: TradeLeg[], arbitrageId: string): TradeOrder[
     side: leg.side,
     size: leg.size,
     price: leg.expectedPrice,
-    orderType: 'limit' as const,
-    // The signed CLOB adapter currently supports GTC limit orders. Multi-leg
-    // atomicity is not implied; ExecutionEngine performs compensating recovery.
-    timeInForce: 'GTC' as const,
+    // FOK bounds each leg's partial-fill risk. Polymarket still offers no
+    // cross-order atomic transaction, so compensating recovery remains required.
+    orderType: 'market' as const,
+    timeInForce: 'FOK' as const,
   }));
 }
 

@@ -46,6 +46,21 @@ describe('Counter', () => {
     expect(counter.get({ method: 'POST' })).toBe(2);
   });
 
+  it('canonicalizes label order and escapes untrusted label values', () => {
+    counter.inc({ route: 'line\n"quoted"\\path', method: 'GET' });
+    counter.inc({ method: 'GET', route: 'line\n"quoted"\\path' });
+
+    expect(counter.get({ method: 'GET', route: 'line\n"quoted"\\path' })).toBe(2);
+    expect(counter.toPrometheusFormat()).toContain(
+      'method="GET",route="line\\n\\"quoted\\"\\\\path"'
+    );
+  });
+
+  it('rejects invalid numeric values that would corrupt the scrape payload', () => {
+    expect(() => counter.inc({}, Number.NaN)).toThrow(/finite/);
+    expect(() => counter.inc({}, -1)).toThrow(/non-negative/);
+  });
+
   it('should return 0 for unregistered label set', () => {
     counter.inc({ method: 'GET' });
     expect(counter.get({ method: 'DELETE' })).toBe(0);
@@ -113,6 +128,10 @@ describe('Gauge', () => {
     expect(gauge.get()).toBe(-5);
   });
 
+  it('rejects non-finite values', () => {
+    expect(() => gauge.set({}, Number.POSITIVE_INFINITY)).toThrow(/finite/);
+  });
+
   it('should inc from zero when no existing value (else branch)', () => {
     gauge.inc({}, 3);
     expect(gauge.get()).toBe(3);
@@ -126,6 +145,14 @@ describe('Gauge', () => {
   it('should return 0 for unregistered label set', () => {
     gauge.set({ host: 'a' }, 10);
     expect(gauge.get({ host: 'b' })).toBe(0);
+  });
+
+  it('clears stale label sets', () => {
+    gauge.set({ market: 'old' }, 10);
+    gauge.clear();
+
+    expect(gauge.get({ market: 'old' })).toBe(0);
+    expect(gauge.toPrometheusFormat().split('\n')).toHaveLength(2);
   });
 
   it('should output only HELP/TYPE lines when no values', () => {
@@ -185,6 +212,16 @@ describe('Histogram', () => {
     const output = histogram.toPrometheusFormat();
     expect(output).toContain('env="prod"');
     expect(output).toContain('env="staging"');
+  });
+
+  it('preserves escaped labels without confusing them with histogram buckets', () => {
+    histogram.observe({ source: 'a,b="c"\n' }, 0.2);
+
+    expect(histogram.toPrometheusFormat()).toContain('source="a,b=\\"c\\"\\n"');
+  });
+
+  it('rejects non-finite observations', () => {
+    expect(() => histogram.observe({}, Number.NaN)).toThrow(/finite/);
   });
 
   it('should return empty maps from snapshots when no data', () => {

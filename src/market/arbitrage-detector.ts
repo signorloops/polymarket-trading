@@ -18,6 +18,7 @@ import {
 import { generalizedKLDivergence } from '../utils/math.js';
 import { getLogger } from '../utils/logger.js';
 import { ALGORITHM_CONFIG } from '../utils/config.js';
+import { TradingMetrics } from '../utils/metrics.js';
 import { OrderBook } from './order-book.js';
 import { createSingleton } from '../utils/singleton.js';
 import {
@@ -59,18 +60,30 @@ export interface CrossMarketIncoherenceDiagnostic {
   lowerBoundNats: number;
 }
 
+export interface ArbitrageDetectorOptions {
+  maxOrderBookAgeMs?: number;
+  maxSingleMarketShares?: number;
+  conservativeTakerFeeRate?: number;
+}
+
 export class ArbitrageDetector {
   private polytope: MarginalPolytope;
   private logger = getLogger().child({ module: 'ArbitrageDetector' });
   private lastResults: Map<string, BregmanProjectionResult> = new Map();
   private payoffModels: CrossMarketPayoffModel[];
+  private readonly maxOrderBookAgeMs: number;
+  private readonly maxSingleMarketShares: number;
+  private readonly conservativeTakerFeeRate: number;
 
-  constructor(payoffModels: CrossMarketPayoffModel[] = []) {
+  constructor(payoffModels: CrossMarketPayoffModel[] = [], options: ArbitrageDetectorOptions = {}) {
     this.polytope = new MarginalPolytope();
     for (const model of payoffModels) {
       validatePayoffModel(model);
     }
     this.payoffModels = [...payoffModels];
+    this.maxOrderBookAgeMs = options.maxOrderBookAgeMs ?? 5000;
+    this.maxSingleMarketShares = options.maxSingleMarketShares ?? 100;
+    this.conservativeTakerFeeRate = options.conservativeTakerFeeRate ?? 0.07;
   }
 
   setPayoffModels(payoffModels: CrossMarketPayoffModel[]): void {
@@ -176,6 +189,8 @@ export class ArbitrageDetector {
     // which this Frank-Wolfe-on-probabilities formulation does not expose. Until
     // that payoff model exists, cross-market execution must use findDollarPayoffArbitrage.
     const lowerBoundNats = fwResult.objective - fwResult.gap;
+    TradingMetrics.frankWolfeIterations.observe({}, fwResult.iterations);
+    TradingMetrics.frankWolfeGap.observe({}, fwResult.gap);
 
     if (isSignificantIncoherence(fwResult, ALGORITHM_CONFIG.MIN_PROFIT_THRESHOLD)) {
       this.logger.info(`Cross-market probability incoherence detected`, {
@@ -204,31 +219,16 @@ export class ArbitrageDetector {
   findAllOpportunities(orderBooks: Map<string, OrderBook> = new Map()): ArbitrageOpportunity[] {
     const opportunities: ArbitrageOpportunity[] = [];
     const timestamp = Date.now();
-    const expiresAt = timestamp + 60000; // 1 minute validity
-
-    // Single-market arbitrage
-    const singleMarket = this.detectSingleMarketArbitrage();
-    for (const arb of singleMarket) {
-      opportunities.push({
-        id: `single-${arb.eventId}-${String(timestamp)}`,
-        type: 'single-market',
-        markets: [arb.yesMarketId, arb.noMarketId],
-        expectedProfit: arb.profitPotential,
-        guaranteedProfit: arb.profitPotential * 0.9, // Conservative estimate
-        profitUnit: 'USD',
-        confidence: Math.min(arb.deviation * 10, 1),
-        tradeDirection: this.computeSingleMarketTrade(arb),
-        timestamp,
-        expiresAt,
-      });
-    }
+    opportunities.push(...this.findExecutableSingleMarketOpportunities(orderBooks, timestamp));
 
     // Cross-market execution candidates must come from an explicit terminal
     // payoff model and executable asks. The KL diagnostic above remains useful
     // for research, but is dimensionless and is never returned as USD profit.
     for (const model of this.payoffModels) {
       const quotes = model.marketIds.flatMap((marketId) => {
-        const ask = orderBooks.get(marketId)?.getBestAsk();
+        const book = orderBooks.get(marketId);
+        const ask =
+          book && !book.isStale(this.maxOrderBookAgeMs, timestamp) ? book.getBestAsk() : null;
         return ask ? [{ marketId, askPrice: ask.price, availableSize: ask.size }] : [];
       });
       const crossMarket = findDollarPayoffArbitrage(model, quotes);
@@ -262,7 +262,12 @@ export class ArbitrageDetector {
         confidence: Math.min(Math.max(crossMarket.returnOnCost, 0), 1),
         tradeDirection: crossMarket.quantities,
         timestamp,
-        expiresAt,
+        expiresAt:
+          Math.min(
+            ...crossMarket.marketIds.map(
+              (marketId) => orderBooks.get(marketId)?.getTimestamp() ?? timestamp
+            )
+          ) + this.maxOrderBookAgeMs,
       });
     }
 
@@ -325,15 +330,66 @@ export class ArbitrageDetector {
     return fwLinearMinimizationOracle(gradient, constraints);
   }
 
-  private computeSingleMarketTrade(arb: SingleMarketArbitrage): number[] {
-    // Trade direction: positive = buy, negative = sell
-    if (arb.sum < 1) {
-      // Buy both YES and NO
-      return [1 - arb.yesPrice, 1 - arb.noPrice];
-    } else {
-      // Sell both (represented as negative buy)
-      return [-arb.yesPrice, -arb.noPrice];
+  private findExecutableSingleMarketOpportunities(
+    orderBooks: Map<string, OrderBook>,
+    timestamp: number
+  ): ArbitrageOpportunity[] {
+    const opportunities: ArbitrageOpportunity[] = [];
+    for (const event of this.getEventsFromPolytope()) {
+      const yes = event.markets.find((market) => market.outcome === 'YES');
+      const no = event.markets.find((market) => market.outcome === 'NO');
+      if (!yes || !no) continue;
+
+      const yesBook = orderBooks.get(yes.id);
+      const noBook = orderBooks.get(no.id);
+      if (
+        !yesBook ||
+        !noBook ||
+        yesBook.isStale(this.maxOrderBookAgeMs, timestamp) ||
+        noBook.isStale(this.maxOrderBookAgeMs, timestamp)
+      ) {
+        continue;
+      }
+
+      const size = Math.min(
+        yesBook.getAskDepth(),
+        noBook.getAskDepth(),
+        this.maxSingleMarketShares
+      );
+      if (!Number.isFinite(size) || size <= 0) continue;
+
+      const yesExecution = yesBook.calculateTakerExecutionCost(
+        size,
+        'buy',
+        this.conservativeTakerFeeRate
+      );
+      const noExecution = noBook.calculateTakerExecutionCost(
+        size,
+        'buy',
+        this.conservativeTakerFeeRate
+      );
+      if (yesExecution.remainingSize > 1e-8 || noExecution.remainingSize > 1e-8) continue;
+
+      const totalCost = yesExecution.totalCost + noExecution.totalCost;
+      const guaranteedProfit = size - totalCost;
+      if (!Number.isFinite(guaranteedProfit) || guaranteedProfit <= 1e-8) continue;
+
+      const expiresAt =
+        Math.min(yesBook.getTimestamp(), noBook.getTimestamp()) + this.maxOrderBookAgeMs;
+      opportunities.push({
+        id: `single-${event.id}-${String(timestamp)}`,
+        type: 'single-market',
+        markets: [yes.id, no.id],
+        expectedProfit: guaranteedProfit,
+        guaranteedProfit,
+        profitUnit: 'USD',
+        confidence: Math.min(Math.max(guaranteedProfit / Math.max(totalCost, 1e-8), 0), 1),
+        tradeDirection: [size, size],
+        timestamp,
+        expiresAt,
+      });
     }
+    return opportunities;
   }
 
   private getEventsFromPolytope(): Event[] {

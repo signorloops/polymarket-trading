@@ -12,7 +12,7 @@ import {
 } from '../../src/execution/execution-engine.js';
 import { PolymarketClient } from '../../src/api/polymarket-client.js';
 import { OrderManager } from '../../src/execution/order-manager.js';
-import { RiskManager, resetRiskManager } from '../../src/execution/risk-manager.js';
+import { RiskManager, getRiskManager, resetRiskManager } from '../../src/execution/risk-manager.js';
 
 describe('ExecutionEngine', () => {
   beforeEach(() => {
@@ -464,6 +464,8 @@ describe('ExecutionEngine', () => {
 
       expect(result.status).toBe('error');
       expect(result.error).toBe('API Error: Insufficient funds');
+      expect(engine.getPendingOrders()).toEqual([]);
+      expect(getRiskManager().isCircuitBreakerActive()).toBe(true);
 
       engine.stop();
     });
@@ -512,7 +514,7 @@ describe('ExecutionEngine', () => {
         { apiStatus: 'pending', expectedStatus: 'open' },
         { apiStatus: 'cancelled', expectedStatus: 'cancelled' },
         { apiStatus: 'rejected', expectedStatus: 'error' },
-        { apiStatus: 'unknown_status', expectedStatus: 'pending' },
+        { apiStatus: 'unknown_status', expectedStatus: 'error' },
       ];
 
       for (const testCase of testCases) {
@@ -713,6 +715,18 @@ describe('ExecutionEngine', () => {
       const engine = new ExecutionEngine(orderManager, {
         placeOrder: mockPlaceOrder,
         cancelOrder: mockCancelOrder,
+        getOrder: jest.fn().mockResolvedValue({
+          id: 'exchange-order-1',
+          marketId: 'test-market',
+          side: 'buy',
+          size: 100,
+          price: 0.6,
+          status: 'cancelled',
+          filledSize: 0,
+          remainingSize: 100,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }),
       });
 
       const order: TradeOrder = {
@@ -758,6 +772,18 @@ describe('ExecutionEngine', () => {
       const mockClient = {
         placeOrder: mockPlaceOrder,
         cancelOrder: mockCancelOrder,
+        getOrder: jest.fn().mockResolvedValue({
+          id: 'pending-order',
+          marketId: 'test-market',
+          side: 'buy',
+          size: 100,
+          price: 0.6,
+          status: 'cancelled',
+          filledSize: 0,
+          remainingSize: 100,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }),
       } as unknown as PolymarketClient;
 
       const orderManager = new OrderManager();
@@ -774,6 +800,15 @@ describe('ExecutionEngine', () => {
 
       // Add order to pending
       orderManager.addPending(order);
+      orderManager.updateStatus({
+        orderId: 'pending-order',
+        exchangeOrderId: 'pending-order',
+        status: 'open',
+        filledSize: 0,
+        remainingSize: 100,
+        avgPrice: 0.6,
+        timestamp: Date.now(),
+      });
 
       const result = await engine.cancelOrder('pending-order');
 
@@ -1120,8 +1155,8 @@ describe('ExecutionEngine', () => {
         { api: 'CANCELLED', expected: 'cancelled' },
         { api: 'ERROR', expected: 'error' },
         { api: 'REJECTED', expected: 'error' },
-        { api: 'UNKNOWN', expected: 'pending' },
-        { api: '', expected: 'pending' },
+        { api: 'UNKNOWN', expected: 'error' },
+        { api: '', expected: 'error' },
       ];
 
       for (const mapping of statusMappings) {

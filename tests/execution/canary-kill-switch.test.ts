@@ -32,12 +32,13 @@ describe('CanaryKillSwitchPersistence', () => {
     expect(new CanaryKillSwitchPersistence(statePath).loadState()).toEqual(state);
   });
 
-  it('returns an inactive default state when the file does not exist', () => {
-    const persistence = new CanaryKillSwitchPersistence(statePath);
+  it('fails closed when the file does not exist', () => {
+    const persistence = new CanaryKillSwitchPersistence(statePath, () => 500);
 
     expect(persistence.loadState()).toEqual({
-      active: false,
-      updatedAt: 0,
+      active: true,
+      updatedAt: 500,
+      reason: 'Kill switch state file is missing; explicitly deactivate it before a real canary',
     });
   });
 

@@ -38,11 +38,14 @@ describe('loadTradingSystemConfigFromEnv', () => {
       configPath,
       JSON.stringify({
         liveTrading: false,
-        markets: ['market-1'],
+        markets: ['market-1', 'market-1-no'],
         events: [
           {
             id: 'event-1',
-            markets: [{ id: 'market-1', outcome: 'YES', price: 0.5 }],
+            markets: [
+              { id: 'market-1', outcome: 'YES', price: 0.5 },
+              { id: 'market-1-no', outcome: 'NO', price: 0.5 },
+            ],
           },
         ],
       })
@@ -52,7 +55,7 @@ describe('loadTradingSystemConfigFromEnv', () => {
       TRADING_SYSTEM_CONFIG_PATH: configPath,
     });
 
-    expect(config.markets).toEqual(['market-1']);
+    expect(config.markets).toEqual(['market-1', 'market-1-no']);
     expect(config.events[0]?.id).toBe('event-1');
   });
 
@@ -70,11 +73,14 @@ describe('loadTradingSystemConfigFromEnv', () => {
       loadTradingSystemConfigFromEnv({
         TRADING_SYSTEM_CONFIG_JSON: JSON.stringify({
           liveTrading: true,
-          markets: ['market-1'],
+          markets: ['market-1', 'market-1-no'],
           events: [
             {
               id: 'event-1',
-              markets: [{ id: 'market-1', outcome: 'YES', price: 0.5 }],
+              markets: [
+                { id: 'market-1', outcome: 'YES', price: 0.5 },
+                { id: 'market-1-no', outcome: 'NO', price: 0.5 },
+              ],
             },
           ],
         }),
@@ -86,10 +92,22 @@ describe('loadTradingSystemConfigFromEnv', () => {
     const config = loadTradingSystemConfigFromEnv({
       TRADING_SYSTEM_CONFIG_JSON: JSON.stringify({
         liveTrading: false,
-        markets: ['a-yes', 'b-no'],
+        markets: ['a-yes', 'a-no', 'b-yes', 'b-no'],
         events: [
-          { id: 'event-a', markets: [{ id: 'a-yes', outcome: 'YES', price: 0.4 }] },
-          { id: 'event-b', markets: [{ id: 'b-no', outcome: 'NO', price: 0.5 }] },
+          {
+            id: 'event-a',
+            markets: [
+              { id: 'a-yes', outcome: 'YES', price: 0.4 },
+              { id: 'a-no', outcome: 'NO', price: 0.6 },
+            ],
+          },
+          {
+            id: 'event-b',
+            markets: [
+              { id: 'b-yes', outcome: 'YES', price: 0.5 },
+              { id: 'b-no', outcome: 'NO', price: 0.5 },
+            ],
+          },
         ],
         payoffModels: [
           {
@@ -114,10 +132,22 @@ describe('loadTradingSystemConfigFromEnv', () => {
       loadTradingSystemConfigFromEnv({
         TRADING_SYSTEM_CONFIG_JSON: JSON.stringify({
           liveTrading: false,
-          markets: ['a-yes', 'b-no'],
+          markets: ['a-yes', 'a-no', 'b-yes', 'b-no'],
           events: [
-            { id: 'event-a', markets: [{ id: 'a-yes', outcome: 'YES', price: 0.4 }] },
-            { id: 'event-b', markets: [{ id: 'b-no', outcome: 'NO', price: 0.5 }] },
+            {
+              id: 'event-a',
+              markets: [
+                { id: 'a-yes', outcome: 'YES', price: 0.4 },
+                { id: 'a-no', outcome: 'NO', price: 0.6 },
+              ],
+            },
+            {
+              id: 'event-b',
+              markets: [
+                { id: 'b-yes', outcome: 'YES', price: 0.5 },
+                { id: 'b-no', outcome: 'NO', price: 0.5 },
+              ],
+            },
           ],
           payoffModels: [
             {
@@ -169,6 +199,17 @@ describe('parseRuntimeServerConfigFromEnv', () => {
     expect(() => parseRuntimeServerConfigFromEnv({ HTTP_HOST: '0.0.0.0' })).toThrow(
       /HTTP_METRICS_TOKEN is required/
     );
+  });
+
+  it('does not treat a hostname beginning with 127 as loopback', () => {
+    expect(() => parseRuntimeServerConfigFromEnv({ HTTP_HOST: '127.example.com' })).toThrow(
+      /HTTP_METRICS_TOKEN is required/
+    );
+  });
+
+  it('rejects invalid TCP ports', () => {
+    expect(() => parseRuntimeServerConfigFromEnv({ HTTP_PORT: '65536' })).toThrow();
+    expect(() => parseRuntimeServerConfigFromEnv({ HTTP_PORT: '3000junk' })).toThrow();
   });
 
   it('loads a metrics token from a mounted secret file', () => {

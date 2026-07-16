@@ -31,7 +31,7 @@ describe('canary trade', () => {
   }
 
   function createClient(): TradingClient {
-    return {
+    return makeSafeClient({
       placeOrder: jest.fn().mockResolvedValue({
         id: '0xorder',
         marketId: '1234567890',
@@ -45,6 +45,44 @@ describe('canary trade', () => {
         updatedAt: '2026-04-23T00:00:00.000Z',
       }),
       cancelOrder: jest.fn().mockResolvedValue(undefined),
+    });
+  }
+
+  function makeSafeClient<T extends TradingClient>(
+    client: T
+  ): T & {
+    getOrder: jest.Mock;
+    getBalances: jest.Mock;
+    getCollateralBalance: jest.Mock;
+    startHeartbeat: jest.Mock;
+    stopHeartbeat: jest.Mock;
+  } {
+    return {
+      ...client,
+      getOrder:
+        'getOrder' in client
+          ? (client.getOrder as jest.Mock)
+          : jest.fn().mockResolvedValue({
+              id: '0xorder',
+              marketId: '1234567890',
+              side: 'buy',
+              size: 2,
+              price: 0.4,
+              status: 'cancelled',
+              filledSize: 0,
+              remainingSize: 2,
+              createdAt: '2026-04-23T00:00:00.000Z',
+              updatedAt: '2026-04-23T00:00:01.000Z',
+            }),
+      getBalances: jest
+        .fn()
+        .mockResolvedValue([{ assetId: '1234567890', size: 100, allowances: { exchange: 100 } }]),
+      getCollateralBalance: jest.fn().mockResolvedValue({
+        size: 100,
+        allowances: { exchange: 100 },
+      }),
+      startHeartbeat: jest.fn().mockResolvedValue(undefined),
+      stopHeartbeat: jest.fn(),
     };
   }
 
@@ -63,6 +101,10 @@ describe('canary trade', () => {
       loadState: jest.fn().mockReturnValue(state),
       saveState: jest.fn(),
     };
+  }
+
+  function createInactiveKillSwitch(): CanaryKillSwitchStatePort {
+    return createKillSwitch({ active: false, updatedAt: 1_000 });
   }
 
   it('parses canary configuration from environment defaults to dry-run', () => {
@@ -179,6 +221,73 @@ describe('canary trade', () => {
     expect(client.placeOrder).not.toHaveBeenCalled();
   });
 
+  it('does not submit when the initial CLOB heartbeat cannot be confirmed', async () => {
+    const client = createClient() as TradingClient & { startHeartbeat: jest.Mock };
+    client.startHeartbeat.mockRejectedValueOnce(new Error('heartbeat unavailable'));
+    const persistence = createPersistence();
+
+    await expect(
+      runCanaryTrade(
+        createConfig({
+          dryRun: false,
+          tradingEnabled: true,
+          confirmation: CANARY_CONFIRMATION_PHRASE,
+        }),
+        client,
+        { persistence, killSwitch: createInactiveKillSwitch() }
+      )
+    ).rejects.toThrow(/heartbeat unavailable/);
+
+    expect(client.placeOrder).not.toHaveBeenCalled();
+    expect(persistence.saveRecord).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: 'failed', submissionAttempted: false })
+    );
+  });
+
+  it('requires collateral and allowance headroom for the maximum platform fee', async () => {
+    const client = createClient() as TradingClient & {
+      getCollateralBalance: jest.Mock;
+    };
+    client.getCollateralBalance.mockResolvedValue({
+      size: 0.81,
+      allowances: { exchange: 0.81 },
+    });
+
+    await expect(
+      runCanaryTrade(
+        createConfig({
+          dryRun: false,
+          tradingEnabled: true,
+          confirmation: CANARY_CONFIRMATION_PHRASE,
+        }),
+        client,
+        { persistence: createPersistence(), killSwitch: createInactiveKillSwitch() }
+      )
+    ).rejects.toThrow(/collateral/);
+    expect(client.placeOrder).not.toHaveBeenCalled();
+  });
+
+  it('requires a sufficient token allowance before a canary sell', async () => {
+    const client = createClient() as TradingClient & { getBalances: jest.Mock };
+    client.getBalances.mockResolvedValue([
+      { assetId: '1234567890', size: 100, allowances: { exchange: 1 } },
+    ]);
+
+    await expect(
+      runCanaryTrade(
+        createConfig({
+          side: 'sell',
+          dryRun: false,
+          tradingEnabled: true,
+          confirmation: CANARY_CONFIRMATION_PHRASE,
+        }),
+        client,
+        { persistence: createPersistence(), killSwitch: createInactiveKillSwitch() }
+      )
+    ).rejects.toThrow(/allowance/);
+    expect(client.placeOrder).not.toHaveBeenCalled();
+  });
+
   it('submits exactly one GTC limit order when all real-trading gates are satisfied', async () => {
     const client = createClient();
     const persistence = createPersistence();
@@ -189,7 +298,7 @@ describe('canary trade', () => {
         confirmation: CANARY_CONFIRMATION_PHRASE,
       }),
       client,
-      { persistence }
+      { persistence, killSwitch: createInactiveKillSwitch() }
     );
 
     expect(client.placeOrder).toHaveBeenCalledTimes(1);
@@ -208,7 +317,7 @@ describe('canary trade', () => {
   });
 
   it('cancels an in-flight canary when the kill switch activates during polling', async () => {
-    const client = {
+    const client = makeSafeClient({
       placeOrder: jest.fn().mockResolvedValue({
         id: '0xorder',
         marketId: '1234567890',
@@ -234,7 +343,7 @@ describe('canary trade', () => {
         updatedAt: '2026-04-23T00:00:01.000Z',
       }),
       cancelOrder: jest.fn().mockResolvedValue(undefined),
-    } as TradingClient;
+    });
     const killSwitch = createKillSwitch({ active: false, updatedAt: 1_000 });
     (killSwitch.loadState as jest.Mock)
       .mockReturnValueOnce({ active: false, updatedAt: 1_000 })
@@ -269,7 +378,7 @@ describe('canary trade', () => {
   });
 
   it('polls an open canary order until it becomes filled and persists the final state', async () => {
-    const client = {
+    const client = makeSafeClient({
       placeOrder: jest.fn().mockResolvedValue({
         id: '0xorder',
         marketId: '1234567890',
@@ -309,7 +418,7 @@ describe('canary trade', () => {
           updatedAt: '2026-04-23T00:00:02.000Z',
         }),
       cancelOrder: jest.fn().mockResolvedValue(undefined),
-    } as TradingClient;
+    });
     const persistence = createPersistence();
 
     const result = await runCanaryTrade(
@@ -321,6 +430,7 @@ describe('canary trade', () => {
       client,
       {
         persistence,
+        killSwitch: createInactiveKillSwitch(),
         sleep: async () => {},
         now: (() => {
           let current = 1000;
@@ -345,11 +455,11 @@ describe('canary trade', () => {
     );
   });
 
-  it('persists a failed record when real canary submission throws before an order is accepted', async () => {
-    const client = {
+  it('persists an unknown record when a network submission has an ambiguous outcome', async () => {
+    const client = makeSafeClient({
       placeOrder: jest.fn().mockRejectedValue(new Error('exchange unavailable')),
       cancelOrder: jest.fn().mockResolvedValue(undefined),
-    } as TradingClient;
+    });
     const persistence = createPersistence();
 
     await expect(
@@ -362,6 +472,7 @@ describe('canary trade', () => {
         client,
         {
           persistence,
+          killSwitch: createInactiveKillSwitch(),
           now: () => 1_000,
         }
       )
@@ -369,15 +480,17 @@ describe('canary trade', () => {
 
     expect(persistence.saveRecord).toHaveBeenCalledWith(
       expect.objectContaining({
-        status: 'failed',
+        status: 'unknown',
         submitted: false,
+        submissionAttempted: true,
+        manualInterventionRequired: true,
         lastError: 'exchange unavailable',
       })
     );
   });
 
   it('cancels a partially filled canary order and marks it for manual intervention', async () => {
-    const client = {
+    const client = makeSafeClient({
       placeOrder: jest.fn().mockResolvedValue({
         id: '0xorder',
         marketId: '1234567890',
@@ -403,7 +516,7 @@ describe('canary trade', () => {
         updatedAt: '2026-04-23T00:00:01.000Z',
       }),
       cancelOrder: jest.fn().mockResolvedValue(undefined),
-    } as TradingClient;
+    });
     const persistence = createPersistence();
 
     const result = await runCanaryTrade(
@@ -415,6 +528,7 @@ describe('canary trade', () => {
       client,
       {
         persistence,
+        killSwitch: createInactiveKillSwitch(),
         sleep: async () => {},
         now: (() => {
           let current = 1000;
@@ -448,7 +562,7 @@ describe('canary trade', () => {
   });
 
   it('marks manual intervention when cancelling the remainder of a partial fill fails', async () => {
-    const client = {
+    const client = makeSafeClient({
       placeOrder: jest.fn().mockResolvedValue({
         id: '0xorder',
         marketId: '1234567890',
@@ -462,7 +576,7 @@ describe('canary trade', () => {
         updatedAt: '2026-04-23T00:00:00.000Z',
       }),
       cancelOrder: jest.fn().mockRejectedValue(new Error('cancel rejected')),
-    } as TradingClient;
+    });
     const persistence = createPersistence();
 
     const result = await runCanaryTrade(
@@ -474,6 +588,7 @@ describe('canary trade', () => {
       client,
       {
         persistence,
+        killSwitch: createInactiveKillSwitch(),
         now: () => 1_000,
       }
     );
@@ -491,7 +606,7 @@ describe('canary trade', () => {
   });
 
   it('cancels and confirms a timed out open canary order before clearing manual intervention', async () => {
-    const client = {
+    const client = makeSafeClient({
       placeOrder: jest.fn().mockResolvedValue({
         id: '0xorder',
         marketId: '1234567890',
@@ -531,7 +646,7 @@ describe('canary trade', () => {
           updatedAt: '2026-04-23T00:00:02.000Z',
         }),
       cancelOrder: jest.fn().mockResolvedValue(undefined),
-    } as TradingClient;
+    });
     const persistence = createPersistence();
 
     const result = await runCanaryTrade(
@@ -543,6 +658,7 @@ describe('canary trade', () => {
       client,
       {
         persistence,
+        killSwitch: createInactiveKillSwitch(),
         sleep: async () => {},
         now: (() => {
           let current = 1_000;
@@ -570,7 +686,7 @@ describe('canary trade', () => {
   });
 
   it('does not cancel a timed-out order twice when cancellation polling finds a partial fill', async () => {
-    const client = {
+    const client = makeSafeClient({
       placeOrder: jest.fn().mockResolvedValue({
         id: '0xorder',
         marketId: '1234567890',
@@ -610,7 +726,7 @@ describe('canary trade', () => {
           updatedAt: '2026-04-23T00:00:02.000Z',
         }),
       cancelOrder: jest.fn().mockResolvedValue(undefined),
-    } as TradingClient;
+    });
 
     const result = await runCanaryTrade(
       createConfig({
@@ -621,6 +737,7 @@ describe('canary trade', () => {
       client,
       {
         persistence: createPersistence(),
+        killSwitch: createInactiveKillSwitch(),
         sleep: async () => {},
         now: (() => {
           let current = 1_000;
@@ -645,7 +762,7 @@ describe('canary trade', () => {
   });
 
   it('marks manual intervention when a timed out open canary order cannot be cancelled', async () => {
-    const client = {
+    const client = makeSafeClient({
       placeOrder: jest.fn().mockResolvedValue({
         id: '0xorder',
         marketId: '1234567890',
@@ -671,7 +788,7 @@ describe('canary trade', () => {
         updatedAt: '2026-04-23T00:00:01.000Z',
       }),
       cancelOrder: jest.fn().mockRejectedValue(new Error('cancel timeout')),
-    } as TradingClient;
+    });
     const persistence = createPersistence();
 
     const result = await runCanaryTrade(
@@ -683,6 +800,7 @@ describe('canary trade', () => {
       client,
       {
         persistence,
+        killSwitch: createInactiveKillSwitch(),
         sleep: async () => {},
         now: (() => {
           let current = 1_000;
@@ -709,7 +827,7 @@ describe('canary trade', () => {
   });
 
   it('keeps manual intervention on when timeout cancellation is not confirmed', async () => {
-    const client = {
+    const client = makeSafeClient({
       placeOrder: jest.fn().mockResolvedValue({
         id: '0xorder',
         marketId: '1234567890',
@@ -749,7 +867,7 @@ describe('canary trade', () => {
           updatedAt: '2026-04-23T00:00:02.000Z',
         }),
       cancelOrder: jest.fn().mockResolvedValue(undefined),
-    } as TradingClient;
+    });
     const persistence = createPersistence();
 
     const result = await runCanaryTrade(
@@ -761,6 +879,7 @@ describe('canary trade', () => {
       client,
       {
         persistence,
+        killSwitch: createInactiveKillSwitch(),
         sleep: async () => {},
         now: (() => {
           let current = 1_000;

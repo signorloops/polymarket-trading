@@ -25,13 +25,13 @@ describe('findDollarPayoffArbitrage', () => {
     expect(opportunity).not.toBeNull();
     expect(opportunity?.quantities).toEqual([1, 1]);
     expect(opportunity?.grossCostUsd).toBeCloseTo(0.9, 8);
-    expect(opportunity?.feeBufferUsd).toBeCloseTo(0.009, 8);
+    expect(opportunity?.feeBufferUsd).toBeCloseTo(0.0433, 8);
     expect(opportunity?.guaranteedPayoutUsd).toBeCloseTo(1, 8);
-    expect(opportunity?.guaranteedProfitUsd).toBeCloseTo(0.091, 8);
+    expect(opportunity?.guaranteedProfitUsd).toBeCloseTo(0.0567, 8);
     expect(opportunity?.scenarioProfitsUsd.map((scenario) => scenario.profitUsd)).toEqual([
-      expect.closeTo(0.091, 8),
-      expect.closeTo(1.091, 8),
-      expect.closeTo(0.091, 8),
+      expect.closeTo(0.0567, 8),
+      expect.closeTo(1.0567, 8),
+      expect.closeTo(0.0567, 8),
     ]);
   });
 

@@ -1,11 +1,9 @@
 /**
  * Polymarket API Client
  *
- * Provides interface to Polymarket REST API for:
- * - Market data retrieval
- * - Order placement and cancellation
- * - Account balance queries
- * - Trade history
+ * Provides a credential-free interface to Polymarket's public Gamma and CLOB
+ * market-data endpoints. Authenticated trading/account operations fail closed
+ * and must use the signed CLOB V2 adapter.
  */
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
@@ -36,7 +34,7 @@ export interface OrderRequest {
   size: number;
   price: number;
   orderType?: 'limit' | 'market';
-  timeInForce?: 'GTC' | 'IOC' | 'FOK';
+  timeInForce?: 'GTC' | 'IOC' | 'FOK' | 'FAK';
 }
 
 export interface OrderResponse {
@@ -80,17 +78,13 @@ export interface PolymarketCredentials {
 export class PolymarketClient {
   private client: AxiosInstance;
   private logger = getLogger().child({ module: 'PolymarketClient' });
-  private credentials: PolymarketCredentials;
 
-  constructor(credentials?: Partial<PolymarketCredentials>) {
-    this.credentials = {
-      apiKey: credentials?.apiKey ?? NETWORK_CONFIG.POLYMARKET_API_KEY ?? '',
-      secret: credentials?.secret ?? NETWORK_CONFIG.POLYMARKET_SECRET ?? '',
-      passphrase: credentials?.passphrase ?? NETWORK_CONFIG.POLYMARKET_PASSPHRASE ?? '',
-    };
-
+  constructor(_credentials?: Partial<PolymarketCredentials>) {
     this.client = axios.create({
-      baseURL: 'https://clob.polymarket.com',
+      // Market discovery belongs to Gamma. CLOB reads below use absolute URLs;
+      // authenticated order/account operations are deliberately delegated to
+      // the official signed V2 adapter.
+      baseURL: 'https://gamma-api.polymarket.com',
       timeout: NETWORK_CONFIG.CONNECTION_TIMEOUT,
       headers: {
         'Content-Type': 'application/json',
@@ -105,19 +99,6 @@ export class PolymarketClient {
     // Request interceptor - add authentication headers
     this.client.interceptors.request.use(
       (config) => {
-        // Add authentication headers if credentials are configured
-        if (this.credentials.apiKey) {
-          config.headers.set('POLY_API_KEY', this.credentials.apiKey);
-
-          // Signed trading requires the official CLOB client, but read endpoints can still
-          // carry the API key and request metadata.
-          if (this.credentials.secret && this.credentials.passphrase) {
-            const timestamp = Date.now().toString();
-            config.headers.set('POLY_TIMESTAMP', timestamp);
-            config.headers.set('POLY_PASSPHRASE', this.credentials.passphrase);
-          }
-        }
-
         this.logger.debug(
           `API Request: ${String(config.method?.toUpperCase())} ${String(config.url)}`
         );
@@ -190,7 +171,10 @@ export class PolymarketClient {
    * Get specific market by ID
    */
   async getMarket(marketId: string): Promise<PolymarketMarket> {
-    const response = await this.client.get<PolymarketMarket>(`/markets/${marketId}`);
+    if (!marketId.trim()) throw new Error('marketId is required');
+    const response = await this.client.get<PolymarketMarket>(
+      `/markets/${encodeURIComponent(marketId)}`
+    );
     return response.data;
   }
 
@@ -202,11 +186,12 @@ export class PolymarketClient {
     asks: { price: string; size: string }[];
     timestamp: string;
   }> {
+    assertTokenId(marketId);
     const response = await this.client.get<{
       bids: { price: string; size: string }[];
       asks: { price: string; size: string }[];
       timestamp: string;
-    }>(`/markets/${marketId}/orderbook`);
+    }>('https://clob.polymarket.com/book', { params: { token_id: marketId } });
     return response.data;
   }
 
@@ -238,40 +223,49 @@ export class PolymarketClient {
   /**
    * Get order details
    */
-  async getOrder(orderId: string): Promise<OrderResponse> {
-    const response = await this.client.get<OrderResponse>(`/orders/${orderId}`);
-    return response.data;
+  getOrder(orderId: string): Promise<OrderResponse> {
+    return Promise.reject(
+      new Error(
+        `Authenticated order lookup for ${orderId} requires the official signed CLOB V2 client`
+      )
+    );
   }
 
   /**
    * Get all open orders
    */
-  async getOpenOrders(marketId?: string): Promise<OrderResponse[]> {
-    const params = marketId ? { marketId } : {};
-    const response = await this.client.get<OrderResponse[]>('/orders', { params });
-    return response.data;
+  getOpenOrders(marketId?: string): Promise<OrderResponse[]> {
+    return Promise.reject(
+      new Error(
+        `Authenticated open-order lookup${marketId ? ` for ${marketId}` : ''} requires the official signed CLOB V2 client`
+      )
+    );
   }
 
   /**
    * Get account balances
    */
-  async getBalances(): Promise<Balance[]> {
-    const response = await this.client.get<Balance[]>('/balance');
-    return response.data;
+  getBalances(): Promise<Balance[]> {
+    return Promise.reject(
+      new Error('Authenticated balances require the official signed CLOB V2 client')
+    );
   }
 
   /**
    * Get trade history
    */
-  async getTrades(params?: {
+  getTrades(params?: {
     marketId?: string;
     limit?: number;
     offset?: number;
     startDate?: string;
     endDate?: string;
   }): Promise<Trade[]> {
-    const response = await this.client.get<Trade[]>('/trades', { params });
-    return response.data;
+    return Promise.reject(
+      new Error(
+        `Trade history${params?.marketId ? ` for ${params.marketId}` : ''} requires an explicit Data API user or signed CLOB client`
+      )
+    );
   }
 
   /**
@@ -282,14 +276,39 @@ export class PolymarketClient {
     params?: {
       startDate?: string;
       endDate?: string;
-      interval?: '1m' | '5m' | '15m' | '1h' | '1d';
+      interval?: 'max' | 'all' | '1m' | '1w' | '1d' | '6h' | '1h';
+      fidelity?: number;
     }
   ): Promise<{ timestamp: string; price: string; volume: string }[]> {
-    const response = await this.client.get<{ timestamp: string; price: string; volume: string }[]>(
-      `/markets/${marketId}/prices`,
-      { params }
-    );
-    return response.data;
+    assertTokenId(marketId);
+    if (params?.interval && (params.startDate || params.endDate)) {
+      throw new Error('Price history interval cannot be combined with startDate/endDate');
+    }
+    if (
+      params?.fidelity !== undefined &&
+      (!Number.isInteger(params.fidelity) || params.fidelity < 1)
+    ) {
+      throw new Error('Price history fidelity must be a positive integer number of minutes');
+    }
+    const startTs = params?.startDate ? toUnixTimestamp(params.startDate, 'startDate') : undefined;
+    const endTs = params?.endDate ? toUnixTimestamp(params.endDate, 'endDate') : undefined;
+    if (startTs !== undefined && endTs !== undefined && startTs >= endTs) {
+      throw new Error('Price history startDate must be before endDate');
+    }
+    const response = await this.client.get<unknown>('https://clob.polymarket.com/prices-history', {
+      params: {
+        market: marketId,
+        ...(startTs !== undefined ? { startTs } : {}),
+        ...(endTs !== undefined ? { endTs } : {}),
+        ...(params?.interval ? { interval: params.interval } : {}),
+        ...(params?.fidelity !== undefined ? { fidelity: params.fidelity } : {}),
+      },
+    });
+    return parsePriceHistory(response.data).map((point) => ({
+      timestamp: new Date(point.t * 1000).toISOString(),
+      price: String(point.p),
+      volume: '',
+    }));
   }
 
   /**
@@ -297,7 +316,7 @@ export class PolymarketClient {
    */
   async healthCheck(): Promise<boolean> {
     try {
-      await this.client.get('/health');
+      await this.client.get('https://clob.polymarket.com/ok');
       return true;
     } catch {
       return false;
@@ -313,3 +332,40 @@ export function getPolymarketClient(_apiKey?: string): PolymarketClient {
 }
 
 export const resetPolymarketClient = polymarketClientSingleton.reset;
+
+function assertTokenId(tokenId: string): void {
+  if (!/^\d+$/.test(tokenId)) {
+    throw new Error('A numeric Polymarket CLOB token id is required');
+  }
+}
+
+function toUnixTimestamp(value: string, field: string): number {
+  const milliseconds = new Date(value).getTime();
+  if (!Number.isFinite(milliseconds)) {
+    throw new Error(`${field} must be a valid date`);
+  }
+  return Math.floor(milliseconds / 1000);
+}
+
+function parsePriceHistory(value: unknown): { t: number; p: number }[] {
+  if (!value || typeof value !== 'object' || !('history' in value)) {
+    throw new Error('Polymarket price history response is malformed');
+  }
+  const history = (value as { history?: unknown }).history;
+  if (!Array.isArray(history)) {
+    throw new Error('Polymarket price history response is malformed');
+  }
+  return history.map((point) => {
+    const timestamp = (point as { t?: unknown } | null)?.t;
+    const price = (point as { p?: unknown } | null)?.p;
+    if (
+      !Number.isFinite(timestamp) ||
+      !Number.isFinite(price) ||
+      (price as number) < 0 ||
+      (price as number) > 1
+    ) {
+      throw new Error('Polymarket price history response contains an invalid point');
+    }
+    return { t: timestamp as number, p: price as number };
+  });
+}

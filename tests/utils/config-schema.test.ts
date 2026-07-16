@@ -222,4 +222,16 @@ describe('parseConfigFromEnv', () => {
 
     expect(() => parseConfigFromEnv()).toThrow(/POLYMARKET_NEG_RISK/);
   });
+
+  it('should reject numeric environment values with trailing junk', () => {
+    process.env.MAX_ITERATIONS = '150oops';
+
+    expect(() => parseConfigFromEnv()).toThrow();
+  });
+
+  it('should reject misspelled boolean environment values', () => {
+    process.env.CIRCUIT_BREAKER_ENABLED = 'tru';
+
+    expect(() => parseConfigFromEnv()).toThrow(/CIRCUIT_BREAKER_ENABLED/);
+  });
 });

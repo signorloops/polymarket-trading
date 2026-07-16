@@ -79,6 +79,16 @@ describe('ConfigEncryption', () => {
         process.env.CONFIG_ENCRYPTION_KEY = originalKey;
       }
     });
+
+    it('rejects weak or malformed master keys', () => {
+      const originalKey = process.env.CONFIG_ENCRYPTION_KEY;
+      try {
+        process.env.CONFIG_ENCRYPTION_KEY = 'short-passphrase';
+        expect(() => encryptValue('test')).toThrow('Encryption failed');
+      } finally {
+        process.env.CONFIG_ENCRYPTION_KEY = originalKey;
+      }
+    });
   });
 
   describe('isEncrypted', () => {
@@ -221,6 +231,31 @@ POLYMARKET_API_KEY=my-api-key
       const result = await encryptEnvFile(envFile);
       expect(result.skipped).toBe(1);
       expect(result.encrypted).toBe(0);
+    });
+
+    it('fails without rewriting plaintext when encryption cannot complete', async () => {
+      const envFile = path.join(tempDir, '.env');
+      const content = 'PRIVATE_KEY=plaintext-secret\n';
+      await fs.writeFile(envFile, content, { mode: 0o600 });
+      const originalKey = process.env.CONFIG_ENCRYPTION_KEY;
+      try {
+        delete process.env.CONFIG_ENCRYPTION_KEY;
+        await expect(encryptEnvFile(envFile)).rejects.toThrow(/Encryption failed/);
+      } finally {
+        process.env.CONFIG_ENCRYPTION_KEY = originalKey;
+      }
+
+      expect(await fs.readFile(envFile, 'utf8')).toBe(content);
+    });
+
+    it('fails without partially decrypting a file containing corrupt ciphertext', async () => {
+      const envFile = path.join(tempDir, '.env');
+      const valid = encryptValue('valid-secret');
+      const content = `PRIVATE_KEY=${valid}\nPOLYMARKET_SECRET=ENC:v1:corrupt\n`;
+      await fs.writeFile(envFile, content, { mode: 0o600 });
+
+      await expect(decryptEnvFile(envFile)).rejects.toThrow(/Decryption failed/);
+      expect(await fs.readFile(envFile, 'utf8')).toBe(content);
     });
   });
 

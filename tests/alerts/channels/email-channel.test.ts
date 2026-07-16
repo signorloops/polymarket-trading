@@ -140,7 +140,7 @@ describe('EmailChannel', () => {
       const channel = new EmailChannel(validConfig);
       await channel.send(
         makeNotification({
-          metadata: { region: 'us-east-1', count: 42 },
+          metadata: { region: 'us-east-1', count: 42, privateKey: 'TOP-SECRET' },
         })
       );
 
@@ -151,6 +151,9 @@ describe('EmailChannel', () => {
       expect(html).toContain('us-east-1');
       expect(text).toContain('region');
       expect(text).toContain('42');
+      expect(html).not.toContain('TOP-SECRET');
+      expect(text).not.toContain('TOP-SECRET');
+      expect(html).toContain('[REDACTED]');
     });
 
     it('should escape HTML special characters', async () => {

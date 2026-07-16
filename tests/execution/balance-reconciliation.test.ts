@@ -10,6 +10,10 @@ function createClient(getBalances: TradingBalanceClient['getBalances']): Trading
     placeOrder: jest.fn(),
     cancelOrder: jest.fn(),
     getOrder: jest.fn(),
+    getCollateralBalance: jest.fn().mockResolvedValue({
+      size: 100,
+      allowances: { exchange: 100 },
+    }),
   } as TradingBalanceClient;
 }
 
@@ -34,6 +38,7 @@ describe('reconcileConfiguredBalances', () => {
 
     expect(client.getBalances).toHaveBeenCalledWith(['token-a']);
     expect(report.synced).toEqual(['token-a']);
+    expect(report.collateral.size).toBe(100);
     expect(riskManager.getPosition('token-a')?.size).toBe(3);
   });
 

@@ -3,12 +3,29 @@
   "version": "1.0.0",
   "description": "Polymarket arbitrage trading system with marginal polytope and Frank-Wolfe optimization",
   "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
   "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist/src",
+    "dist/benchmarks",
+    "README.md",
+    "README.en.md",
+    "README.zh-CN.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "engines": {
     "node": ">=20.19.0"
   },
   "scripts": {
-    "build": "tsc",
+    "clean": "node --eval \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc",
     "start": "node dist/src/index.js",
     "dev": "tsc --watch",
     "lint": "eslint 'src/**/*.ts' 'tests/**/*.ts'",
@@ -32,7 +49,8 @@
     "canary:cancel-all": "npm run build && node dist/src/scripts/canary-cancel-all.js",
     "canary:kill-switch": "npm run build && node dist/src/scripts/canary-kill-switch.js",
     "reconcile:balances": "npm run build && node dist/src/scripts/reconcile-balances.js",
-    "prepare": "husky install"
+    "prepare": "husky install",
+    "prepack": "npm run build"
   },
   "lint-staged": {
     "*.{ts,tsx}": [
@@ -67,14 +85,17 @@
     "typescript-eslint": "^8.56.0"
   },
   "dependencies": {
-    "@polymarket/clob-client": "^5.8.1",
+    "@polymarket/clob-client-v2": "1.0.8",
     "@slack/webhook": "^7.0.7",
     "axios": "^1.18.1",
     "dotenv": "^17.3.1",
     "javascript-lp-solver": "^1.0.3",
     "nodemailer": "^9.0.3",
     "viem": "^2.55.2",
-    "ws": "^8.21.1",
+    "ws": "8.21.1",
     "zod": "^4.3.6"
+  },
+  "overrides": {
+    "ws": "8.21.1"
   }
 }

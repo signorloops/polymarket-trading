@@ -12,7 +12,18 @@ import { getLogger } from '../utils/logger.js';
 import { RISK_CONFIG } from '../utils/config.js';
 import { OrderStatus } from './execution-engine.js';
 import { createSingleton } from '../utils/singleton.js';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { TradingMetrics } from '../utils/metrics.js';
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname } from 'node:path';
 
 export interface Position {
@@ -35,6 +46,13 @@ export interface RiskCheckResult {
   allowed: boolean;
   reason?: string;
   riskLevel: 'low' | 'medium' | 'high' | 'critical';
+}
+
+export interface RiskTrade {
+  marketId: string;
+  size: number;
+  side: 'buy' | 'sell';
+  estimatedNotional: number;
 }
 
 /** External (exchange) position used for reconciliation. `assetId` is the outcome
@@ -72,28 +90,34 @@ interface PersistedRiskState {
   maxDailyPnL: number;
   minDailyPnL: number;
   circuitBreakerTriggered: boolean;
+  tradingDay?: string;
+  maxDrawdown?: number;
 }
 
 export class RiskManager {
-  private static readonly RECONCILE_TOLERANCE = 1e-6;
+  static readonly RECONCILE_TOLERANCE = 1e-6;
+  private static readonly CONSERVATIVE_TAKER_FEE_RATE = 0.07;
 
   private positions: Map<string, Position> = new Map();
   private marketPrices: Map<string, number> = new Map();
   private dailyPnL = 0;
   private maxDailyPnL = 0;
   private minDailyPnL = 0;
+  private maxDrawdown = 0;
+  private tradingDay = currentTradingDay();
+  private collateralBalance: number | undefined;
   private circuitBreakerTriggered = false;
   private logger = getLogger().child({ module: 'RiskManager' });
   private config: Required<Omit<RiskManagerConfig, 'stateFilePath'>>;
   private stateFilePath: string | undefined;
 
   constructor(config: RiskManagerConfig = {}) {
-    this.config = {
+    this.config = validateRiskConfig({
       maxExposure: config.maxExposure ?? RISK_CONFIG.MAX_EXPOSURE,
       maxBetFraction: config.maxBetFraction ?? 0.5,
       maxDailyLoss: config.maxDailyLoss ?? RISK_CONFIG.MAX_DAILY_LOSS,
       emergencyStopThreshold: config.emergencyStopThreshold ?? RISK_CONFIG.EMERGENCY_STOP_THRESHOLD,
-    };
+    });
     this.stateFilePath = config.stateFilePath;
     if (this.stateFilePath) {
       this.loadState();
@@ -104,10 +128,15 @@ export class RiskManager {
    * Update risk manager configuration
    */
   updateConfig(config: RiskManagerConfig): void {
-    this.config = {
+    this.config = validateRiskConfig({
       ...this.config,
-      ...config,
-    };
+      ...(config.maxExposure === undefined ? {} : { maxExposure: config.maxExposure }),
+      ...(config.maxBetFraction === undefined ? {} : { maxBetFraction: config.maxBetFraction }),
+      ...(config.maxDailyLoss === undefined ? {} : { maxDailyLoss: config.maxDailyLoss }),
+      ...(config.emergencyStopThreshold === undefined
+        ? {}
+        : { emergencyStopThreshold: config.emergencyStopThreshold }),
+    });
     this.logger.info('Risk manager config updated', this.config);
   }
 
@@ -120,8 +149,79 @@ export class RiskManager {
     side: 'buy' | 'sell',
     estimatedNotional: number
   ): RiskCheckResult {
+    return this.checkTrades([{ marketId, size, side, estimatedNotional }]);
+  }
+
+  /** Check a complete multi-leg projection against portfolio limits. */
+  checkTrades(trades: readonly RiskTrade[]): RiskCheckResult {
+    const startedAt = performance.now();
+    try {
+      return this.evaluateTrades(trades);
+    } finally {
+      TradingMetrics.riskCheckLatency.observe({}, performance.now() - startedAt);
+    }
+  }
+
+  private evaluateTrades(trades: readonly RiskTrade[]): RiskCheckResult {
+    this.ensureCurrentTradingDay();
+    if (trades.length === 0 || trades.some((trade) => !isValidRiskTrade(trade))) {
+      return { allowed: false, reason: 'Trade inputs are invalid', riskLevel: 'critical' };
+    }
+
+    const projectedPositions = new Map(
+      Array.from(this.positions, ([marketId, position]) => [marketId, { ...position }])
+    );
+    let allReduceOnly = true;
+    let requiredCollateral = 0;
+
+    for (const trade of trades) {
+      const currentPosition = projectedPositions.get(trade.marketId);
+      const currentSize = currentPosition?.size ?? 0;
+      const projectedSize = currentSize + (trade.side === 'buy' ? trade.size : -trade.size);
+      const reduceOnly =
+        trade.side === 'sell' &&
+        currentSize > 0 &&
+        projectedSize >= -RiskManager.RECONCILE_TOLERANCE;
+      allReduceOnly &&= reduceOnly;
+
+      // Outcome tokens cannot be sold short on the CLOB. Reconciliation must
+      // establish inventory before a sell can pass this boundary.
+      if (trade.side === 'sell' && !reduceOnly) {
+        return {
+          allowed: false,
+          reason: `Sell would exceed reconciled position for ${trade.marketId}`,
+          riskLevel: 'high',
+        };
+      }
+
+      if (trade.side === 'buy') {
+        requiredCollateral +=
+          trade.estimatedNotional + trade.size * RiskManager.CONSERVATIVE_TAKER_FEE_RATE * 0.25;
+      }
+
+      if (Math.abs(projectedSize) < RiskManager.RECONCILE_TOLERANCE) {
+        projectedPositions.delete(trade.marketId);
+        continue;
+      }
+
+      const avgPrice =
+        trade.side === 'buy'
+          ? currentPosition && currentPosition.avgPrice <= 0
+            ? 0
+            : (currentSize * (currentPosition?.avgPrice ?? 0) + trade.estimatedNotional) /
+              projectedSize
+          : (currentPosition?.avgPrice ?? trade.estimatedNotional / trade.size);
+      projectedPositions.set(trade.marketId, {
+        marketId: trade.marketId,
+        size: projectedSize,
+        avgPrice,
+        side: 'long',
+        timestamp: Date.now(),
+      });
+    }
+
     // Check circuit breaker
-    if (this.circuitBreakerTriggered) {
+    if (this.circuitBreakerTriggered && !allReduceOnly) {
       return {
         allowed: false,
         reason: 'Circuit breaker triggered - trading halted',
@@ -130,7 +230,7 @@ export class RiskManager {
     }
 
     // Check daily loss limit
-    if (this.dailyPnL < -this.config.maxDailyLoss) {
+    if (this.dailyPnL <= -this.config.maxDailyLoss && !allReduceOnly) {
       this.triggerCircuitBreaker('Daily loss limit exceeded');
       return {
         allowed: false,
@@ -139,10 +239,10 @@ export class RiskManager {
       };
     }
 
-    // Calculate new exposure
-    const currentExposure = this.getTotalExposure();
-    const tradeNotional = Math.abs(estimatedNotional);
-    const newExposure = currentExposure + tradeNotional;
+    const newExposure = Array.from(projectedPositions.values()).reduce(
+      (sum, position) => sum + this.getPositionExposure(position),
+      0
+    );
 
     // Check max exposure
     if (newExposure > this.config.maxExposure) {
@@ -153,74 +253,122 @@ export class RiskManager {
       };
     }
 
-    // Check position concentration
-    const currentPosition = this.positions.get(marketId);
-    const newPositionSize = (currentPosition?.size ?? 0) + (side === 'buy' ? size : -size);
-    const unitValue = Math.abs(size) > 0 ? tradeNotional / Math.abs(size) : 0;
-    const concentration = Math.abs(newPositionSize * unitValue) / (newExposure || 1);
-
-    if (currentExposure > 0 && concentration > 0.5) {
+    if (
+      !allReduceOnly &&
+      this.collateralBalance !== undefined &&
+      requiredCollateral > this.collateralBalance
+    ) {
       return {
         allowed: false,
-        reason: `Position concentration too high: ${(concentration * 100).toFixed(1)}%`,
-        riskLevel: 'medium',
+        reason: `Insufficient reconciled collateral: ${String(requiredCollateral)} > ${String(this.collateralBalance)}`,
+        riskLevel: 'high',
       };
     }
 
+    const maxMarketExposure = this.config.maxExposure * this.config.maxBetFraction;
+    for (const position of projectedPositions.values()) {
+      const marketExposure = this.getPositionExposure(position);
+      const currentExposure = this.getPositionExposure(this.positions.get(position.marketId));
+      if (marketExposure > currentExposure && marketExposure > maxMarketExposure) {
+        return {
+          allowed: false,
+          reason: `Market exposure would exceed per-market limit: ${String(marketExposure)} > ${String(maxMarketExposure)}`,
+          riskLevel: 'medium',
+        };
+      }
+    }
+
     return { allowed: true, riskLevel: 'low' };
+  }
+
+  isReduceOnlyTrade(marketId: string, size: number, side: 'buy' | 'sell'): boolean {
+    if (side !== 'sell' || !Number.isFinite(size) || size <= 0) return false;
+    const position = this.positions.get(marketId);
+    return position !== undefined && position.size > 0 && size <= position.size + 1e-10;
   }
 
   /**
    * Update position after trade execution
    */
   updatePosition(orderStatus: OrderStatus, marketId: string, side: 'buy' | 'sell'): void {
+    this.ensureCurrentTradingDay();
+    if (!Number.isFinite(orderStatus.filledSize) || orderStatus.filledSize < 0) {
+      this.triggerCircuitBreaker('Invalid filled size received from order adapter');
+      return;
+    }
     if (orderStatus.filledSize <= 0) {
+      return;
+    }
+    if (
+      marketId.trim() === '' ||
+      !Number.isFinite(orderStatus.avgPrice) ||
+      orderStatus.avgPrice <= 0 ||
+      orderStatus.avgPrice >= 1
+    ) {
+      this.triggerCircuitBreaker('Invalid execution price received from order adapter');
       return;
     }
 
     const existingPosition = this.positions.get(marketId);
     const filledSize = side === 'buy' ? orderStatus.filledSize : -orderStatus.filledSize;
 
-    if (existingPosition) {
-      // Update existing position
-      const newSize = existingPosition.size + filledSize;
-
-      if (Math.abs(newSize) < 1e-10) {
-        // Position closed
-        const pnl = this.calculatePnL(
-          existingPosition,
-          orderStatus.avgPrice,
-          orderStatus.filledSize
-        );
-        this.dailyPnL += pnl;
+    // Conditional outcome-token inventory is long-only. If the adapter reports a
+    // sell larger than local reconciled inventory, account state has drifted. Book
+    // only the locally known close, stop adding exposure, and require reconciliation
+    // instead of inventing a negative token position.
+    if (
+      side === 'sell' &&
+      (!existingPosition ||
+        existingPosition.size <= 0 ||
+        orderStatus.filledSize > existingPosition.size + RiskManager.RECONCILE_TOLERANCE)
+    ) {
+      if (existingPosition?.size && existingPosition.size > 0) {
+        if (existingPosition.avgPrice > 0) {
+          this.dailyPnL += this.calculatePnL(
+            existingPosition,
+            orderStatus.avgPrice,
+            existingPosition.size
+          );
+        }
         this.positions.delete(marketId);
         this.marketPrices.delete(marketId);
-        this.logger.info(`Position closed for ${marketId}`, { pnl });
-      } else if (newSize * existingPosition.size < 0) {
-        // Position flipped
-        const closedSize = existingPosition.size;
-        const pnl = this.calculatePnL(existingPosition, orderStatus.avgPrice, Math.abs(closedSize));
-        this.dailyPnL += pnl;
+      }
+      this.updatePnLTracking();
+      this.triggerCircuitBreaker(`Sell fill exceeded reconciled position for ${marketId}`);
+      this.persistState();
+      return;
+    }
 
-        this.positions.set(marketId, {
-          marketId,
-          size: newSize,
-          avgPrice: orderStatus.avgPrice,
-          side: newSize > 0 ? 'long' : 'short',
-          timestamp: Date.now(),
-        });
-        this.marketPrices.set(marketId, orderStatus.avgPrice);
-        this.logger.info(`Position flipped for ${marketId}`, { newSize, pnl });
-      } else {
-        // Add to position (average down/up)
+    if (existingPosition) {
+      const newSize = existingPosition.size + filledSize;
+      const sameDirection = existingPosition.size * filledSize > 0;
+      if (sameDirection) {
         const totalValue =
-          existingPosition.size * existingPosition.avgPrice + filledSize * orderStatus.avgPrice;
-        const newAvgPrice = newSize !== 0 ? totalValue / newSize : existingPosition.avgPrice;
-
+          Math.abs(existingPosition.size) * existingPosition.avgPrice +
+          Math.abs(filledSize) * orderStatus.avgPrice;
         existingPosition.size = newSize;
-        existingPosition.avgPrice = newAvgPrice;
-        this.marketPrices.set(marketId, this.marketPrices.get(marketId) ?? orderStatus.avgPrice);
-        this.logger.debug(`Position updated for ${marketId}`, { newSize, newAvgPrice });
+        existingPosition.avgPrice =
+          existingPosition.avgPrice <= 0 ? 0 : totalValue / Math.abs(newSize);
+        existingPosition.timestamp = Date.now();
+      } else {
+        const closedSize = Math.min(Math.abs(existingPosition.size), Math.abs(filledSize));
+        const costBasisKnown = existingPosition.avgPrice > 0;
+        const pnl = costBasisKnown
+          ? this.calculatePnL(existingPosition, orderStatus.avgPrice, closedSize)
+          : 0;
+        if (costBasisKnown) this.dailyPnL += pnl;
+        if (Math.abs(newSize) < 1e-10) {
+          this.positions.delete(marketId);
+          this.marketPrices.delete(marketId);
+          this.logger.info(`Position closed for ${marketId}`, { pnl });
+        } else if (newSize * existingPosition.size > 0) {
+          existingPosition.size = newSize;
+          existingPosition.timestamp = Date.now();
+          this.logger.info(`Position reduced for ${marketId}`, { newSize, pnl });
+        }
+      }
+      if (this.positions.has(marketId)) {
+        this.marketPrices.set(marketId, orderStatus.avgPrice);
       }
     } else {
       // New position
@@ -228,7 +376,7 @@ export class RiskManager {
         marketId,
         size: filledSize,
         avgPrice: orderStatus.avgPrice,
-        side: filledSize > 0 ? 'long' : 'short',
+        side: 'long',
         timestamp: Date.now(),
       });
       this.marketPrices.set(marketId, orderStatus.avgPrice);
@@ -236,6 +384,21 @@ export class RiskManager {
         size: filledSize,
         avgPrice: orderStatus.avgPrice,
       });
+    }
+
+    // The last reconciled collateral value is an upper bound until the next
+    // exchange snapshot. Decrease it for local buys using the current maximum
+    // platform taker-fee curve; do not optimistically add sell proceeds.
+    if (side === 'buy' && this.collateralBalance !== undefined) {
+      const protocolFee =
+        orderStatus.filledSize *
+        RiskManager.CONSERVATIVE_TAKER_FEE_RATE *
+        orderStatus.avgPrice *
+        (1 - orderStatus.avgPrice);
+      this.collateralBalance = Math.max(
+        0,
+        this.collateralBalance - orderStatus.filledSize * orderStatus.avgPrice - protocolFee
+      );
     }
 
     // Update PnL tracking
@@ -247,7 +410,7 @@ export class RiskManager {
    * Update market mark price for unrealized PnL estimation
    */
   updateMarketPrice(marketId: string, price: number): void {
-    if (!Number.isFinite(price) || price <= 0) {
+    if (!Number.isFinite(price) || price <= 0 || price >= 1) {
       return;
     }
     this.marketPrices.set(marketId, price);
@@ -300,15 +463,15 @@ export class RiskManager {
    * Get current risk metrics
    */
   getRiskMetrics(): RiskMetrics {
+    this.ensureCurrentTradingDay();
     const totalExposure = this.getTotalExposure();
     const unrealizedPnL = this.calculateUnrealizedPnL();
-    const maxDrawdown = this.maxDailyPnL - this.minDailyPnL;
 
     return {
       totalExposure,
       dailyPnL: this.dailyPnL,
       unrealizedPnL,
-      maxDrawdown,
+      maxDrawdown: this.maxDrawdown,
       positionCount: this.positions.size,
     };
   }
@@ -365,6 +528,8 @@ export class RiskManager {
     this.dailyPnL = 0;
     this.maxDailyPnL = 0;
     this.minDailyPnL = 0;
+    this.maxDrawdown = 0;
+    this.tradingDay = currentTradingDay();
     this.logger.info('Daily PnL reset');
     this.persistState();
   }
@@ -373,14 +538,32 @@ export class RiskManager {
    * Get all current positions
    */
   getPositions(): Position[] {
-    return Array.from(this.positions.values());
+    return Array.from(this.positions.values(), (position) => ({ ...position }));
   }
 
   /**
    * Get position for a specific market
    */
   getPosition(marketId: string): Position | undefined {
-    return this.positions.get(marketId);
+    const position = this.positions.get(marketId);
+    return position ? { ...position } : undefined;
+  }
+
+  getPositionUnrealizedPnL(marketId: string): number | undefined {
+    const position = this.positions.get(marketId);
+    const markPrice = this.marketPrices.get(marketId);
+    if (!position || position.avgPrice <= 0 || markPrice === undefined) {
+      return undefined;
+    }
+    return (markPrice - position.avgPrice) * position.size;
+  }
+
+  setCollateralBalance(balance: number): void {
+    if (!Number.isFinite(balance) || balance < 0) {
+      this.triggerCircuitBreaker('Invalid collateral balance received during reconciliation');
+      return;
+    }
+    this.collateralBalance = balance;
   }
 
   /**
@@ -408,7 +591,13 @@ export class RiskManager {
   reconcile(balances: readonly ExchangeBalance[]): ReconcileResult {
     const exchange = new Map<string, number>();
     for (const b of balances) {
-      if (Number.isFinite(b.size) && Math.abs(b.size) > RiskManager.RECONCILE_TOLERANCE) {
+      if (!b.assetId || !Number.isFinite(b.size) || b.size < 0 || exchange.has(b.assetId)) {
+        this.triggerCircuitBreaker('Invalid or duplicate exchange balance during reconciliation');
+        throw new Error(
+          `Invalid or duplicate exchange balance for ${b.assetId || 'missing asset'}`
+        );
+      }
+      if (b.size > RiskManager.RECONCILE_TOLERANCE) {
         exchange.set(b.assetId, b.size);
       }
     }
@@ -424,7 +613,11 @@ export class RiskManager {
       } else if (Math.abs(exchangeSize - pos.size) > RiskManager.RECONCILE_TOLERANCE) {
         synced.push(assetId);
         pos.size = exchangeSize;
-        pos.side = exchangeSize >= 0 ? 'long' : 'short';
+        // The exchange balance endpoint has no acquisition history. Any external
+        // size drift invalidates our blended cost basis, so keep PnL unknown until
+        // an audited ledger supplies it instead of fabricating realized gains.
+        pos.avgPrice = 0;
+        pos.side = 'long';
         pos.timestamp = Date.now();
       }
     }
@@ -437,7 +630,7 @@ export class RiskManager {
           marketId: assetId,
           size: exchangeSize,
           avgPrice: 0, // unknown cost basis; excluded from unrealized PnL until set
-          side: exchangeSize >= 0 ? 'long' : 'short',
+          side: 'long',
           timestamp: Date.now(),
         });
       }
@@ -456,9 +649,18 @@ export class RiskManager {
 
   private getTotalExposure(): number {
     return Array.from(this.positions.values()).reduce(
-      (sum, pos) => sum + Math.abs(pos.size * pos.avgPrice),
+      (sum, pos) => sum + this.getPositionExposure(pos),
       0
     );
+  }
+
+  private getPositionExposure(position: Position | undefined): number {
+    if (!position) return 0;
+    if (position.avgPrice > 0 && position.avgPrice < 1) {
+      return Math.abs(position.size) * position.avgPrice;
+    }
+    const markPrice = this.marketPrices.get(position.marketId);
+    return Math.abs(position.size) * (markPrice ?? 1);
   }
 
   private calculatePnL(position: Position, exitPrice: number, size: number): number {
@@ -492,6 +694,18 @@ export class RiskManager {
     if (this.dailyPnL < this.minDailyPnL) {
       this.minDailyPnL = this.dailyPnL;
     }
+    this.maxDrawdown = Math.max(this.maxDrawdown, this.maxDailyPnL - this.dailyPnL);
+  }
+
+  private ensureCurrentTradingDay(): void {
+    const today = currentTradingDay();
+    if (today === this.tradingDay) return;
+    this.dailyPnL = 0;
+    this.maxDailyPnL = 0;
+    this.minDailyPnL = 0;
+    this.maxDrawdown = 0;
+    this.tradingDay = today;
+    this.persistState();
   }
 
   /**
@@ -517,6 +731,9 @@ export class RiskManager {
       this.maxDailyPnL = state.maxDailyPnL;
       this.minDailyPnL = state.minDailyPnL;
       this.circuitBreakerTriggered = state.circuitBreakerTriggered;
+      this.tradingDay = state.tradingDay ?? currentTradingDay();
+      this.maxDrawdown = state.maxDrawdown ?? Math.max(0, this.maxDailyPnL - this.dailyPnL);
+      this.ensureCurrentTradingDay();
       this.logger.info('Risk state loaded from disk', {
         positions: this.positions.size,
         dailyPnL: this.dailyPnL,
@@ -544,17 +761,51 @@ export class RiskManager {
       maxDailyPnL: this.maxDailyPnL,
       minDailyPnL: this.minDailyPnL,
       circuitBreakerTriggered: this.circuitBreakerTriggered,
+      tradingDay: this.tradingDay,
+      maxDrawdown: this.maxDrawdown,
     };
+    const lockPath = `${this.stateFilePath}.lock`;
+    let lockFd: number | undefined;
+    let tmp: string | undefined;
     try {
-      mkdirSync(dirname(this.stateFilePath), { recursive: true });
-      const tmp = `${this.stateFilePath}.tmp`;
-      writeFileSync(tmp, JSON.stringify(state), 'utf8');
+      mkdirSync(dirname(this.stateFilePath), { recursive: true, mode: 0o700 });
+      lockFd = openSync(lockPath, 'wx', 0o600);
+      tmp = `${this.stateFilePath}.${String(process.pid)}.${String(Date.now())}.tmp`;
+      writeFileSync(tmp, JSON.stringify(state), { encoding: 'utf8', mode: 0o600 });
+      const tmpFd = openSync(tmp, 'r');
+      try {
+        fsyncSync(tmpFd);
+      } finally {
+        closeSync(tmpFd);
+      }
       renameSync(tmp, this.stateFilePath);
+      const dirFd = openSync(dirname(this.stateFilePath), 'r');
+      try {
+        fsyncSync(dirFd);
+      } finally {
+        closeSync(dirFd);
+      }
     } catch (error) {
       this.circuitBreakerTriggered = true;
       this.logger.error('Failed to persist risk state', {
         error: error instanceof Error ? error.message : String(error),
       });
+    } finally {
+      if (tmp) {
+        try {
+          unlinkSync(tmp);
+        } catch {
+          // The rename may already have consumed the temp file.
+        }
+      }
+      if (lockFd !== undefined) {
+        closeSync(lockFd);
+        try {
+          unlinkSync(lockPath);
+        } catch {
+          // Preserve the original persistence result.
+        }
+      }
     }
   }
 }
@@ -573,8 +824,57 @@ function isPersistedRiskState(value: unknown): value is PersistedRiskState {
     Number.isFinite(state.maxDailyPnL) &&
     typeof state.minDailyPnL === 'number' &&
     Number.isFinite(state.minDailyPnL) &&
-    typeof state.circuitBreakerTriggered === 'boolean'
+    state.maxDailyPnL >= state.minDailyPnL &&
+    state.maxDailyPnL >= state.dailyPnL &&
+    state.minDailyPnL <= state.dailyPnL &&
+    typeof state.circuitBreakerTriggered === 'boolean' &&
+    (state.tradingDay === undefined || /^\d{4}-\d{2}-\d{2}$/.test(state.tradingDay)) &&
+    (state.maxDrawdown === undefined ||
+      (typeof state.maxDrawdown === 'number' &&
+        Number.isFinite(state.maxDrawdown) &&
+        state.maxDrawdown >= 0)) &&
+    new Set(state.positions.map((position) => position.marketId)).size === state.positions.length
   );
+}
+
+function isValidRiskTrade(trade: RiskTrade): boolean {
+  if (
+    trade.marketId.trim() === '' ||
+    !Number.isFinite(trade.size) ||
+    trade.size <= 0 ||
+    !Number.isFinite(trade.estimatedNotional) ||
+    trade.estimatedNotional <= 0
+  ) {
+    return false;
+  }
+  const unitPrice = trade.estimatedNotional / trade.size;
+  return unitPrice > 0 && unitPrice < 1;
+}
+
+function validateRiskConfig(
+  config: Required<Omit<RiskManagerConfig, 'stateFilePath'>>
+): Required<Omit<RiskManagerConfig, 'stateFilePath'>> {
+  if (!Number.isFinite(config.maxExposure) || config.maxExposure <= 0) {
+    throw new Error('maxExposure must be greater than zero');
+  }
+  if (
+    !Number.isFinite(config.maxBetFraction) ||
+    config.maxBetFraction <= 0 ||
+    config.maxBetFraction > 1
+  ) {
+    throw new Error('maxBetFraction must be in (0, 1]');
+  }
+  if (!Number.isFinite(config.maxDailyLoss) || config.maxDailyLoss <= 0) {
+    throw new Error('maxDailyLoss must be greater than zero');
+  }
+  if (!Number.isFinite(config.emergencyStopThreshold) || config.emergencyStopThreshold <= 0) {
+    throw new Error('emergencyStopThreshold must be greater than zero');
+  }
+  return config;
+}
+
+function currentTradingDay(now = new Date()): string {
+  return now.toISOString().slice(0, 10);
 }
 
 function isPersistedPosition(value: unknown): value is Position {
@@ -587,10 +887,13 @@ function isPersistedPosition(value: unknown): value is Position {
     position.marketId.trim() !== '' &&
     typeof position.size === 'number' &&
     Number.isFinite(position.size) &&
+    Math.abs(position.size) > RiskManager.RECONCILE_TOLERANCE &&
     typeof position.avgPrice === 'number' &&
     Number.isFinite(position.avgPrice) &&
     position.avgPrice >= 0 &&
-    (position.side === 'long' || position.side === 'short') &&
+    position.avgPrice < 1 &&
+    position.side === 'long' &&
+    position.size > 0 &&
     typeof position.timestamp === 'number' &&
     Number.isFinite(position.timestamp) &&
     position.timestamp >= 0

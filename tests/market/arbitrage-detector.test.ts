@@ -11,9 +11,21 @@ import {
   getArbitrageDetector,
   resetArbitrageDetector,
   type ArbitrageOpportunity,
-  type SingleMarketArbitrage,
 } from '../../src/market/arbitrage-detector.js';
-import { getOrderBookManager, resetOrderBookManager } from '../../src/market/order-book.js';
+import {
+  getOrderBookManager,
+  resetOrderBookManager,
+  type OrderBook,
+} from '../../src/market/order-book.js';
+
+function createAskBooks(quotes: Record<string, number>): Map<string, OrderBook> {
+  const manager = getOrderBookManager();
+  const timestamp = Date.now();
+  for (const [marketId, price] of Object.entries(quotes)) {
+    manager.updateBook(marketId, [], [{ price, size: 100 }], timestamp, 'snapshot');
+  }
+  return new Map(Object.keys(quotes).map((marketId) => [marketId, manager.getBook(marketId)]));
+}
 
 describe('ArbitrageDetector', () => {
   beforeEach(() => {
@@ -118,7 +130,9 @@ describe('ArbitrageDetector', () => {
       detector.clear();
 
       // After clear, no opportunities should be found
-      const opportunities = detector.findAllOpportunities();
+      const opportunities = detector.findAllOpportunities(
+        createAskBooks({ 'yes-m1': 0.5, 'no-m1': 0.4 })
+      );
       expect(opportunities.length).toBe(0);
     });
   });
@@ -381,7 +395,14 @@ describe('ArbitrageDetector', () => {
         outcomes: ['YES', 'NO'],
       });
 
-      const opportunities = detector.findAllOpportunities();
+      const opportunities = detector.findAllOpportunities(
+        createAskBooks({
+          'yes-m1': 0.45,
+          'no-m1': 0.45,
+          'yes-m2': 0.3,
+          'no-m2': 0.3,
+        })
+      );
 
       expect(opportunities.length).toBeGreaterThan(0);
       expect(opportunities[0]!.type).toBe('single-market');
@@ -410,7 +431,9 @@ describe('ArbitrageDetector', () => {
         outcomes: ['YES', 'NO'],
       });
 
-      const opportunities = detector.findAllOpportunities();
+      const opportunities = detector.findAllOpportunities(
+        createAskBooks({ 'yes-m1': 0.5, 'no-m1': 0.4 })
+      );
 
       // Should be sorted by guaranteed profit descending
       for (let i = 1; i < opportunities.length; i++) {
@@ -432,7 +455,9 @@ describe('ArbitrageDetector', () => {
         outcomes: ['YES', 'NO'],
       });
 
-      const opportunities = detector.findAllOpportunities();
+      const opportunities = detector.findAllOpportunities(
+        createAskBooks({ 'yes-m1': 0.5, 'no-m1': 0.4 })
+      );
 
       expect(opportunities.length).toBeGreaterThan(0);
       expect(opportunities[0]!.timestamp).toBeGreaterThan(0);
@@ -480,7 +505,7 @@ describe('ArbitrageDetector', () => {
         profitUnit: 'USD',
         tradeDirection: [1, 1],
       });
-      expect(crossMarket?.guaranteedProfit).toBeCloseTo(0.091, 8);
+      expect(crossMarket?.guaranteedProfit).toBeCloseTo(0.0567, 8);
     });
 
     it('never promotes the dimensionless KL diagnostic without payoff scenarios and books', () => {
@@ -695,7 +720,9 @@ describe('ArbitrageDetector', () => {
         outcomes: ['YES', 'NO'],
       });
 
-      const opportunities = detector.findAllOpportunities();
+      const opportunities = detector.findAllOpportunities(
+        createAskBooks({ 'yes-m1': 0.5, 'no-m1': 0.4 })
+      );
       expect(opportunities.length).toBeGreaterThan(0);
 
       const opportunity = opportunities[0]!;
@@ -705,7 +732,7 @@ describe('ArbitrageDetector', () => {
       expect(opportunity.tradeDirection[1]).toBeGreaterThan(0);
     });
 
-    it('should compute sell direction when sum > 1', () => {
+    it('does not promote a theoretical short without executable inventory', () => {
       const detector = new ArbitrageDetector();
 
       detector.addEvent({
@@ -717,14 +744,10 @@ describe('ArbitrageDetector', () => {
         outcomes: ['YES', 'NO'],
       });
 
-      const opportunities = detector.findAllOpportunities();
-      expect(opportunities.length).toBeGreaterThan(0);
-
-      const opportunity = opportunities[0]!;
-      expect(opportunity.type).toBe('single-market');
-      // Trade direction should be negative (sell both)
-      expect(opportunity.tradeDirection[0]).toBeLessThan(0);
-      expect(opportunity.tradeDirection[1]).toBeLessThan(0);
+      const opportunities = detector.findAllOpportunities(
+        createAskBooks({ 'yes-m1': 0.6, 'no-m1': 0.5 })
+      );
+      expect(opportunities).toHaveLength(0);
     });
 
     it('should handle exact sum = 1 (no arbitrage)', () => {
@@ -933,82 +956,6 @@ describe('ArbitrageDetector', () => {
       const events = getEventsFromPolytope();
 
       expect(events.length).toBe(2);
-    });
-
-    it('should compute trade direction for sum < 1', () => {
-      const detector = new ArbitrageDetector();
-
-      const computeSingleMarketTrade = (
-        detector as unknown as {
-          computeSingleMarketTrade(arb: SingleMarketArbitrage): number[];
-        }
-      ).computeSingleMarketTrade.bind(detector);
-
-      const arb: SingleMarketArbitrage = {
-        eventId: 'event-1',
-        yesMarketId: 'yes-m1',
-        noMarketId: 'no-m1',
-        yesPrice: 0.5,
-        noPrice: 0.4,
-        sum: 0.9,
-        deviation: 0.1,
-        profitPotential: 0.1,
-      };
-
-      const direction = computeSingleMarketTrade(arb);
-
-      expect(direction).toEqual([0.5, 0.6]); // [1 - 0.5, 1 - 0.4]
-    });
-
-    it('should compute trade direction for sum > 1', () => {
-      const detector = new ArbitrageDetector();
-
-      const computeSingleMarketTrade = (
-        detector as unknown as {
-          computeSingleMarketTrade(arb: SingleMarketArbitrage): number[];
-        }
-      ).computeSingleMarketTrade.bind(detector);
-
-      const arb: SingleMarketArbitrage = {
-        eventId: 'event-1',
-        yesMarketId: 'yes-m1',
-        noMarketId: 'no-m1',
-        yesPrice: 0.6,
-        noPrice: 0.5,
-        sum: 1.1,
-        deviation: 0.1,
-        profitPotential: 0.1,
-      };
-
-      const direction = computeSingleMarketTrade(arb);
-
-      expect(direction).toEqual([-0.6, -0.5]); // [-0.6, -0.5]
-    });
-
-    it('should compute trade direction for sum = 1', () => {
-      const detector = new ArbitrageDetector();
-
-      const computeSingleMarketTrade = (
-        detector as unknown as {
-          computeSingleMarketTrade(arb: SingleMarketArbitrage): number[];
-        }
-      ).computeSingleMarketTrade.bind(detector);
-
-      const arb: SingleMarketArbitrage = {
-        eventId: 'event-1',
-        yesMarketId: 'yes-m1',
-        noMarketId: 'no-m1',
-        yesPrice: 0.6,
-        noPrice: 0.4,
-        sum: 1.0,
-        deviation: 0,
-        profitPotential: 0,
-      };
-
-      const direction = computeSingleMarketTrade(arb);
-
-      // When sum = 1, it falls into else branch (sell direction)
-      expect(direction).toEqual([-0.6, -0.4]);
     });
   });
 });

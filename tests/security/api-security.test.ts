@@ -30,6 +30,15 @@ describe('ApiKeyManager', () => {
       manager.registerKey('key1', 'api-key-1', 'secret-1', expiresAt);
       expect(manager.isCurrentKeyExpired()).toBe(false);
     });
+
+    it('returns a defensive credentials copy', () => {
+      manager.registerKey('key1', 'api-key-1', 'secret-1');
+      manager.setCurrentKey('key1');
+      const credentials = manager.getCurrentCredentials();
+      if (credentials) credentials.apiSecret = 'mutated';
+
+      expect(manager.getCurrentCredentials()?.apiSecret).toBe('secret-1');
+    });
   });
 
   describe('rotateKey', () => {
@@ -177,6 +186,14 @@ describe('RateLimiter', () => {
         jest.useRealTimers();
       }
     });
+
+    it('fails closed for new keys when the cardinality cap is exhausted', () => {
+      const map = (limiter as unknown as { limits: Map<string, unknown> }).limits;
+      for (let i = 0; i < 10000; i++) map.set(`k${String(i)}`, { count: 1, resetTime: Infinity });
+
+      expect(limiter.isAllowed('overflow')).toBe(false);
+      expect(map.size).toBe(10000);
+    });
   });
 
   describe('getRemaining', () => {
@@ -189,6 +206,19 @@ describe('RateLimiter', () => {
 
     it('should return max for new keys', () => {
       expect(limiter.getRemaining('newuser')).toBe(3);
+    });
+
+    it('should return max when the previous window expired', () => {
+      jest.useFakeTimers();
+      try {
+        jest.setSystemTime(1_000);
+        const shortLimiter = new RateLimiter(3, 100);
+        shortLimiter.isAllowed('user1');
+        jest.setSystemTime(1_101);
+        expect(shortLimiter.getRemaining('user1')).toBe(3);
+      } finally {
+        jest.useRealTimers();
+      }
     });
   });
 

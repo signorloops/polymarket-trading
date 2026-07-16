@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { OrderRequest, OrderResponse } from '../api/polymarket-client.js';
-import type { TradingClient } from '../api/trading-client.js';
+import type {
+  HeartbeatTradingClient,
+  TradingBalanceClient,
+  TradingClient,
+} from '../api/trading-client.js';
 import {
   CanaryTradePersistence,
   DEFAULT_CANARY_STATE_FILE_PATH,
@@ -23,6 +27,7 @@ import {
 
 export const CANARY_CONFIRMATION_PHRASE = 'PLACE_ONE_REAL_POLYMARKET_CANARY_ORDER';
 export const CANARY_HARD_MAX_NOTIONAL_USD = 5;
+const CONSERVATIVE_TAKER_FEE_RATE = 0.07;
 export const DEFAULT_CANARY_POLL_INTERVAL_MS = 2_000;
 export const DEFAULT_CANARY_POLL_TIMEOUT_MS = 30_000;
 
@@ -144,14 +149,50 @@ export async function runCanaryTrade(
   assertRealCanaryEnabled(config);
   const submittedAt = now();
   let record: CanaryTradeRecord | undefined;
+  let heartbeatClient: HeartbeatTradingClient | undefined;
+  let submissionAttempted = false;
 
   try {
     assertCanaryKillSwitchInactive(killSwitch);
     if (!tradingClient) {
       throw new Error('Trading client is required for real canary submission');
     }
+    if (!isTradingStatusClient(tradingClient)) {
+      throw new Error('Real canary requires exchange order-status reconciliation support');
+    }
+    if (!isTradingBalanceClient(tradingClient)) {
+      throw new Error('Real canary requires token and collateral balance reconciliation support');
+    }
+    if (!isHeartbeatTradingClient(tradingClient)) {
+      throw new Error('Real canary requires CLOB heartbeat support');
+    }
+
+    assertNoUnresolvedCanary(persistence);
+    await assertCanaryBalances(config, tradingClient);
+
+    record = createRecord({
+      runId,
+      requestedAt: submittedAt,
+      updatedAt: now(),
+      config,
+      notionalUsd,
+      status: 'intent',
+      submitted: false,
+    });
+    persistence.saveRecord(record);
+
+    heartbeatClient = tradingClient;
+    await heartbeatClient.startHeartbeat();
+    submissionAttempted = true;
+    record = {
+      ...record,
+      updatedAt: now(),
+      submissionAttempted: true,
+    };
+    persistence.saveRecord(record);
 
     let order = await tradingClient.placeOrder(orderRequest);
+    assertCanaryOrderResponse(order, config);
     record = createRecord({
       runId,
       requestedAt: submittedAt,
@@ -160,6 +201,7 @@ export async function runCanaryTrade(
       notionalUsd,
       status: toCanaryRecordStatus(order.status),
       submitted: true,
+      submissionAttempted: true,
       orderId: order.id,
     });
     persistence.saveRecord(record);
@@ -264,6 +306,15 @@ export async function runCanaryTrade(
       });
     }
 
+    if (order.status === 'filled') {
+      record = updateRecord({
+        updatedAt: now(),
+        manualInterventionRequired: true,
+        manualInterventionReason:
+          'Canary order filled; reconcile balances and deliberately close or retain the resulting position',
+      });
+    }
+
     return {
       submitted: true,
       dryRun: false,
@@ -286,14 +337,28 @@ export async function runCanaryTrade(
         submitted: false,
       });
 
+    const ambiguousSubmission = submissionAttempted && !failedRecord.orderId;
     persistence.saveRecord({
       ...failedRecord,
       updatedAt: now(),
-      status: 'failed',
+      status: ambiguousSubmission
+        ? 'unknown'
+        : failedRecord.orderId
+          ? failedRecord.status
+          : 'failed',
+      submissionAttempted,
+      manualInterventionRequired: ambiguousSubmission || failedRecord.orderId !== undefined,
+      ...((ambiguousSubmission || failedRecord.orderId !== undefined) && {
+        manualInterventionReason: ambiguousSubmission
+          ? 'Order submission outcome is unknown; reconcile the order journal and exchange before retrying'
+          : 'A confirmed canary order encountered a lifecycle error; reconcile it on the exchange',
+      }),
       lastError: getErrorMessage(error),
     });
 
     throw error;
+  } finally {
+    heartbeatClient?.stopHeartbeat();
   }
 }
 
@@ -364,8 +429,124 @@ function assertCanaryKillSwitchInactive(killSwitch: CanaryKillSwitchStatePort): 
   }
 }
 
+function assertNoUnresolvedCanary(persistence: CanaryTradePersistencePort): void {
+  const records = persistence.loadRecords?.() ?? [];
+  const unresolved = records.filter(
+    (record) =>
+      record.status === 'intent' ||
+      record.status === 'submitted' ||
+      record.status === 'open' ||
+      record.status === 'partial' ||
+      record.status === 'timed_out' ||
+      record.status === 'unknown'
+  );
+  if (unresolved.length > 0) {
+    throw new Error(
+      `Canary state contains ${String(unresolved.length)} unresolved prior run(s); reconcile them before submitting another order`
+    );
+  }
+}
+
+async function assertCanaryBalances(
+  config: CanaryTradeConfig,
+  tradingClient: TradingBalanceClient
+): Promise<void> {
+  const [balances, collateral] = await Promise.all([
+    tradingClient.getBalances([config.tokenId]),
+    tradingClient.getCollateralBalance(),
+  ]);
+  const balance = balances.find((candidate) => candidate.assetId === config.tokenId);
+  if (balances.length !== 1 || !balance || !Number.isFinite(balance.size) || balance.size < 0) {
+    throw new Error('Canary token balance reconciliation failed');
+  }
+  if (
+    !Number.isFinite(collateral.size) ||
+    collateral.size < 0 ||
+    hasInvalidAllowance(collateral.allowances) ||
+    (balance.allowances !== undefined && hasInvalidAllowance(balance.allowances))
+  ) {
+    throw new Error('Canary collateral reconciliation failed');
+  }
+
+  if (config.side === 'buy') {
+    const requiredCollateral = calculateMaximumBuyCostUsd(config);
+    if (collateral.size + 1e-8 < requiredCollateral) {
+      throw new Error('Insufficient reconciled collateral for canary buy');
+    }
+    if (!hasSufficientAllowance(collateral.allowances, requiredCollateral)) {
+      throw new Error('No sufficient collateral allowance is available for canary buy');
+    }
+  } else {
+    if (balance.size + 1e-8 < config.size) {
+      throw new Error('Insufficient reconciled token balance for canary sell');
+    }
+    if (!balance.allowances || !hasSufficientAllowance(balance.allowances, config.size)) {
+      throw new Error('No sufficient conditional-token allowance is available for canary sell');
+    }
+  }
+}
+
+function assertCanaryOrderResponse(order: OrderResponse, config: CanaryTradeConfig): void {
+  if (
+    order.id.trim() === '' ||
+    order.marketId !== config.tokenId ||
+    order.side !== config.side ||
+    !Number.isFinite(order.size) ||
+    Math.abs(order.size - config.size) > 1e-8 ||
+    !Number.isFinite(order.price) ||
+    order.price <= 0 ||
+    order.price >= 1 ||
+    !Number.isFinite(order.filledSize) ||
+    order.filledSize < 0 ||
+    !Number.isFinite(order.remainingSize) ||
+    order.remainingSize < 0 ||
+    order.filledSize + order.remainingSize > order.size + 1e-8
+  ) {
+    throw new Error('Canary order adapter returned an invalid or mismatched response');
+  }
+}
+
+function hasInvalidAllowance(allowances: Record<string, number>): boolean {
+  return Object.values(allowances).some(
+    (allowance) => !Number.isFinite(allowance) || allowance < 0
+  );
+}
+
+function hasSufficientAllowance(allowances: Record<string, number>, required: number): boolean {
+  return Object.values(allowances).some(
+    (allowance) => Number.isFinite(allowance) && allowance + 1e-8 >= required
+  );
+}
+
+function isTradingBalanceClient(client: TradingClient): client is TradingBalanceClient {
+  return (
+    'getBalances' in client &&
+    typeof client.getBalances === 'function' &&
+    'getCollateralBalance' in client &&
+    typeof client.getCollateralBalance === 'function'
+  );
+}
+
+function isHeartbeatTradingClient(client: TradingClient): client is HeartbeatTradingClient {
+  return (
+    'startHeartbeat' in client &&
+    typeof client.startHeartbeat === 'function' &&
+    'stopHeartbeat' in client &&
+    typeof client.stopHeartbeat === 'function'
+  );
+}
+
 function calculateNotionalUsd(config: CanaryTradeConfig): number {
   return config.size * config.price;
+}
+
+function calculateMaximumBuyCostUsd(config: CanaryTradeConfig): number {
+  return (
+    calculateNotionalUsd(config) +
+    // A limit buy may fill at any better price below its limit. The platform
+    // fee curve p(1-p) peaks at 0.25 when p=0.5, so reserve that global maximum.
+    config.size * CONSERVATIVE_TAKER_FEE_RATE * 0.25
+  );
 }
 
 function createRecord(params: {
@@ -376,6 +557,7 @@ function createRecord(params: {
   notionalUsd: number;
   status: CanaryTradeRecordStatus;
   submitted: boolean;
+  submissionAttempted?: boolean;
   orderId?: string;
 }): CanaryTradeRecord {
   return {
@@ -384,6 +566,9 @@ function createRecord(params: {
     updatedAt: params.updatedAt,
     dryRun: params.config.dryRun,
     submitted: params.submitted,
+    ...(params.submissionAttempted === undefined
+      ? {}
+      : { submissionAttempted: params.submissionAttempted }),
     tokenId: params.config.tokenId,
     side: params.config.side,
     size: params.config.size,

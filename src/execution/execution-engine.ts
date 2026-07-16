@@ -51,6 +51,10 @@ export class ExecutionEngine {
   private logger = getLogger().child({ module: 'ExecutionEngine' });
   private apiClient: TradingClient | null = null;
   private riskManager: RiskManager;
+  private readonly riskReservations = new Map<
+    string,
+    { marketId: string; size: number; side: 'buy' | 'sell'; estimatedNotional: number }
+  >();
   private readonly options: Required<ExecutionEngineOptions>;
 
   constructor(
@@ -98,6 +102,13 @@ export class ExecutionEngine {
    * Execute a single order
    */
   async executeOrder(order: TradeOrder): Promise<OrderStatus> {
+    return this.executeOrderInternal(order, false);
+  }
+
+  private async executeOrderInternal(
+    order: TradeOrder,
+    compensatingRecovery: boolean
+  ): Promise<OrderStatus> {
     const startTime = performance.now();
     this.logger.info(`Executing order ${order.id}`, {
       marketId: order.marketId,
@@ -106,21 +117,61 @@ export class ExecutionEngine {
       price: order.price,
     });
 
-    this.orderManager.addPending(order);
-    TradingMetrics.ordersSubmitted.inc({ market_id: order.marketId, side: order.side });
+    let reserved = false;
 
     try {
-      // Simulate order submission (replace with actual API call)
-      const status = await this.submitOrder(order);
+      if (this.apiClient && !compensatingRecovery) {
+        const reservation = {
+          marketId: order.marketId,
+          size: order.size,
+          side: order.side,
+          estimatedNotional: order.size * order.price,
+        };
+        const riskCheck = this.riskManager.checkTrades([
+          ...this.riskReservations.values(),
+          reservation,
+        ]);
+        if (!riskCheck.allowed) {
+          throw new Error(`Order blocked by risk manager: ${riskCheck.reason ?? 'unknown reason'}`);
+        }
+        if (this.riskReservations.has(order.id)) {
+          throw new Error(`Duplicate in-flight order id: ${order.id}`);
+        }
+        this.riskReservations.set(order.id, reservation);
+        reserved = true;
+      }
+
+      this.orderManager.addPending(order);
+      const status = await this.submitOrder(order, compensatingRecovery);
       const executionTime = performance.now() - startTime;
 
       this.orderManager.updateStatus(status);
-      this.orderManager.removePending(order.id);
       this.riskManager.updatePosition(status, order.marketId, order.side);
+      if (this.isCancellableStatus(status)) {
+        if (reserved) {
+          this.riskReservations.set(order.id, {
+            marketId: order.marketId,
+            size: status.remainingSize,
+            side: order.side,
+            estimatedNotional: status.remainingSize * order.price,
+          });
+          reserved = false;
+        }
+      } else {
+        this.orderManager.removePending(order.id);
+      }
       recordOrderMetrics(order, status, executionTime);
       return status;
     } catch (error) {
       const executionTime = performance.now() - startTime;
+      if (this.apiClient) {
+        // A thrown authenticated submission can be an explicit rejection or an
+        // ambiguous network outcome. Without an exchange order id we cannot prove
+        // which one occurred, so halt further exposure until journal/account review.
+        this.riskManager.triggerCircuitBreaker(
+          `Real order ${order.id} did not return a confirmed exchange state`
+        );
+      }
       const errorStatus: OrderStatus = {
         orderId: order.id,
         status: 'error',
@@ -133,10 +184,11 @@ export class ExecutionEngine {
 
       this.orderManager.updateStatus(errorStatus);
       this.orderManager.removePending(order.id);
-      TradingMetrics.ordersFailed.inc({ market_id: order.marketId, side: order.side });
       recordOrderMetrics(order, errorStatus, executionTime);
       this.logger.error(`Order ${order.id} failed`, { error: errorStatus.error });
       return errorStatus;
+    } finally {
+      if (reserved) this.riskReservations.delete(order.id);
     }
   }
 
@@ -187,6 +239,10 @@ export class ExecutionEngine {
     for (const result of results) {
       if (result.error) {
         errors.push(`Order ${result.orderId}: ${result.error}`);
+      } else if (result.status !== 'filled' || result.remainingSize > 1e-8) {
+        errors.push(
+          `Order ${result.orderId} incomplete: status=${result.status}, remaining=${String(result.remainingSize)}`
+        );
       }
       totalFilled += result.filledSize;
       totalCost += result.filledSize * result.avgPrice;
@@ -254,25 +310,71 @@ export class ExecutionEngine {
     try {
       await this.submitCancel(trackedStatus?.exchangeOrderId ?? orderId);
 
+      let finalStatus = trackedStatus;
+      if (this.apiClient) {
+        if (!isTradingStatusClient(this.apiClient) || !trackedStatus?.exchangeOrderId || !order) {
+          throw new Error('Exchange cancellation cannot be reconciled to the original order');
+        }
+        const terminal = await pollOrderUntilTerminal({
+          tradingClient: this.apiClient,
+          orderId: trackedStatus.exchangeOrderId,
+          pollIntervalMs: this.options.recoveryPollIntervalMs,
+          pollTimeoutMs: this.options.recoveryPollTimeoutMs,
+          sleep: this.options.sleep,
+          now: this.options.now,
+          mapStatus: (status) => status,
+          openStatuses: new Set(['open', 'partial']),
+        });
+        if (!terminal) {
+          throw new Error('Exchange cancellation did not reach a terminal state');
+        }
+        const additionalFill = Math.max(terminal.filledSize - trackedStatus.filledSize, 0);
+        if (additionalFill > 0) {
+          this.riskManager.updatePosition(
+            {
+              orderId,
+              exchangeOrderId: trackedStatus.exchangeOrderId,
+              status: terminal.status === 'filled' ? 'filled' : 'partial',
+              filledSize: additionalFill,
+              remainingSize: terminal.remainingSize,
+              avgPrice: terminal.price,
+              timestamp: this.options.now(),
+            },
+            order.marketId,
+            order.side
+          );
+        }
+        finalStatus = {
+          orderId,
+          exchangeOrderId: trackedStatus.exchangeOrderId,
+          status: this.mapOrderStatus(terminal.status),
+          filledSize: terminal.filledSize,
+          remainingSize: terminal.remainingSize,
+          avgPrice: terminal.price,
+          timestamp: this.options.now(),
+        };
+      }
+
       const status: OrderStatus = {
         orderId,
-        status: 'cancelled',
+        status: finalStatus?.status ?? 'cancelled',
         ...(trackedStatus?.exchangeOrderId
           ? { exchangeOrderId: trackedStatus.exchangeOrderId }
           : {}),
-        filledSize: trackedStatus?.filledSize ?? 0,
-        remainingSize: order?.size ?? trackedStatus?.remainingSize ?? 0,
-        avgPrice: trackedStatus?.avgPrice ?? order?.price ?? 0,
+        filledSize: finalStatus?.filledSize ?? 0,
+        remainingSize: finalStatus?.remainingSize ?? order?.size ?? 0,
+        avgPrice: finalStatus?.avgPrice ?? order?.price ?? 0,
         timestamp: Date.now(),
       };
 
       this.orderManager.updateStatus(status);
       this.orderManager.removePending(orderId);
+      this.riskReservations.delete(orderId);
 
       // Record cancellation metric. NOTE: do NOT label by order_id — that creates
       // one unbounded time series per order (a cardinality leak). Count as a total;
       // per-order detail belongs in structured logs, not metrics.
-      TradingMetrics.ordersCancelled.inc({});
+      if (status.status === 'cancelled') TradingMetrics.ordersCancelled.inc({});
 
       return true;
     } catch (error) {
@@ -311,11 +413,11 @@ export class ExecutionEngine {
     this.orderManager.clearOldOrders(maxAgeMs);
   }
 
-  private async submitOrder(order: TradeOrder): Promise<OrderStatus> {
+  private async submitOrder(order: TradeOrder, compensatingRecovery = false): Promise<OrderStatus> {
     // Kill-switch: never place an order while the risk circuit breaker is active.
     // This is the last line of defense on the order-submission path — even if an
     // upstream caller skipped the risk check, no real-money order leaves the system.
-    if (this.riskManager.isCircuitBreakerActive()) {
+    if (this.riskManager.isCircuitBreakerActive() && !compensatingRecovery) {
       this.logger.error('Order submission blocked: risk circuit breaker is active', {
         orderId: order.id,
         marketId: order.marketId,
@@ -349,6 +451,18 @@ export class ExecutionEngine {
       // Map API response to OrderStatus
       const filledSize = response.filledSize;
       const remainingSize = response.remainingSize;
+      if (
+        !Number.isFinite(filledSize) ||
+        filledSize < 0 ||
+        !Number.isFinite(remainingSize) ||
+        remainingSize < 0 ||
+        filledSize + remainingSize > order.size + 1e-8 ||
+        !Number.isFinite(response.price) ||
+        response.price <= 0 ||
+        response.price >= 1
+      ) {
+        throw new Error('Trading adapter returned an invalid order response');
+      }
 
       return {
         orderId: order.id,
@@ -417,7 +531,7 @@ export class ExecutionEngine {
       case 'rejected':
         return 'error';
       default:
-        return 'pending';
+        throw new Error(`Unsupported exchange order status: ${apiStatus}`);
     }
   }
 
@@ -432,6 +546,9 @@ export class ExecutionEngine {
     requestedOrders: TradeOrder[],
     observedOrders: OrderStatus[]
   ): Promise<ExecutionRecoveryResult> {
+    this.riskManager.triggerCircuitBreaker(
+      `Incomplete multi-leg arbitrage ${arbitrageId}; recovery in progress`
+    );
     const cancelledOrderIds: string[] = [];
     const errors: string[] = [];
     const finalFilledByOrder = new Map<string, number>();
@@ -454,6 +571,12 @@ export class ExecutionEngine {
         continue;
       }
       cancelledOrderIds.push(observed.orderId);
+
+      const reconciledStatus = this.orderManager.getStatus(observed.orderId);
+      if (reconciledStatus && !this.isCancellableStatus(reconciledStatus)) {
+        finalFilledByOrder.set(observed.orderId, reconciledStatus.filledSize);
+        continue;
+      }
 
       if (!this.apiClient || !isTradingStatusClient(this.apiClient) || !observed.exchangeOrderId) {
         cancellationsConfirmed = false;
@@ -525,15 +648,18 @@ export class ExecutionEngine {
           unwindSide === 'sell'
             ? Math.max(0.001, referencePrice - this.options.maxUnwindSlippage)
             : Math.min(0.999, referencePrice + this.options.maxUnwindSlippage);
-        const unwind = await this.executeOrder({
-          id: `${arbitrageId}-unwind-${requested.id}`,
-          marketId: requested.marketId,
-          side: unwindSide,
-          size: filledSize,
-          price: unwindPrice,
-          orderType: 'limit',
-          timeInForce: 'GTC',
-        });
+        const unwind = await this.executeOrderInternal(
+          {
+            id: `${arbitrageId}-unwind-${requested.id}`,
+            marketId: requested.marketId,
+            side: unwindSide,
+            size: filledSize,
+            price: unwindPrice,
+            orderType: 'market',
+            timeInForce: 'FOK',
+          },
+          true
+        );
         unwindOrders.push(unwind);
         if (unwind.status !== 'filled' || unwind.filledSize + 1e-8 < filledSize) {
           unwindComplete = false;
@@ -545,9 +671,6 @@ export class ExecutionEngine {
       }
     }
 
-    this.riskManager.triggerCircuitBreaker(
-      `Incomplete multi-leg arbitrage ${arbitrageId}; operator review required`
-    );
     const unwindAttempted = unwindOrders.length > 0;
     return {
       attempted: true,

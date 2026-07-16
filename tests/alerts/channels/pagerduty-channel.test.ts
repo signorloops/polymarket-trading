@@ -140,7 +140,7 @@ describe('PagerDutyChannel', () => {
       const channel = new PagerDutyChannel({ integrationKey: mockKey });
       await channel.send(
         makeNotification({
-          metadata: { host: 'web-01' },
+          metadata: { host: 'web-01', password: 'TOP-SECRET' },
         })
       );
 
@@ -165,6 +165,8 @@ describe('PagerDutyChannel', () => {
       expect(payload.payload.source).toBe('monitor');
       expect(payload.payload.custom_details.message).toBe('Primary server is unreachable');
       expect(payload.payload.custom_details.host).toBe('web-01');
+      expect(JSON.stringify(payload)).not.toContain('TOP-SECRET');
+      expect(payload.payload.custom_details.password).toBe('[REDACTED]');
     });
 
     it('should use custom severityMap when provided', async () => {

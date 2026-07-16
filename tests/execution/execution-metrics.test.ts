@@ -6,9 +6,10 @@ import { jest } from '@jest/globals';
 
 // Mocks
 const mockObserveExecLatency = jest.fn();
-const mockObserveDetectionLatency = jest.fn();
+const mockObserveExecutionLatency = jest.fn();
 const mockRecordTrade = jest.fn();
-const mockRecordArbitrage = jest.fn();
+const mockArbitrageExecuted = jest.fn();
+const mockArbitrageFailed = jest.fn();
 const mockSendAlert = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
 
 jest.unstable_mockModule('../../src/utils/logger.js', () => ({
@@ -29,10 +30,11 @@ jest.unstable_mockModule('../../src/utils/logger.js', () => ({
 jest.unstable_mockModule('../../src/utils/metrics.js', () => ({
   TradingMetrics: {
     orderExecutionLatency: { observe: mockObserveExecLatency },
-    arbitrageDetectionLatency: { observe: mockObserveDetectionLatency },
+    arbitrageExecutionLatency: { observe: mockObserveExecutionLatency },
+    arbitrageExecuted: { inc: mockArbitrageExecuted },
+    arbitrageFailed: { inc: mockArbitrageFailed },
   },
   recordTrade: mockRecordTrade,
-  recordArbitrage: mockRecordArbitrage,
 }));
 
 jest.unstable_mockModule('../../src/alerts/index.js', () => ({
@@ -120,9 +122,9 @@ describe('recordArbitrageMetrics', () => {
 
     recordArbitrageMetrics('arb-1', result, 15);
 
-    expect(mockObserveDetectionLatency).toHaveBeenCalledWith({ arbitrage_id: 'arb-1' }, 15);
-    // Arbitrage profit is unknown until settlement; do NOT fabricate totalFilled*0.01.
-    expect(mockRecordArbitrage).toHaveBeenCalledWith('arb-1', 0, true, 0);
+    expect(mockObserveExecutionLatency).toHaveBeenCalledWith({}, 15);
+    expect(mockArbitrageExecuted).toHaveBeenCalledWith({ type: 'multi-leg' });
+    expect(mockArbitrageFailed).not.toHaveBeenCalled();
   });
 
   it('should record profit=0 on failure', () => {
@@ -137,7 +139,8 @@ describe('recordArbitrageMetrics', () => {
 
     recordArbitrageMetrics('arb-2', result, 25);
 
-    expect(mockRecordArbitrage).toHaveBeenCalledWith('arb-2', 0, false, 0);
+    expect(mockObserveExecutionLatency).toHaveBeenCalledWith({}, 25);
+    expect(mockArbitrageFailed).toHaveBeenCalledWith({ type: 'multi-leg' });
   });
 });
 
@@ -179,8 +182,8 @@ describe('legsToOrders', () => {
       side: 'buy',
       size: 100,
       price: 0.5,
-      orderType: 'limit',
-      timeInForce: 'GTC',
+      orderType: 'market',
+      timeInForce: 'FOK',
     });
     expect(orders[1]!.id).toBe('arb-1-1');
   });

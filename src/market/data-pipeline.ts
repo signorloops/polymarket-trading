@@ -30,11 +30,14 @@ export interface OrderBookUpdate {
   bids: { price: number; size: number }[];
   asks: { price: number; size: number }[];
   timestamp: number;
+  kind: 'snapshot' | 'delta';
 }
 
 export type DataPipelineEvent =
   | { type: 'trade'; data: MarketData }
   | { type: 'orderbook'; data: OrderBookUpdate }
+  | { type: 'tick-size'; marketId: string; tickSize: number; timestamp: number }
+  | { type: 'market-resolved'; marketId: string; timestamp: number }
   | { type: 'connected' }
   | { type: 'disconnected' }
   | { type: 'error'; error: Error };
@@ -48,6 +51,7 @@ export class DataPipeline {
   private reconnectAttempts = 0;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
+  private lastPongAt = 0;
   private handlers: Set<EventHandler> = new Set();
   private logger = getLogger().child({ module: 'DataPipeline' });
   private isManualClose = false;
@@ -89,15 +93,47 @@ export class DataPipeline {
   /**
    * Disconnect from the WebSocket
    */
-  disconnect(): void {
+  async disconnect(): Promise<void> {
     this.isManualClose = true;
     this.clearTimers();
 
-    if (this.ws) {
-      this.logger.info('Disconnecting from WebSocket');
-      this.ws.close();
-      this.ws = null;
+    const currentWs = this.ws;
+    this.ws = null;
+    if (!currentWs || currentWs.readyState === WebSocket.CLOSED) {
+      return;
     }
+
+    this.logger.info('Disconnecting from WebSocket');
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = (): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(forceCloseTimer);
+        resolve();
+      };
+      const forceCloseTimer = setTimeout(() => {
+        if (
+          currentWs.readyState !== WebSocket.CLOSED &&
+          typeof currentWs.terminate === 'function'
+        ) {
+          currentWs.terminate();
+        }
+        finish();
+      }, 2_000);
+      forceCloseTimer.unref();
+
+      if (typeof currentWs.once === 'function') {
+        currentWs.once('close', finish);
+      } else {
+        // Minimal WebSocket-compatible transports may close synchronously.
+        finish();
+      }
+      if (currentWs.readyState === WebSocket.CLOSING) {
+        return;
+      }
+      currentWs.close();
+    });
   }
 
   /**
@@ -120,23 +156,28 @@ export class DataPipeline {
     const currentWs = this.ws;
 
     currentWs.on('open', () => {
-      if (this.ws && this.ws !== currentWs) {
+      if (this.ws !== currentWs) {
         return;
       }
       this.logger.info('WebSocket connected');
       this.reconnectAttempts = 0;
+      this.lastPongAt = Date.now();
       this.startHeartbeat();
       this.emit({ type: 'connected' });
       this.subscribeToMarkets();
     });
 
     currentWs.on('message', (wsData: WebSocket.Data) => {
-      if (this.ws && this.ws !== currentWs) {
+      if (this.ws !== currentWs) {
         return;
       }
       const startTime = performance.now();
       try {
         const dataStr = this.webSocketDataToString(wsData);
+        if (dataStr.trim().toUpperCase() === 'PONG') {
+          this.lastPongAt = Date.now();
+          return;
+        }
         const message: unknown = JSON.parse(dataStr);
         this.handleMessage(message);
 
@@ -160,7 +201,7 @@ export class DataPipeline {
     });
 
     currentWs.on('close', (code: number, reason: Buffer) => {
-      if (this.ws && this.ws !== currentWs) {
+      if (this.ws !== currentWs) {
         return;
       }
       this.ws = null;
@@ -178,7 +219,7 @@ export class DataPipeline {
     });
 
     currentWs.on('error', (error: Error) => {
-      if (this.ws && this.ws !== currentWs) {
+      if (this.ws !== currentWs) {
         return;
       }
       this.logger.error('WebSocket error', { error: error.message });
@@ -193,6 +234,10 @@ export class DataPipeline {
   }
 
   private handleMessage(message: unknown): void {
+    if (Array.isArray(message)) {
+      for (const entry of message) this.handleMessage(entry);
+      return;
+    }
     if (!this.isValidMessage(message)) {
       this.logger.warn('Invalid message received', { message });
       return;
@@ -211,6 +256,12 @@ export class DataPipeline {
         break;
       case 'price_change':
         this.handlePriceChangeMessage(msg);
+        break;
+      case 'tick_size_change':
+        this.handleTickSizeChangeMessage(msg);
+        break;
+      case 'market_resolved':
+        this.handleMarketResolvedMessage(msg);
         break;
       default:
         // Unknown message type, ignore
@@ -245,7 +296,7 @@ export class DataPipeline {
       price: Number(msg.price),
       size: this.isValidSize(msg.size) ? Number(msg.size) : 0,
       side: this.normalizeSide(msg.side),
-      timestamp: Number(msg.timestamp ?? Date.now()),
+      timestamp: this.readTimestamp(msg.timestamp),
     };
 
     if (data.marketId) {
@@ -277,7 +328,8 @@ export class DataPipeline {
       marketId,
       bids,
       asks,
-      timestamp: Number(msg.timestamp ?? Date.now()),
+      timestamp: this.readTimestamp(msg.timestamp),
+      kind: 'snapshot',
     };
 
     if (data.marketId) {
@@ -291,7 +343,7 @@ export class DataPipeline {
   }
 
   private handlePriceChangeMessage(msg: Record<string, unknown>): void {
-    const timestamp = Number(msg.timestamp ?? Date.now());
+    const timestamp = this.readTimestamp(msg.timestamp);
     const rawChanges = msg.price_changes;
 
     if (Array.isArray(rawChanges)) {
@@ -318,6 +370,7 @@ export class DataPipeline {
             bids: side === 'buy' ? [level] : [],
             asks: side === 'sell' ? [level] : [],
             timestamp,
+            kind: 'delta',
           },
         });
       }
@@ -347,6 +400,33 @@ export class DataPipeline {
     if (marketId) {
       this.emit({ type: 'trade', data });
     }
+  }
+
+  private handleTickSizeChangeMessage(msg: Record<string, unknown>): void {
+    const marketId = this.readStringIdentifier(msg.asset_id ?? msg.market_id);
+    const tickSize = Number(msg.new_tick_size ?? msg.tick_size);
+    if (!marketId || !Number.isFinite(tickSize) || tickSize <= 0 || tickSize >= 1) {
+      this.logger.warn('Dropping invalid tick-size-change message', { marketId });
+      return;
+    }
+    this.emit({
+      type: 'tick-size',
+      marketId,
+      tickSize,
+      timestamp: this.readTimestamp(msg.timestamp),
+    });
+  }
+
+  private handleMarketResolvedMessage(msg: Record<string, unknown>): void {
+    const marketId = this.readStringIdentifier(
+      msg.asset_id ?? msg.market_id ?? msg.winning_asset_id ?? msg.market
+    );
+    if (!marketId) return;
+    this.emit({
+      type: 'market-resolved',
+      marketId,
+      timestamp: this.readTimestamp(msg.timestamp),
+    });
   }
 
   private subscribeToMarkets(): void {
@@ -402,6 +482,11 @@ export class DataPipeline {
 
   private normalizeSide(side: unknown): 'buy' | 'sell' {
     return typeof side === 'string' && side.toLowerCase() === 'buy' ? 'buy' : 'sell';
+  }
+
+  private readTimestamp(value: unknown): number {
+    const timestamp = Number(value ?? Date.now());
+    return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : Date.now();
   }
 
   /**
@@ -461,12 +546,22 @@ export class DataPipeline {
       this.heartbeatTimer = null;
     }
 
-    // Send ping every 30 seconds to keep connection alive
+    // Polymarket market/user channels require an application-level PING every
+    // 10 seconds and answer with the literal PONG message.
     this.heartbeatTimer = setInterval(() => {
       if (this.ws?.readyState === WebSocket.OPEN) {
-        this.ws.ping();
+        if (Date.now() - this.lastPongAt > 25000) {
+          this.logger.error('WebSocket heartbeat timed out; reconnecting');
+          if (typeof this.ws.terminate === 'function') {
+            this.ws.terminate();
+          } else {
+            this.ws.close();
+          }
+          return;
+        }
+        this.ws.send('PING');
       }
-    }, 30000);
+    }, 10000);
     this.heartbeatTimer.unref();
   }
 
@@ -497,9 +592,9 @@ export function getDataPipeline(): DataPipeline {
  * Reset the global pipeline (for testing)
  * Disconnects the WebSocket before clearing the instance.
  */
-export function resetDataPipeline(): void {
+export async function resetDataPipeline(): Promise<void> {
   if (pipelineCreated) {
-    pipelineSingleton.get().disconnect();
+    await pipelineSingleton.get().disconnect();
     pipelineCreated = false;
   }
   pipelineSingleton.reset();

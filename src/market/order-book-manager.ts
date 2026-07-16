@@ -31,10 +31,15 @@ export class OrderBookManager {
     marketId: string,
     bids: { price: number; size: number }[],
     asks: { price: number; size: number }[],
-    timestamp?: number
+    timestamp?: number,
+    kind: 'snapshot' | 'delta' = 'delta'
   ): void {
     const book = this.getBook(marketId);
-    book.update(bids, asks, timestamp);
+    if (kind === 'snapshot') {
+      book.replace(bids, asks, timestamp);
+    } else {
+      book.update(bids, asks, timestamp);
+    }
   }
 
   getAllBooks(): OrderBook[] {

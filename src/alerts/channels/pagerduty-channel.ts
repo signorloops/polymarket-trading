@@ -8,6 +8,8 @@ import type {
   NotificationChannel,
   PagerDutyConfig,
 } from '../types.js';
+import { getLogger } from '../../utils/logger.js';
+import { redactSecrets } from '../../utils/redact.js';
 
 /**
  * PagerDuty severity mapping
@@ -48,6 +50,7 @@ export class PagerDutyChannel implements NotificationChannel {
 
   private integrationKey: string | null = null;
   private severityMap: Record<AlertLevel, PagerDutySeverity>;
+  private readonly logger = getLogger().child({ module: 'PagerDutyChannel' });
 
   constructor(config?: PagerDutyConfig) {
     if (config?.integrationKey) {
@@ -85,8 +88,8 @@ export class PagerDutyChannel implements NotificationChannel {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`PagerDuty API failed: ${String(response.status)} ${errorText}`);
+        this.logger.warn('PagerDuty API rejected notification', { status: response.status });
+        return false;
       }
 
       const result: unknown = await response.json();
@@ -99,8 +102,8 @@ export class PagerDutyChannel implements NotificationChannel {
         return true;
       }
       return false;
-    } catch (error) {
-      console.error('[PagerDutyChannel] Failed to send notification:', error);
+    } catch {
+      this.logger.error('PagerDuty notification delivery failed');
       return false;
     }
   }
@@ -135,8 +138,8 @@ export class PagerDutyChannel implements NotificationChannel {
       });
 
       return response.ok;
-    } catch (error) {
-      console.error('[PagerDutyChannel] Test failed:', error);
+    } catch {
+      this.logger.error('PagerDuty connectivity test failed');
       return false;
     }
   }
@@ -161,7 +164,7 @@ export class PagerDutyChannel implements NotificationChannel {
         timestamp: notification.timestamp.toISOString(),
         custom_details: {
           message: notification.message,
-          ...notification.metadata,
+          ...(redactSecrets(notification.metadata) as Record<string, unknown> | undefined),
         },
       },
     };

@@ -2,23 +2,21 @@
 
 [English (Default)](./README.md) | [中文](./README.zh-CN.md)
 
-基于边际多面体（Marginal Polytope）和 Frank-Wolfe 优化算法的高频套利交易系统。
+基于边际多面体（Marginal Polytope）和 Frank-Wolfe 优化算法的套利研究与模拟交易系统。
 
 ## 项目状态
 
-[![Tests](https://img.shields.io/badge/tests-942%20passed-brightgreen)]()
-[![Coverage](https://img.shields.io/badge/coverage-93%25-brightgreen)]()
-[![Lint](https://img.shields.io/badge/lint-passing-brightgreen)]()
-[![Build](https://img.shields.io/badge/build-passing-brightgreen)]()
+[![CI](https://github.com/signorloops/polymarket-trading/actions/workflows/ci.yml/badge.svg)](https://github.com/signorloops/polymarket-trading/actions/workflows/ci.yml)
+[![Security](https://github.com/signorloops/polymarket-trading/actions/workflows/security.yml/badge.svg)](https://github.com/signorloops/polymarket-trading/actions/workflows/security.yml)
 
 - ✅ **代码质量**: ESLint 0 错误，TypeScript 严格模式
-- ✅ **测试覆盖**: 93%+ 语句覆盖，82%+ 分支覆盖，942 个测试
-- ✅ **性能优化**: 核心算法微秒级响应
+- ✅ **自动化验证**：CI 执行类型检查、lint、格式、死代码检查、测试、构建和冒烟测试
+- ✅ **性能工具**：提供数学、优化器和订单簿路径的独立基准测试
 - ✅ **文档完善**: API 文档、架构说明、部署指南
 
 ## 核心特性
 
-- **边际多面体套利检测**：通过凸优化检测跨市场套利机会
+- **可审计机会检测**：单市场机会使用新鲜订单簿深度与费用；跨市场美元机会必须配置穷尽的 payoff 场景
 - **Bregman 投影**：使用 KL / 广义 KL 散度计算最优交易向量
 - **Frank-Wolfe 算法**：真实目标线搜索（golden-section）+ 约束可行迭代更新
 - **实时数据处理**：WebSocket 数据管道，订单簿重建（SkipList O(log n)）
@@ -74,13 +72,13 @@ cp .env.example .env
 
 ```env
 # 网络配置
-RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY
+RPC_URL= # 可选的旧 Polygon 交易追踪器
 WS_URL=wss://ws-subscriptions-clob.polymarket.com/ws/market
 POLYMARKET_API_KEY=your_api_key
 POLYMARKET_SECRET=your_api_secret
 POLYMARKET_PASSPHRASE=your_api_passphrase
 POLYMARKET_CHAIN_ID=137
-POLYMARKET_SIGNATURE_TYPE=0 # 0=EOA, 1=代理钱包, 2=Gnosis Safe
+POLYMARKET_SIGNATURE_TYPE=0 # 0=EOA, 1=代理钱包, 2=Gnosis Safe, 3=EIP-1271
 POLYMARKET_FUNDER_ADDRESS=
 
 # 钱包配置
@@ -91,7 +89,7 @@ WALLET_ADDRESS=your_wallet_address
 ALPHA=0.9
 INITIAL_EPSILON=0.1
 MAX_ITERATIONS=150
-MIN_PROFIT_THRESHOLD=0.05
+MIN_PROFIT_THRESHOLD=0.05 # 无量纲 KL 诊断阈值，不是美元利润
 
 # 交易参数
 MAX_POSITION_PCT=0.5
@@ -123,8 +121,8 @@ CANARY_STATE_PATH=.state/canary-trades.json
 CANARY_KILL_SWITCH_PATH=.state/canary-kill-switch.json
 ```
 
-canary CLI 会把状态写入 `CANARY_STATE_PATH`。如果订单出现部分成交或轮询超时，系统会尝试撤掉剩余挂单；只要还需要人工处理，返回结果里就会显式标记 `manualInterventionRequired`。
-`npm run canary:kill-switch -- activate "reason"` 会阻止后续真实 canary 提交，直到执行 `deactivate`；`npm run canary:cancel-all` 会基于持久化状态文件尝试撤掉所有未终态 canary 订单。
+canary CLI 会在提交前持久化意图，并对不确定提交结果安全失败。kill-switch 文件缺失时真实提交也会被阻止；只有在已审核的 canary 窗口内，才应显式执行 `npm run canary:kill-switch -- deactivate`。预检要求客户端支持订单状态、余额/授权额与 heartbeat。部分成交、完全成交和不确定结果都会标记为需要人工对账。
+`npm run canary:kill-switch -- activate "reason"` 会阻止后续真实 canary 提交；`npm run canary:cancel-all` 会基于持久化状态文件尝试撤掉所有未终态 canary 订单。
 
 自动实盘仍保持禁用。Canary、余额对账、持久幂等、payoff 模型与多腿原子性的状态见 [实盘就绪门禁](docs/live-trading-readiness.md)。
 
@@ -171,21 +169,21 @@ const config = {
 };
 
 const system = new PolymarketTradingSystem(config);
-await system.initialize();
-await system.start();
+system.initialize();
+system.start();
 ```
 
 ### 运行检测循环
 
 ```typescript
 // 运行单次套利检测
-const opportunities = await system.runDetectionCycle();
+const opportunities = system.runDetectionCycle();
 console.log(`发现 ${opportunities.length} 个套利机会`);
 
 // 执行套利机会
 for (const opp of opportunities) {
   if (opp.guaranteedProfit > 0.05) {
-    await system.executeOpportunity(opp);
+    system.executeOpportunity(opp);
   }
 }
 ```
@@ -389,19 +387,27 @@ docker build -t polymarket-trading .
 ### 运行容器
 
 ```bash
+mkdir -p .secrets
+openssl rand -hex 32 > .secrets/metrics-token
 docker run -d \
   --name polymarket-trading \
   --env-file .env \
+  -e HTTP_HOST=0.0.0.0 \
+  -e HTTP_METRICS_TOKEN_FILE=/run/secrets/metrics-token \
   -v $(pwd)/config:/app/config:ro \
-  -v $(pwd)/.state:/app/.state \
-  -p 3000:3000 \
+  -v $(pwd)/.secrets/metrics-token:/run/secrets/metrics-token:ro \
+  --mount source=polymarket-state,target=/app/.state \
+  -p 127.0.0.1:3000:3000 \
   polymarket-trading
 ```
 
 ### Docker Compose
 
 ```bash
-docker-compose up -d
+mkdir -p .secrets
+openssl rand -hex 32 > .secrets/metrics-token
+openssl rand -hex 32 > .secrets/grafana-admin-password
+docker compose --profile monitoring up -d
 ```
 
 包含：
@@ -414,11 +420,11 @@ docker-compose up -d
 
 ### Prometheus 指标
 
-- `arbitrage_opportunities_total`: 检测到的套利机会总数
-- `trade_executions_total`: 交易执行次数
-- `position_size_usd`: 当前仓位大小
-- `pnl_usd`: 累计盈亏
-- `risk_manager_status`: 风险管理器状态
+- `trading_arbitrage_opportunities_total`: 已记录的机会数
+- `trading_orders_submitted_total`: 已提交订单数
+- `trading_position_size`: 当前仓位大小
+- `trading_position_pnl`: 未实现仓位盈亏
+- `trading_total_exposure`: 当前总敞口
 
 ### Grafana 仪表盘
 
@@ -453,7 +459,7 @@ TRADING_SYSTEM_CONFIG_PATH=./config/trading-system.example.json LOG_LEVEL=warn n
 - ✅ 完成 API 集成 (Polymarket REST + WebSocket)
 - ✅ 代码拆分 (frank-wolfe.ts 414行 → 242行)
 - ✅ 性能优化 (SkipList, Float64ArrayPool, 稀疏约束)
-- ✅ 测试覆盖率达到 93%+ (942 个测试)
+- ✅ 添加自动化测试和 CI 质量门禁
 - ✅ 添加 Docker 支持
 - ✅ 添加 Prometheus/Grafana 监控
 

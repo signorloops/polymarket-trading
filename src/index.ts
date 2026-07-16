@@ -15,7 +15,7 @@ import {
 import { resetExecutionEngine } from './execution/execution-engine.js';
 import { getRiskManager, resetRiskManager } from './execution/risk-manager.js';
 import { resetTransactionTracker } from './blockchain/transaction-tracker.js';
-import { getMetricsForScraping, resetMetricsRegistry } from './utils/metrics.js';
+import { getMetricsForScraping, resetMetricsRegistry, TradingMetrics } from './utils/metrics.js';
 import { initLogger, getLogger } from './utils/logger.js';
 import { validateConfig, printConfigSummary, LOG_CONFIG, NETWORK_CONFIG } from './utils/config.js';
 import { getErrorMessage } from './utils/errors.js';
@@ -32,8 +32,7 @@ import { createSignedClobTradingClientFromEnv } from './api/signed-clob-client.j
 import { reconcileConfiguredBalances } from './execution/balance-reconciliation.js';
 
 // Trading system constants
-const MIN_SINGLE_MARKET_PROFIT_PER_SHARE_USD = 0.05;
-const POSITION_SIZE_MULTIPLIER = 100; // Base multiplier for position sizing
+const MIN_SINGLE_MARKET_PROFIT_USD = 0.05;
 const MAIN_LOOP_INTERVAL_MS = 1000; // Normal cycle interval
 const ERROR_RETRY_INTERVAL_MS = 5000; // Retry interval after error
 const TOP_OPPORTUNITIES_TO_LOG = 3; // Number of top opportunities to log
@@ -71,6 +70,7 @@ export class PolymarketTradingSystem {
   private latestPrices: Map<string, number> = new Map();
   private mainLoopPromise?: Promise<void>;
   private mainLoopAbortController: AbortController | undefined;
+  private disconnectPromise: Promise<void> = Promise.resolve();
 
   constructor(config: TradingSystemConfig) {
     this.config = config;
@@ -86,7 +86,7 @@ export class PolymarketTradingSystem {
 
     if (this.config.liveTrading) {
       throw new Error(
-        'Live trading is disabled until official Polymarket CLOB execution is implemented'
+        'Automatic live trading is disabled until the funded canary, reconciliation, and multi-leg readiness gates are approved'
       );
     }
 
@@ -154,6 +154,7 @@ export class PolymarketTradingSystem {
     this.logger.info('Stopping trading system');
     this.requestStop();
     await this.mainLoopPromise;
+    await this.disconnectPromise;
 
     this.logger.info('Trading system stopped');
   }
@@ -173,6 +174,7 @@ export class PolymarketTradingSystem {
    * Run a single arbitrage detection cycle
    */
   runDetectionCycle(): ArbitrageOpportunity[] {
+    const startedAt = performance.now();
     // Find all opportunities
     const orderBookManager = getOrderBookManager();
     const orderBooks = new Map(
@@ -182,6 +184,10 @@ export class PolymarketTradingSystem {
       })
     );
     const opportunities = this.detector.findAllOpportunities(orderBooks);
+    TradingMetrics.arbitrageDetectionLatency.observe({}, performance.now() - startedAt);
+    for (const opportunity of opportunities) {
+      TradingMetrics.arbitrageOpportunitiesFound.inc({ type: opportunity.type });
+    }
 
     if (opportunities.length > 0) {
       this.logger.info(`Found ${String(opportunities.length)} arbitrage opportunities`);
@@ -205,9 +211,10 @@ export class PolymarketTradingSystem {
    */
   executeOpportunity(opportunity: ArbitrageOpportunity): boolean {
     if (opportunity.type === 'cross-market') {
-      this.logger.warn('Cross-market execution is disabled until dollar payoff is modeled', {
-        id: opportunity.id,
-      });
+      this.logger.warn(
+        'Cross-market automatic execution is disabled until payoff review and multi-leg safety gates are complete',
+        { id: opportunity.id }
+      );
       return false;
     }
 
@@ -228,7 +235,7 @@ export class PolymarketTradingSystem {
         continue;
       }
 
-      const size = Math.abs(direction) * POSITION_SIZE_MULTIPLIER;
+      const size = Math.abs(direction);
       if (!Number.isFinite(size) || size <= 0) {
         continue;
       }
@@ -244,35 +251,17 @@ export class PolymarketTradingSystem {
       return false;
     }
 
-    const primaryLeg = legs[0];
-    if (!primaryLeg) {
-      this.logger.warn('Invalid opportunity: missing primary leg', { id: opportunity.id });
-      return false;
-    }
-
-    // Portfolio-level check uses aggregate notional across all legs.
-    const totalEstimatedNotional = legs.reduce((sum, leg) => sum + leg.notional, 0);
-    const aggregateCheck = riskManager.checkTrade(
-      primaryLeg.marketId,
-      primaryLeg.size,
-      primaryLeg.side,
-      totalEstimatedNotional
+    const riskCheck = riskManager.checkTrades(
+      legs.map((leg) => ({
+        marketId: leg.marketId,
+        side: leg.side,
+        size: leg.size,
+        estimatedNotional: leg.notional,
+      }))
     );
-    if (!aggregateCheck.allowed) {
-      this.logger.warn('Trade rejected by risk manager', { reason: aggregateCheck.reason });
+    if (!riskCheck.allowed) {
+      this.logger.warn('Trade rejected by portfolio risk check', { reason: riskCheck.reason });
       return false;
-    }
-
-    // Per-leg checks catch concentration and single-market risks.
-    for (const leg of legs) {
-      const riskCheck = riskManager.checkTrade(leg.marketId, leg.size, leg.side, leg.notional);
-      if (!riskCheck.allowed) {
-        this.logger.warn('Trade rejected by per-leg risk check', {
-          reason: riskCheck.reason,
-          marketId: leg.marketId,
-        });
-        return false;
-      }
     }
 
     const sizes = legs.map((leg) => leg.size);
@@ -284,7 +273,7 @@ export class PolymarketTradingSystem {
 
     // Execute trades
     if (this.config.liveTrading) {
-      this.logger.error('Live trading is disabled until official CLOB execution is implemented');
+      this.logger.error('Automatic live trading remains disabled by the readiness gate');
       return false;
     } else {
       this.logger.info('Paper trading - no actual execution');
@@ -313,9 +302,28 @@ export class PolymarketTradingSystem {
       case 'orderbook': {
         // Update order book
         const manager = getOrderBookManager();
-        manager.updateBook(event.data.marketId, event.data.bids, event.data.asks);
+        manager.updateBook(
+          event.data.marketId,
+          event.data.bids,
+          event.data.asks,
+          event.data.timestamp,
+          event.data.kind
+        );
         break;
       }
+
+      case 'tick-size':
+        this.logger.info('Market tick size changed', {
+          marketId: event.marketId,
+          tickSize: event.tickSize,
+        });
+        break;
+
+      case 'market-resolved':
+        getOrderBookManager().removeBook(event.marketId);
+        this.latestPrices.delete(event.marketId);
+        this.logger.warn('Resolved market removed from active books', { marketId: event.marketId });
+        break;
 
       case 'connected':
         this.logger.info('Data pipeline connected');
@@ -350,7 +358,8 @@ export class PolymarketTradingSystem {
         for (const opp of opportunities) {
           if (
             opp.type === 'single-market' &&
-            opp.guaranteedProfit > MIN_SINGLE_MARKET_PROFIT_PER_SHARE_USD
+            opp.guaranteedProfit > MIN_SINGLE_MARKET_PROFIT_USD &&
+            opp.expiresAt > Date.now()
           ) {
             this.executeOpportunity(opp);
           }
@@ -371,7 +380,7 @@ export class PolymarketTradingSystem {
     this.isRunning = false;
     this.mainLoopAbortController?.abort();
     this.mainLoopAbortController = undefined;
-    this.pipeline.disconnect();
+    this.disconnectPromise = this.pipeline.disconnect();
 
     if (this.unsubscribe) {
       this.unsubscribe();
@@ -479,7 +488,26 @@ async function main(): Promise<void> {
         circuitBreakerActive: status.circuitBreakerActive,
       };
     },
-    getMetrics: () => getMetricsForScraping(),
+    getMetrics: () => {
+      const risk = getRiskManager().getRiskMetrics();
+      TradingMetrics.totalExposure.set({}, risk.totalExposure);
+      TradingMetrics.dailyPnl.set({}, risk.dailyPnL);
+      TradingMetrics.unrealizedPnl.set({}, risk.unrealizedPnL);
+      TradingMetrics.maxDrawdown.set({}, risk.maxDrawdown);
+      TradingMetrics.circuitBreakerOpen.set({}, getRiskManager().isCircuitBreakerActive() ? 1 : 0);
+      TradingMetrics.websocketConnected.set({}, system.getStatus().websocketConnected ? 1 : 0);
+      TradingMetrics.positionSize.clear();
+      TradingMetrics.positionPnl.clear();
+      for (const position of getRiskManager().getPositions()) {
+        const labels = { market_id: position.marketId };
+        TradingMetrics.positionSize.set(labels, position.size);
+        const positionPnl = getRiskManager().getPositionUnrealizedPnL(position.marketId);
+        if (positionPnl !== undefined) {
+          TradingMetrics.positionPnl.set(labels, positionPnl);
+        }
+      }
+      return getMetricsForScraping();
+    },
     getRiskStatus: () => ({
       circuitBreakerActive: getRiskManager().isCircuitBreakerActive(),
       metrics: getRiskManager().getRiskMetrics(),

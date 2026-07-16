@@ -39,6 +39,12 @@ export interface VWAPResult {
   remainingSize: number;
 }
 
+export interface TakerExecutionCost extends VWAPResult {
+  grossCost: number;
+  protocolFee: number;
+  totalCost: number;
+}
+
 export interface LiquidityMetrics {
   bidDepth: number;
   askDepth: number;
@@ -73,6 +79,7 @@ export class OrderBook {
     asks: { price: number; size: number }[],
     timestamp?: number
   ): void {
+    this.validateLevels(bids, asks);
     // Update bids
     for (const { price, size } of bids) {
       const prevSize = this.bids.get(price) ?? 0;
@@ -113,6 +120,31 @@ export class OrderBook {
 
     this.lastUpdate = timestamp ?? Date.now();
     this.sequence++;
+  }
+
+  /** Replace all levels from an authoritative full-book snapshot. */
+  replace(
+    bids: { price: number; size: number }[],
+    asks: { price: number; size: number }[],
+    timestamp?: number
+  ): void {
+    this.validateLevels(bids, asks);
+    this.resetLevels();
+    this.update(bids, asks, timestamp);
+  }
+
+  getTimestamp(): number {
+    return this.lastUpdate;
+  }
+
+  isStale(maxAgeMs: number, now = Date.now()): boolean {
+    return (
+      !Number.isFinite(maxAgeMs) ||
+      maxAgeMs <= 0 ||
+      this.lastUpdate <= 0 ||
+      now < this.lastUpdate ||
+      now - this.lastUpdate > maxAgeMs
+    );
   }
 
   /**
@@ -179,6 +211,7 @@ export class OrderBook {
    * Calculate VWAP for a given order size
    */
   calculateVWAP(size: number, side: 'buy' | 'sell'): VWAPResult {
+    this.assertTradeSize(size);
     const levels = side === 'buy' ? this.getSortedAsks() : this.getSortedBids();
     let remainingSize = size;
     let totalValue = 0;
@@ -200,6 +233,38 @@ export class OrderBook {
       totalSize: size,
       executedSize,
       remainingSize: Math.max(0, remainingSize),
+    };
+  }
+
+  calculateTakerExecutionCost(
+    size: number,
+    side: 'buy' | 'sell',
+    feeRate: number
+  ): TakerExecutionCost {
+    if (!Number.isFinite(size) || size <= 0 || !Number.isFinite(feeRate) || feeRate < 0) {
+      throw new Error('Execution size and fee rate must be finite and non-negative');
+    }
+    const levels = side === 'buy' ? this.getSortedAsks() : this.getSortedBids();
+    let remainingSize = size;
+    let grossCost = 0;
+    let protocolFee = 0;
+    let executedSize = 0;
+    for (const level of levels) {
+      if (remainingSize <= 0) break;
+      const sizeAtLevel = Math.min(remainingSize, level.size);
+      grossCost += sizeAtLevel * level.price;
+      protocolFee += sizeAtLevel * feeRate * level.price * (1 - level.price);
+      executedSize += sizeAtLevel;
+      remainingSize -= sizeAtLevel;
+    }
+    return {
+      vwap: executedSize > 0 ? grossCost / executedSize : 0,
+      totalSize: size,
+      executedSize,
+      remainingSize: Math.max(remainingSize, 0),
+      grossCost,
+      protocolFee,
+      totalCost: grossCost + protocolFee,
     };
   }
 
@@ -286,19 +351,22 @@ export class OrderBook {
       const slippage = side === 'buy' ? (vwap - midPrice) / midPrice : (midPrice - vwap) / midPrice;
 
       if (slippage > TRADING_CONFIG.SLIPPAGE_TOLERANCE) {
-        // Calculate partial fill that stays within tolerance
-        const remainingSlippage =
-          TRADING_CONFIG.SLIPPAGE_TOLERANCE -
-          this.calculateSlippageForValue(totalValue, totalSize, midPrice, side);
-
-        if (remainingSlippage <= 0) {
+        // Solve the VWAP inequality exactly for the partial size x at this level:
+        //   buy:  (value + x*price)/(size+x) <= mid*(1+tolerance)
+        //   sell: (value + x*price)/(size+x) >= mid*(1-tolerance)
+        const threshold =
+          side === 'buy'
+            ? midPrice * (1 + TRADING_CONFIG.SLIPPAGE_TOLERANCE)
+            : midPrice * (1 - TRADING_CONFIG.SLIPPAGE_TOLERANCE);
+        const budget =
+          side === 'buy' ? threshold * totalSize - totalValue : totalValue - threshold * totalSize;
+        const marginalDeviation =
+          side === 'buy' ? level.price - threshold : threshold - level.price;
+        if (budget <= 0 || marginalDeviation <= 0) {
           return totalSize;
         }
-
-        // Approximate additional size
-        const priceDeviation = Math.abs(level.price - midPrice) / midPrice;
-        const additionalSize = (remainingSlippage * totalSize) / Math.max(priceDeviation, 0.001);
-        return totalSize + Math.min(additionalSize, level.size);
+        const additionalSize = budget / marginalDeviation;
+        return totalSize + Math.min(Math.max(additionalSize, 0), level.size);
       }
 
       totalSize = newTotalSize;
@@ -312,13 +380,32 @@ export class OrderBook {
    * Clear the order book
    */
   clear(): void {
+    this.resetLevels();
+    this.lastUpdate = 0;
+    this.sequence = 0;
+  }
+
+  private resetLevels(): void {
     this.bids.clear();
     this.asks.clear();
     this.bidLevels = new SkipList();
     this.askLevels = new SkipList();
     this.bidDepth = 0;
     this.askDepth = 0;
-    this.sequence = 0;
+  }
+
+  private validateLevels(bids: PriceLevel[], asks: PriceLevel[]): void {
+    for (const level of [...bids, ...asks]) {
+      if (
+        !Number.isFinite(level.price) ||
+        level.price <= 0 ||
+        level.price >= 1 ||
+        !Number.isFinite(level.size) ||
+        level.size < 0
+      ) {
+        throw new Error('Order book level must have price in (0, 1) and non-negative size');
+      }
+    }
   }
 
   private getSortedBids(): PriceLevel[] {
@@ -347,14 +434,9 @@ export class OrderBook {
     return side === 'bid' ? this.bidDepth : this.askDepth;
   }
 
-  private calculateSlippageForValue(
-    totalValue: number,
-    totalSize: number,
-    midPrice: number,
-    side: 'buy' | 'sell'
-  ): number {
-    if (totalSize <= 0) return 0;
-    const vwap = totalValue / totalSize;
-    return side === 'buy' ? (vwap - midPrice) / midPrice : (midPrice - vwap) / midPrice;
+  private assertTradeSize(size: number): void {
+    if (!Number.isFinite(size) || size <= 0) {
+      throw new Error('Trade size must be finite and greater than zero');
+    }
   }
 }

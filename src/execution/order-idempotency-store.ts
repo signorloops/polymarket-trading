@@ -5,7 +5,7 @@ import path from 'node:path';
 import type { OrderRequest } from '../api/polymarket-client.js';
 import { getErrorMessage } from '../utils/errors.js';
 
-export type IdempotentOrderState = 'claimed' | 'submitted' | 'unknown';
+export type IdempotentOrderState = 'claimed' | 'submitted' | 'unknown' | 'terminal';
 
 export interface IdempotentOrderRecord {
   key: string;
@@ -14,6 +14,7 @@ export interface IdempotentOrderRecord {
   createdAt: number;
   updatedAt: number;
   exchangeOrderId?: string;
+  terminalStatus?: 'filled' | 'cancelled' | 'rejected';
   lastError?: string;
 }
 
@@ -21,7 +22,9 @@ export interface OrderIdempotencyPort {
   claim(key: string, order: OrderRequest): IdempotentOrderRecord;
   markSubmitted(key: string, exchangeOrderId: string): void;
   markUnknown(key: string, error: unknown): void;
+  markTerminal?(key: string, status: 'filled' | 'cancelled' | 'rejected'): void;
   get(key: string): IdempotentOrderRecord | undefined;
+  listUnresolved?(): IdempotentOrderRecord[];
 }
 
 export const DEFAULT_ORDER_IDEMPOTENCY_DIRECTORY = path.join(
@@ -61,6 +64,7 @@ export class FileOrderIdempotencyStore implements OrderIdempotencyPort {
       file = fs.openSync(filePath, 'wx', 0o600);
       fs.writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`, 'utf8');
       fs.fsyncSync(file);
+      fsyncDirectory(this.directory);
       return record;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
@@ -87,21 +91,44 @@ export class FileOrderIdempotencyStore implements OrderIdempotencyPort {
     if (exchangeOrderId.trim() === '') {
       throw new Error('Exchange order id is required for idempotency journal update');
     }
-    this.update(key, (record) => ({
-      ...record,
-      state: 'submitted',
-      exchangeOrderId,
-      updatedAt: Date.now(),
-    }));
+    this.update(key, (record) => {
+      if (record.state !== 'claimed') {
+        throw new Error(`Cannot mark ${record.state} order ${record.key} submitted`);
+      }
+      return {
+        ...record,
+        state: 'submitted',
+        exchangeOrderId,
+        updatedAt: Date.now(),
+      };
+    });
   }
 
   markUnknown(key: string, error: unknown): void {
-    this.update(key, (record) => ({
-      ...record,
-      state: 'unknown',
-      lastError: getErrorMessage(error),
-      updatedAt: Date.now(),
-    }));
+    this.update(key, (record) =>
+      record.state === 'submitted' || record.state === 'terminal'
+        ? record
+        : {
+            ...record,
+            state: 'unknown',
+            lastError: getErrorMessage(error),
+            updatedAt: Date.now(),
+          }
+    );
+  }
+
+  markTerminal(key: string, status: 'filled' | 'cancelled' | 'rejected'): void {
+    this.update(key, (record) => {
+      if (record.state !== 'submitted' && record.state !== 'terminal') {
+        throw new Error(`Cannot mark ${record.state} order ${record.key} terminal`);
+      }
+      return {
+        ...record,
+        state: 'terminal',
+        terminalStatus: status,
+        updatedAt: Date.now(),
+      };
+    });
   }
 
   get(key: string): IdempotentOrderRecord | undefined {
@@ -123,24 +150,54 @@ export class FileOrderIdempotencyStore implements OrderIdempotencyPort {
     }
   }
 
+  listUnresolved(): IdempotentOrderRecord[] {
+    if (!fs.existsSync(this.directory)) return [];
+    const records: IdempotentOrderRecord[] = [];
+    for (const entry of fs.readdirSync(this.directory, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+      const filePath = path.join(this.directory, entry.name);
+      try {
+        const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as unknown;
+        if (!isIdempotentOrderRecord(parsed)) throw new Error('invalid journal record');
+        if (parsed.state !== 'terminal') records.push(parsed);
+      } catch (error) {
+        throw new Error(
+          `Failed to read order idempotency record ${entry.name}: ${getErrorMessage(error)}`,
+          { cause: error }
+        );
+      }
+    }
+    return records.sort((left, right) => left.createdAt - right.createdAt);
+  }
+
   private update(
     key: string,
     updater: (record: IdempotentOrderRecord) => IdempotentOrderRecord
   ): void {
     const normalizedKey = normalizeKey(key);
-    const current = this.get(normalizedKey);
-    if (!current) {
-      throw new Error(`Order idempotency key ${normalizedKey} was not claimed`);
-    }
-    const next = updater(current);
     const filePath = this.filePath(normalizedKey);
-    const tempPath = `${filePath}.${String(process.pid)}.tmp`;
+    const lockPath = `${filePath}.lock`;
+    const tempPath = `${filePath}.${String(process.pid)}.${String(Date.now())}.tmp`;
+    let lock: number | undefined;
     try {
+      lock = fs.openSync(lockPath, 'wx', 0o600);
+      const current = this.get(normalizedKey);
+      if (!current) {
+        throw new Error(`Order idempotency key ${normalizedKey} was not claimed`);
+      }
+      const next = updater(current);
       fs.writeFileSync(tempPath, `${JSON.stringify(next, null, 2)}\n`, {
         encoding: 'utf8',
         mode: 0o600,
       });
+      const temp = fs.openSync(tempPath, 'r');
+      try {
+        fs.fsyncSync(temp);
+      } finally {
+        fs.closeSync(temp);
+      }
       fs.renameSync(tempPath, filePath);
+      fsyncDirectory(this.directory);
     } catch (error) {
       try {
         fs.rmSync(tempPath, { force: true });
@@ -150,6 +207,15 @@ export class FileOrderIdempotencyStore implements OrderIdempotencyPort {
       throw new Error(`Failed to update order idempotency record: ${getErrorMessage(error)}`, {
         cause: error,
       });
+    } finally {
+      if (lock !== undefined) {
+        fs.closeSync(lock);
+        try {
+          fs.unlinkSync(lockPath);
+        } catch {
+          // Preserve the update outcome.
+        }
+      }
     }
   }
 
@@ -186,16 +252,37 @@ function isIdempotentOrderRecord(value: unknown): value is IdempotentOrderRecord
   if (typeof value !== 'object' || value === null) {
     return false;
   }
-  const record = value as Partial<IdempotentOrderRecord>;
+  const record = value as Record<string, unknown>;
   return (
     typeof record.key === 'string' &&
     typeof record.requestHash === 'string' &&
-    (record.state === 'claimed' || record.state === 'submitted' || record.state === 'unknown') &&
+    (record.state === 'claimed' ||
+      record.state === 'submitted' ||
+      record.state === 'unknown' ||
+      record.state === 'terminal') &&
     typeof record.createdAt === 'number' &&
     Number.isFinite(record.createdAt) &&
     typeof record.updatedAt === 'number' &&
     Number.isFinite(record.updatedAt) &&
     (record.exchangeOrderId === undefined || typeof record.exchangeOrderId === 'string') &&
-    (record.lastError === undefined || typeof record.lastError === 'string')
+    (record.terminalStatus === undefined ||
+      (typeof record.terminalStatus === 'string' &&
+        ['filled', 'cancelled', 'rejected'].includes(record.terminalStatus))) &&
+    (record.lastError === undefined || typeof record.lastError === 'string') &&
+    (record.state === 'submitted' || record.state === 'terminal'
+      ? typeof record.exchangeOrderId === 'string' && record.exchangeOrderId.trim() !== ''
+      : record.exchangeOrderId === undefined) &&
+    (record.state === 'terminal'
+      ? record.terminalStatus !== undefined
+      : record.terminalStatus === undefined)
   );
+}
+
+function fsyncDirectory(directory: string): void {
+  const descriptor = fs.openSync(directory, 'r');
+  try {
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
 }

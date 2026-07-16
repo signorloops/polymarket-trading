@@ -6,7 +6,7 @@
 2. Frank-Wolfe 每一步在数学上做了什么
 3. LMO（线性最小化 Oracle）为什么这样实现
 4. Bregman 投影（IPF）更新式从哪里来
-5. `guaranteedProfit = objective - gap` 的含义
+5. `objective - gap` 作为 KL 诊断下界的含义与边界
 6. 如何用项目里的 API 跑一个完整示例
 
 ---
@@ -85,7 +85,7 @@ $$
 \nabla_i D_{\mathrm{GKL}}(\mu\|\theta)=\log\frac{\mu_i}{\theta_i}
 $$
 
-这正是检测器中的梯度实现（见 `src/market/arbitrage-detector.ts:257`）。
+这正是检测器中 `computeGradient()` 的实现（见 `src/market/arbitrage-detector.ts`）。
 
 若是标准 KL，则梯度是：
 
@@ -93,7 +93,7 @@ $$
 \nabla_i D_{\mathrm{KL}}(\mu\|\theta)=\log\frac{\mu_i}{\theta_i}+1
 $$
 
-对应代码：`src/core/bregman-projection.ts:252`。
+对应代码见 `src/core/bregman-projection.ts`。
 
 ### 为什么用于 Polymarket 交易
 
@@ -149,8 +149,7 @@ $$
 
 对应代码：
 
-- gap 计算：`src/core/frank-wolfe.ts:144`
-- 收敛判断：`src/core/frank-wolfe.ts:152`
+- gap 计算与收敛判断：`src/core/frank-wolfe.ts`
 
 ### 3.2 本项目收敛判据（实现细节）
 
@@ -160,7 +159,7 @@ $$
 \mathrm{gap} \le \text{tolerance}\cdot(1-\alpha)\cdot\max(1,|f(\mu)|)
 $$
 
-其中 $\alpha=\texttt{ALGORITHM\_CONFIG.ALPHA}$（默认 `0.9`，见 `src/utils/config-schema.ts:16`）。
+其中 $\alpha=\texttt{ALGORITHM\_CONFIG.ALPHA}$（默认 `0.9`，见 `src/utils/config-schema.ts`）。
 
 这使阈值随目标量级变化，避免目标值很大/很小时固定阈值不稳定。
 
@@ -196,7 +195,7 @@ $$
 \mu_{i^\star}=\frac{b_k}{a_{i^\star}}
 $$
 
-这就是 `linearMinimizationOracle` 的核心逻辑（`src/core/lmo.ts:60`）。
+这就是 `linearMinimizationOracle` 的核心逻辑（`src/core/lmo.ts`）。
 
 ### 为什么用于 Polymarket 交易
 
@@ -220,10 +219,10 @@ $$
 
 由于 $f$ 凸，$\phi$ 是一维凸函数。项目采用黄金分割搜索（无需导数，鲁棒）：
 
-- 实现：`src/core/line-search.ts:35`
-- 默认 FW `stepSize='line-search'`（`src/core/frank-wolfe.ts:173`）
+- 实现：`src/core/line-search.ts`
+- 默认 FW `stepSize='line-search'`（`src/core/frank-wolfe.ts`）
 
-另有 `lineSearchKL` 作为“无目标函数时的近似退化方案”（`src/core/line-search.ts:18`）。
+另有 `lineSearchKL` 作为“无目标函数时的近似退化方案”（`src/core/line-search.ts`）。
 
 ### 为什么用于 Polymarket 交易
 
@@ -251,7 +250,7 @@ $$
 $$
 
 直观上，这是按“当前约束偏差比例”做指数缩放，使该约束被拉回目标值。  
-项目实现正是这个更新（`src/core/bregman-projection.ts:101`）：
+项目实现正是这个更新（`src/core/bregman-projection.ts`）：
 
 1. 预处理稀疏等式约束（仅非零项）
 2. 对每个约束做乘法更新
@@ -269,7 +268,7 @@ Bregman/IPF 在 Polymarket 的价值是：
 
 ---
 
-## 7. `objective - gap` 为什么可当“保守可提取收益”
+## 7. `objective - gap` 是诊断下界，不是可提取收益
 
 在最小化问题中：
 
@@ -277,28 +276,21 @@ $$
 f^\star \ge f(\mu_t)-\mathrm{gap}_t
 $$
 
-即 `current objective - gap` 是“最优值的下界”。  
-项目把最优散度解释为可提取套利强度，因此定义：
+即 `current objective - gap` 是当前优化目标最优值的下界。这里的目标是 KL / 广义 KL 散度，因此单位是 nats（无量纲）：
 
 $$
-\texttt{guaranteedProfit} \approx \texttt{objective} - \texttt{gap}
+\texttt{lowerBoundNats} = \texttt{objective} - \texttt{gap}
 $$
 
-对应代码：
-
-- `src/core/arbitrage-utils.ts:21`
-- `src/market/arbitrage-detector.ts:153`
-
-注意：这是算法下界意义上的“保守估计”，真实成交收益还会受滑点、深度和执行延迟影响。
+对应业务入口是 `ArbitrageDetector.diagnoseCrossMarketIncoherence()`。它只返回研究诊断，不进入美元机会列表，也不会授权执行。
 
 ### 为什么用于 Polymarket 交易
 
-Polymarket 执行层面最怕“纸面套利，落地亏损”。  
-用 `objective - gap` 作为保守门槛的意义是：
+这个下界可用于判断概率向量相对约束域是否显著不一致：
 
-1. 把优化误差显式扣掉，降低假阳性机会。
-2. 可直接与最小收益阈值对接（如 `MIN_PROFIT_THRESHOLD`），便于自动化交易决策。
-3. 在成交不确定（滑点/排队）下，先用下界筛选更安全。
+1. 把优化误差显式扣掉，降低诊断假阳性。
+2. `MIN_PROFIT_THRESHOLD` 只筛选这个无量纲信号，名称保留自早期实现，不代表 USD。
+3. 真正的 USD 套利必须再使用新鲜订单簿深度、逐腿费用，以及穷尽终局状态的 payoff 模型计算。
 
 ---
 
@@ -352,16 +344,16 @@ $$
 
 ## 9. 与源码的逐项映射
 
-| 数学对象 | 代码实现 |
-|---|---|
-| 可行域 $\mathcal{M}$（等式/不等式约束） | `src/core/marginal-polytope.ts` |
-| LMO：$\arg\min\langle g,s\rangle$ | `src/core/lmo.ts` |
-| FW 主循环 | `src/core/frank-wolfe.ts` |
-| gap 与收敛判据 | `src/core/frank-wolfe.ts:144`, `src/core/frank-wolfe.ts:152` |
-| 线搜索（真实目标） | `src/core/line-search.ts:35` |
-| 广义 KL 与向量算子 | `src/utils/math.ts:145` |
-| Bregman/IPF 投影 | `src/core/bregman-projection.ts` |
-| 套利判定与交易向量 | `src/core/arbitrage-utils.ts` |
+| 数学对象                                | 代码实现                                                     |
+| --------------------------------------- | ------------------------------------------------------------ |
+| 可行域 $\mathcal{M}$（等式/不等式约束） | `src/core/marginal-polytope.ts`                              |
+| LMO：$\arg\min\langle g,s\rangle$       | `src/core/lmo.ts`                                            |
+| FW 主循环                               | `src/core/frank-wolfe.ts`                                    |
+| gap 与收敛判据                          | `src/core/frank-wolfe.ts`                                    |
+| 线搜索（真实目标）                      | `src/core/line-search.ts`                                    |
+| 广义 KL 与向量算子                      | `src/utils/math.ts`                                          |
+| Bregman/IPF 投影                        | `src/core/bregman-projection.ts`                             |
+| 套利判定与交易向量                      | `src/core/arbitrage-utils.ts`                                |
 
 ---
 
@@ -388,7 +380,7 @@ const constraints: Constraint[] = [
 ];
 
 // 市场价格（可不归一化）
-const theta = [0.78, 0.30, 0.18, 0.92];
+const theta = [0.78, 0.3, 0.18, 0.92];
 
 // 初始点必须可行：每组和为 1
 const initialMu = [0.5, 0.5, 0.5, 0.5];
@@ -414,12 +406,12 @@ const result = frankWolfe(initialMu, objectiveFn, gradientFn, lmoFn, {
 });
 
 const trade = computeTradeRecommendation(result, theta);
-const profitable = isProfitableArbitrage(result, 0.01);
+const significantIncoherence = isProfitableArbitrage(result, 0.01);
 
 console.log('FW result:', result);
 console.log('trade vector (mu - theta):', trade);
-console.log('profitable?', profitable);
-console.log('guaranteedProfit ~= objective - gap =', result.objective - result.gap);
+console.log('significant incoherence?', significantIncoherence);
+console.log('KL lower bound (nats) =', result.objective - result.gap);
 ```
 
 运行建议：
@@ -441,7 +433,7 @@ npm test -- tests/core/bregman-projection.test.ts
 1. `linearMinimizationOracle` 主要针对“独立等式组（product-of-simplex）”场景，通用耦合约束下需要更一般 LP LMO。
 2. `MarginalPolytope.project()` 是轻量化可行化逻辑（按事件归一 + clip），不是全约束精确投影器。
 3. `bregmanProjection()` 只使用了等式约束的稀疏正系数部分，复杂不等式体系要靠外层优化流程处理。
-4. `guaranteedProfit` 是优化意义的保守下界，不是撮合后的最终 PnL。
+4. `objective - gap` 是 KL 目标的无量纲下界；不能标记为 `guaranteedProfit`，也不能与美元 PnL 比较。
 
 ---
 
@@ -466,13 +458,13 @@ npm test -- tests/core/bregman-projection.test.ts
 在 Polymarket 做套利，通常同时面对四个事实：
 
 1. 市场是分散的  
-同一主题可能拆成多个相关市场，信息传播速度不一致，出现短暂错价。
+   同一主题可能拆成多个相关市场，信息传播速度不一致，出现短暂错价。
 2. 约束是结构化的  
-例如同一事件内 `YES + NO = 1`，跨事件还可能有互斥或条件关系。
+   例如同一事件内 `YES + NO = 1`，跨事件还可能有互斥或条件关系。
 3. 数据是实时变化的  
-盘口、深度、成交在秒级甚至更快变化，算法必须“快收敛 + 可中断”。
+   盘口、深度、成交在秒级甚至更快变化，算法必须“快收敛 + 可中断”。
 4. 执行有摩擦  
-滑点、深度不足、排队与延迟会吞掉理论利润，必须用保守指标做筛选。
+   滑点、深度不足、排队与延迟会吞掉理论利润，必须用保守指标做筛选。
 
 结论：这不是“拍脑袋买卖”问题，而是“带约束的实时优化”问题。
 
@@ -481,11 +473,11 @@ npm test -- tests/core/bregman-projection.test.ts
 规则法在单市场上有效，但在跨市场组合上会迅速失效：
 
 1. 规则难以覆盖高维关系  
-两三个市场还能人工写规则，十几个市场后组合数爆炸。
+   两三个市场还能人工写规则，十几个市场后组合数爆炸。
 2. 规则无法自动平衡多约束  
-满足某个事件约束时，可能破坏另一个事件组的可行性。
+   满足某个事件约束时，可能破坏另一个事件组的可行性。
 3. 规则很难输出“最优交易量向量”  
-通常只能告诉你“有机会”，但不能稳定给出可执行头寸。
+   通常只能告诉你“有机会”，但不能稳定给出可执行头寸。
 
 所以需要一个能同时处理“约束 + 目标 + 规模”的统一数学框架。
 
@@ -496,11 +488,11 @@ npm test -- tests/core/bregman-projection.test.ts
 在 Polymarket 中，这一步不是可选项，而是安全底座：
 
 1. 把概率一致性写成硬约束  
-例如事件内和为 1，避免产生逻辑冲突头寸。
+   例如事件内和为 1，避免产生逻辑冲突头寸。
 2. 把边界条件写成硬约束  
-保证 `0 <= mu_i <= 1`，避免出现无意义信号。
+   保证 `0 <= mu_i <= 1`，避免出现无意义信号。
 3. 给后续优化提供统一几何空间  
-后续的任何收益度量都在同一可行域中比较，结果可解释且可落地。
+   后续的任何收益度量都在同一可行域中比较，结果可解释且可落地。
 
 没有这一步，后续“利润信号”很容易来自不可执行点。
 
@@ -510,11 +502,11 @@ Polymarket 报价是概率/赔率语义，核心是“相对偏差”而不是�
 KL 类目标正好抓住这一点：
 
 1. 对数比值强调相对错价  
-`0.1 -> 0.2` 和 `0.5 -> 0.6` 的交易意义不同，KL 能区分。
+   `0.1 -> 0.2` 和 `0.5 -> 0.6` 的交易意义不同，KL 能区分。
 2. 与概率变量自然匹配  
-变量非负、常靠近边界，KL 在这种空间中有稳定解释。
+   变量非负、常靠近边界，KL 在这种空间中有稳定解释。
 3. 广义 KL 适配跨市场未归一化向量  
-现实中组合价格向量不一定全局和为 1，广义 KL 更贴近实际输入。
+   现实中组合价格向量不一定全局和为 1，广义 KL 更贴近实际输入。
 
 因此 KL 类目标既有理论合理性，也贴合 Polymarket 数据形态。
 
@@ -524,13 +516,13 @@ KL 类目标正好抓住这一点：
 Frank-Wolfe 在这里的优势很关键：
 
 1. 每轮计算轻  
-核心是梯度 + LMO，避免复杂投影子问题。
+   核心是梯度 + LMO，避免复杂投影子问题。
 2. 迭代点天然是可行凸组合  
-减少“先算出非法解再修复”的额外延迟与风险。
+   减少“先算出非法解再修复”的额外延迟与风险。
 3. 可随时早停  
-`gap` 给出当前误差上界，适合流式数据下的时间预算控制。
+   `gap` 给出当前误差上界，适合流式数据下的时间预算控制。
 4. 与本项目约束结构匹配  
-当约束近似 product-of-simplex 时，LMO 可分组高效求解。
+   当约束近似 product-of-simplex 时，LMO 可分组高效求解。
 
 换言之：Frank-Wolfe 是在“速度、可行性、可解释性”三者之间的工程最优点。
 
@@ -543,7 +535,7 @@ Frank-Wolfe 在这里的优势很关键：
 2. 减少走过头或走不够导致的收益损失。
 3. 面对噪声盘口仍保持稳定，因为方法本身对导数噪声不敏感。
 
-这一步提升的是实盘稳健性，不只是数学美观。
+这一步提升的是数值优化稳定性，不等同于提升实盘收益或成交可靠性。
 
 ### 13.7 为什么还需要 Bregman 投影
 
@@ -552,20 +544,19 @@ Frank-Wolfe 是主优化链路，Bregman/IPF 主要承担“可行化与最近�
 在 Polymarket 中它解决两个实际问题：
 
 1. 当原始价格向量带噪声或轻微不一致时，快速拉回约束域。
-2. 给执行层一个“离市场最近、但自洽”的目标分布，便于形成 `trade = mu - price`。
+2. 给研究层一个“离市场最近、但自洽”的目标分布；`trade = mu - price` 只能作为方向诊断，不能直接生成订单。
 
-它像一个“约束一致性修复器”，提升交易指令的可执行性。
+它像一个“约束一致性修复器”，但不负责盘口深度、费用、成交概率或终局 payoff。
 
-### 13.8 为什么要用 `objective - gap` 做保守收益门槛
+### 13.8 为什么保留 `objective - gap` 诊断
 
-实盘里最危险的是“模型显示有利差，但成交后没利润”。  
-`objective - gap` 的价值在于把优化不确定性显式扣除：
+`objective - gap` 的价值在于把数值优化不确定性显式扣除：
 
-1. 防止只看理想目标值导致过度交易。
-2. 可直接和策略阈值/风控阈值对接，形成自动过滤。
-3. 在滑点与时延存在时，给出更保守的准入标准。
+1. 防止只看当前 KL 目标值而夸大不一致程度。
+2. 可用于排序研究信号和发现约束/数据异常。
+3. 能帮助定位需要显式 payoff 建模的市场组。
 
-它不是保证最终 PnL 的公式，但能显著降低假阳性机会。
+它不是 PnL 公式。只有 `findDollarPayoffArbitrage()` 结合显式终局场景、新鲜可成交 asks、深度和费用后，才会产生 `profitUnit: 'USD'` 的候选机会；自动多腿执行仍被安全门禁拒绝。
 
 ### 13.9 这套算法组合在 Polymarket 的分工
 
@@ -575,14 +566,14 @@ Frank-Wolfe 是主优化链路，Bregman/IPF 主要承担“可行化与最近�
 2. `KL / generalized KL`：定义“什么是值得追的错价”
 3. `Frank-Wolfe + LMO + line search`：在时间预算内找到高质量可行解
 4. `Bregman/IPF`：在需要时做一致性修复/可行化
-5. `objective - gap`：把解转成保守交易门槛
-6. `trade = mu - price`：输出可执行方向
+5. `objective - gap`：生成无量纲诊断下界
+6. 显式 payoff + 订单簿 + 费用：独立生成可审计 USD 候选
 
 这不是“为了用算法而用算法”，而是把 Polymarket 交易中的四个核心矛盾同时处理：
 
 1. 复杂约束 vs 实时性
-2. 理论机会 vs 可执行性
-3. 收益追求 vs 风险保守
+2. 概率不一致诊断 vs 可执行 USD 机会
+3. 数值优化 vs 交易成本和风控
 4. 多市场联动 vs 工程可维护性
 
 ### 13.10 什么时候这套方法会不够用
@@ -590,7 +581,7 @@ Frank-Wolfe 是主优化链路，Bregman/IPF 主要承担“可行化与最近�
 也要明确边界，避免过度自信：
 
 1. 约束高度耦合且不是分组 simplex 时，当前 LMO 近似可能不足。
-2. 流动性极薄、冲击成本主导时，纯散度目标会高估可兑现收益。
-3. 成本模型（手续费、滑点、成交概率）未显式并入目标时，需要策略层再做二次筛选。
+2. 纯散度目标本身不估计任何可兑现收益，无论流动性是否充足。
+3. 当前 USD payoff 求解器使用显示的 ask 深度和保守费用，但仍未建模排队、延迟、跨腿原子性与成交概率。
 
-因此更完整的下一步通常是：把交易成本与成交概率显式并入优化目标或后验打分。
+因此更完整的下一步通常是：对 payoff 模型做独立数学评审，并把成交概率、动态费用、延迟和失败平仓纳入执行前仿真；在此之前保持自动实盘关闭。

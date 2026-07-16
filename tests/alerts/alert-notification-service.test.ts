@@ -159,14 +159,12 @@ describe('AlertNotificationService', () => {
       expect(envService.getEnabledChannels()).toEqual([]);
     });
 
-    it('should sanitize and fallback invalid env values', () => {
+    it('should sanitize comma-separated environment values', () => {
       process.env.SLACK_WEBHOOK_URL = 'https://hooks.slack.com/test';
-      process.env.ALERTS_DEDUP_WINDOW_MINUTES = 'invalid';
       process.env.ALERT_ROUTING_INFO = ' slack, , email ';
       process.env.SMTP_HOST = 'smtp.example.com';
       process.env.ALERT_EMAIL_FROM = 'bot@example.com';
       process.env.ALERT_EMAIL_TO = 'a@example.com, , b@example.com ';
-      process.env.SMTP_PORT = 'bad-port';
 
       const envService = AlertNotificationService.fromEnv();
       const internalConfig = (envService as unknown as { config: AlertConfig }).config;
@@ -175,6 +173,21 @@ describe('AlertNotificationService', () => {
       expect(internalConfig.routing.info).toEqual(['slack', 'email']);
       expect(internalConfig.channels.email?.smtp.port).toBe(587);
       expect(internalConfig.channels.email?.to).toEqual(['a@example.com', 'b@example.com']);
+    });
+
+    it('rejects ambiguous booleans and malformed numeric settings', () => {
+      process.env.ALERTS_ENABLED = 'yes';
+      expect(() => AlertNotificationService.fromEnv()).toThrow(/ALERTS_ENABLED/);
+
+      process.env.ALERTS_ENABLED = 'true';
+      process.env.ALERTS_DEDUP_WINDOW_MINUTES = '5minutes';
+      expect(() => AlertNotificationService.fromEnv()).toThrow(/ALERTS_DEDUP_WINDOW_MINUTES/);
+    });
+
+    it('requires complete SMTP credentials', () => {
+      process.env.SMTP_USER = 'alert-user';
+      delete process.env.SMTP_PASS;
+      expect(() => AlertNotificationService.fromEnv()).toThrow(/configured together/);
     });
   });
 });

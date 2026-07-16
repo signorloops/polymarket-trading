@@ -26,6 +26,30 @@ function get(
   });
 }
 
+function send(
+  url: string,
+  method: string
+): Promise<{ statusCode: number; body: string; headers: Record<string, string | string[]> }> {
+  return new Promise((resolve, reject) => {
+    const req = request(url, { method }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => {
+        body += chunk;
+      });
+      res.on('end', () => {
+        const headers: Record<string, string | string[]> = {};
+        for (const [name, value] of Object.entries(res.headers)) {
+          if (value !== undefined) headers[name] = value;
+        }
+        resolve({ statusCode: res.statusCode ?? 0, body, headers });
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 describe('createRuntimeHttpServer', () => {
   it('serves health, readiness, metrics, and risk endpoints', async () => {
     const server = createRuntimeHttpServer({
@@ -163,6 +187,58 @@ describe('createRuntimeHttpServer', () => {
     ).toThrow(/metrics bearer token is required/);
   });
 
+  it('does not mistake a hostname beginning with 127 for a loopback address', () => {
+    expect(() =>
+      createRuntimeHttpServer({
+        host: '127.example.com',
+        port: 0,
+        getHealthStatus: () => ({ ok: true, ready: true, uptimeSeconds: 1, mode: 'paper' }),
+        getMetrics: () => '',
+        getRiskStatus: () => ({
+          circuitBreakerActive: false,
+          metrics: {
+            totalExposure: 0,
+            dailyPnL: 0,
+            unrealizedPnL: 0,
+            maxDrawdown: 0,
+            positionCount: 0,
+          },
+        }),
+      })
+    ).toThrow(/metrics bearer token is required/);
+  });
+
+  it('rejects weak bearer tokens even for direct programmatic construction', () => {
+    const baseOptions = {
+      host: '127.0.0.1',
+      port: 0,
+      getHealthStatus: () => ({
+        ok: true as const,
+        ready: true,
+        uptimeSeconds: 1,
+        mode: 'paper' as const,
+      }),
+      getMetrics: () => '',
+      getRiskStatus: () => ({
+        circuitBreakerActive: false,
+        metrics: {
+          totalExposure: 0,
+          dailyPnL: 0,
+          unrealizedPnL: 0,
+          maxDrawdown: 0,
+          positionCount: 0,
+        },
+      }),
+    };
+
+    expect(() => createRuntimeHttpServer({ ...baseOptions, metricsToken: 'weak' })).toThrow(
+      /at least 16 characters/
+    );
+    expect(() => createRuntimeHttpServer({ ...baseOptions, riskStatusToken: 'weak' })).toThrow(
+      /at least 16 characters/
+    );
+  });
+
   it('returns 503 for readiness checks when the system is not ready', async () => {
     const server = createRuntimeHttpServer({
       host: '127.0.0.1',
@@ -193,6 +269,34 @@ describe('createRuntimeHttpServer', () => {
     expect(ready.statusCode).toBe(503);
     expect(JSON.parse(ready.body)).toMatchObject({ ready: false });
 
+    await server.stop();
+  });
+
+  it('rejects mutation methods and sends defensive response headers', async () => {
+    const server = createRuntimeHttpServer({
+      host: '127.0.0.1',
+      port: 0,
+      getHealthStatus: () => ({ ok: true, ready: true, uptimeSeconds: 1, mode: 'paper' }),
+      getMetrics: () => '',
+      getRiskStatus: () => ({
+        circuitBreakerActive: false,
+        metrics: {
+          totalExposure: 0,
+          dailyPnL: 0,
+          unrealizedPnL: 0,
+          maxDrawdown: 0,
+          positionCount: 0,
+        },
+      }),
+    });
+    await server.start();
+    const address = server.getAddress();
+    const response = await send(`http://127.0.0.1:${String(address.port)}/metrics`, 'POST');
+
+    expect(response.statusCode).toBe(405);
+    expect(response.headers.allow).toBe('GET');
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.headers['x-content-type-options']).toBe('nosniff');
     await server.stop();
   });
 });

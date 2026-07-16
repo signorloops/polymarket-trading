@@ -29,6 +29,7 @@ interface MockWsInstance {
   send: jest.Mock;
   ping: jest.Mock;
   pong: jest.Mock;
+  terminate: jest.Mock;
   eventHandlers: Record<string, (...args: unknown[]) => void>;
 }
 
@@ -73,6 +74,7 @@ jest.unstable_mockModule('ws', () => ({
         send: jest.fn(),
         ping: jest.fn(),
         pong: jest.fn(),
+        terminate: jest.fn(),
         eventHandlers: {},
       };
       mockState.wsInstance = instance;
@@ -111,7 +113,7 @@ describe('DataPipeline', () => {
   });
 
   afterEach(async () => {
-    pipeline?.disconnect();
+    await pipeline?.disconnect();
     await resetDataPipeline();
     jest.useRealTimers();
   });
@@ -141,22 +143,20 @@ describe('DataPipeline', () => {
       expect(mockLogger.warn).toHaveBeenCalledWith('Already connected');
     });
 
-    it('should disconnect from WebSocket', () => {
+    it('should disconnect from WebSocket', async () => {
       pipeline.connect();
       if (mockState.wsInstance) {
         mockState.wsInstance.readyState = 1; // OPEN
       }
 
-      pipeline.disconnect();
+      await pipeline.disconnect();
 
       expect(mockState.wsInstance?.close).toHaveBeenCalled();
     });
 
-    it('should handle multiple disconnect calls gracefully', () => {
+    it('should handle multiple disconnect calls gracefully', async () => {
       pipeline.connect();
-      pipeline.disconnect();
-      pipeline.disconnect();
-      pipeline.disconnect();
+      await Promise.all([pipeline.disconnect(), pipeline.disconnect(), pipeline.disconnect()]);
 
       // Should not throw
       expect(mockState.wsInstance?.close).toHaveBeenCalledTimes(1);
@@ -210,10 +210,9 @@ describe('DataPipeline', () => {
 
       mockState.wsInstance?.eventHandlers['open']?.();
 
-      // Advance by 30 seconds (heartbeat interval)
-      jest.advanceTimersByTime(30000);
+      jest.advanceTimersByTime(10000);
 
-      expect(mockState.wsInstance?.ping).toHaveBeenCalled();
+      expect(mockState.wsInstance?.send).toHaveBeenCalledWith('PING');
     });
 
     it('should handle close event', () => {
@@ -234,8 +233,8 @@ describe('DataPipeline', () => {
       expect(mockState.constructorCalls).toHaveLength(2);
     });
 
-    it('should not reconnect on manual disconnect', () => {
-      pipeline.disconnect();
+    it('should not reconnect on manual disconnect', async () => {
+      await pipeline.disconnect();
 
       mockState.wsInstance?.eventHandlers['close']?.(1000, Buffer.from('test'));
 
@@ -280,7 +279,7 @@ describe('DataPipeline', () => {
       jest.advanceTimersByTime(30000);
 
       // Ping should only be called once (before close)
-      expect(mockState.wsInstance?.ping).not.toHaveBeenCalled();
+      expect(mockState.wsInstance?.send).not.toHaveBeenCalledWith('PING');
     });
   });
 
@@ -398,6 +397,7 @@ describe('DataPipeline', () => {
             { price: 0.6, size: 100 },
             { price: 0.65, size: 200 },
           ],
+          kind: 'snapshot',
           timestamp: 1234567890,
         },
       });
@@ -445,6 +445,7 @@ describe('DataPipeline', () => {
           marketId: 'asset-yes',
           bids: [{ price: 0.48, size: 30 }],
           asks: [{ price: 0.52, size: 25 }],
+          kind: 'snapshot',
           timestamp: 123456789000,
         },
       });
@@ -468,6 +469,7 @@ describe('DataPipeline', () => {
           marketId: 'market-1',
           bids: [],
           asks: [],
+          kind: 'snapshot',
           timestamp: 1234567890,
         },
       });
@@ -537,6 +539,7 @@ describe('DataPipeline', () => {
           marketId: 'asset-yes',
           bids: [{ price: 0.5, size: 200 }],
           asks: [],
+          kind: 'delta',
           timestamp: 1757908892351,
         },
       });
@@ -546,6 +549,7 @@ describe('DataPipeline', () => {
           marketId: 'asset-no',
           bids: [],
           asks: [{ price: 0.6, size: 0 }],
+          kind: 'delta',
           timestamp: 1757908892351,
         },
       });
@@ -911,13 +915,13 @@ describe('DataPipeline', () => {
       expect(mockState.constructorCalls).toHaveLength(3);
     });
 
-    it('should cancel stale reconnect timers after repeated close events', () => {
+    it('should cancel stale reconnect timers after repeated close events', async () => {
       // Fire close twice before timer execution to simulate noisy close/error bursts.
       mockState.wsInstance?.eventHandlers['close']?.(1006, Buffer.from('test'));
       mockState.wsInstance?.eventHandlers['close']?.(1006, Buffer.from('test'));
 
       // Manual disconnect should cancel all future reconnect attempts.
-      pipeline.disconnect();
+      await pipeline.disconnect();
       jest.advanceTimersByTime(60000);
 
       expect(mockState.constructorCalls).toHaveLength(1);
@@ -932,14 +936,15 @@ describe('DataPipeline', () => {
       }
     });
 
-    it('should send ping every 30 seconds', () => {
+    it('should send application PING every 10 seconds while PONGs arrive', () => {
       mockState.wsInstance?.eventHandlers['open']?.();
 
-      jest.advanceTimersByTime(30000);
-      expect(mockState.wsInstance?.ping).toHaveBeenCalledTimes(1);
+      jest.advanceTimersByTime(10000);
+      expect(mockState.wsInstance?.send).toHaveBeenCalledWith('PING');
+      mockState.wsInstance?.eventHandlers['message']?.('PONG');
 
-      jest.advanceTimersByTime(30000);
-      expect(mockState.wsInstance?.ping).toHaveBeenCalledTimes(2);
+      jest.advanceTimersByTime(10000);
+      expect(mockState.wsInstance?.send).toHaveBeenCalledTimes(2);
     });
 
     it('should not send ping if connection is closed', () => {
@@ -950,8 +955,8 @@ describe('DataPipeline', () => {
         mockState.wsInstance.readyState = 3; // CLOSED
       }
 
-      jest.advanceTimersByTime(30000);
-      expect(mockState.wsInstance?.ping).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(10000);
+      expect(mockState.wsInstance?.send).not.toHaveBeenCalledWith('PING');
     });
   });
 
@@ -963,8 +968,8 @@ describe('DataPipeline', () => {
       }
     });
 
-    it('should subscribe to configured CLOB asset ids on connect', () => {
-      pipeline.disconnect();
+    it('should subscribe to configured CLOB asset ids on connect', async () => {
+      await pipeline.disconnect();
       pipeline = new DataPipeline('wss://test.polymarket.com', ['asset-1', 'asset-2']);
       pipeline.connect();
       if (mockState.wsInstance) {
@@ -1009,11 +1014,11 @@ describe('DataPipeline', () => {
       expect(pipeline1).not.toBe(pipeline2);
     });
 
-    it('should disconnect on reset', () => {
+    it('should disconnect on reset', async () => {
       const testPipeline = getDataPipeline();
       testPipeline.connect();
 
-      expect(() => resetDataPipeline()).not.toThrow();
+      await expect(resetDataPipeline()).resolves.toBeUndefined();
     });
   });
 
@@ -1094,18 +1099,16 @@ describe('DataPipeline', () => {
   });
 
   describe('edge cases', () => {
-    it('should handle rapid connect/disconnect cycles', () => {
-      expect(() => {
-        pipeline.connect();
-        pipeline.disconnect();
-        pipeline.connect();
-        pipeline.disconnect();
-      }).not.toThrow();
+    it('should handle rapid connect/disconnect cycles', async () => {
+      pipeline.connect();
+      await expect(pipeline.disconnect()).resolves.toBeUndefined();
+      pipeline.connect();
+      await expect(pipeline.disconnect()).resolves.toBeUndefined();
     });
 
-    it('should handle subscribe after disconnect', () => {
+    it('should handle subscribe after disconnect', async () => {
       pipeline.connect();
-      pipeline.disconnect();
+      await pipeline.disconnect();
 
       const handler = jest.fn();
       expect(() => pipeline.subscribe(handler)).not.toThrow();
@@ -1189,6 +1192,7 @@ describe('DataPipeline', () => {
           marketId: 'market-1',
           bids: [{ price: 0.5, size: 100 }],
           asks: [{ price: 0.55, size: 50 }],
+          kind: 'snapshot',
           timestamp: expect.any(Number),
         },
       });
@@ -1218,6 +1222,7 @@ describe('DataPipeline', () => {
           marketId: 'market-1',
           bids: [],
           asks: [],
+          kind: 'snapshot',
           timestamp: expect.any(Number),
         },
       });

@@ -20,4 +20,25 @@ describe('package daemon smoke scripts', () => {
       'node dist/src/scripts/docker-smoke.js'
     );
   });
+
+  it('cleans stale output before building and publishes only explicit artifacts', () => {
+    const packageJson = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as {
+      scripts?: Record<string, string>;
+      files?: string[];
+      types?: string;
+      exports?: unknown;
+    };
+
+    expect(packageJson.scripts?.build).toBe('npm run clean && tsc');
+    expect(packageJson.scripts?.prepack).toBe('npm run build');
+    expect(packageJson.files).toEqual([
+      'dist/src',
+      'dist/benchmarks',
+      'README.md',
+      'README.en.md',
+      'README.zh-CN.md',
+    ]);
+    expect(packageJson.types).toBe('dist/src/index.d.ts');
+    expect(packageJson.exports).toBeDefined();
+  });
 });

@@ -8,8 +8,6 @@ import type {
   PolymarketMarket,
   OrderRequest,
   OrderResponse,
-  Balance,
-  Trade,
 } from '../../src/api/polymarket-client.js';
 
 // Mock axios
@@ -100,25 +98,6 @@ describe('PolymarketClient', () => {
     updatedAt: '2024-01-01T00:00:00Z',
   };
 
-  const mockBalance: Balance = {
-    assetId: 'asset-1',
-    symbol: 'USDC',
-    balance: '1000',
-    available: '800',
-    locked: '200',
-  };
-
-  const mockTrade: Trade = {
-    id: 'trade-1',
-    marketId: 'market-1',
-    orderId: 'order-1',
-    side: 'buy',
-    size: 100,
-    price: 0.6,
-    fee: 0.5,
-    timestamp: '2024-01-01T00:00:00Z',
-  };
-
   beforeEach(() => {
     jest.clearAllMocks();
     resetPolymarketClient();
@@ -152,8 +131,8 @@ describe('PolymarketClient', () => {
     });
   });
 
-  describe('authentication', () => {
-    it('should add CLOB API key header without bearer auth', async () => {
+  describe('public endpoint authentication isolation', () => {
+    it('does not leak trading credentials to public Gamma requests', async () => {
       mockAxiosInstance.get.mockResolvedValueOnce({ data: [mockMarket] });
 
       await client.getMarkets();
@@ -163,23 +142,7 @@ describe('PolymarketClient', () => {
 
       requestInterceptor(config);
 
-      expect(config.headers.set).toHaveBeenCalledWith('POLY_API_KEY', 'test-api-key');
-      expect(config.headers.set).not.toHaveBeenCalledWith('Authorization', expect.any(String));
-    });
-
-    it('should add timestamp and passphrase headers when secret provided', async () => {
-      mockAxiosInstance.get.mockResolvedValueOnce({ data: [mockMarket] });
-
-      await client.getMarkets();
-
-      const requestInterceptor = mockAxiosInstance.interceptors.request.use.mock.calls[0][0];
-      const config = { headers: { set: jest.fn() } } as unknown as InternalAxiosRequestConfig;
-
-      requestInterceptor(config);
-
-      expect(config.headers.set).toHaveBeenCalledWith('POLY_API_KEY', 'test-api-key');
-      expect(config.headers.set).toHaveBeenCalledWith('POLY_PASSPHRASE', 'test-passphrase');
-      expect(config.headers.set).toHaveBeenCalledWith('POLY_TIMESTAMP', expect.any(String));
+      expect(config.headers.set).not.toHaveBeenCalled();
     });
   });
 
@@ -220,6 +183,11 @@ describe('PolymarketClient', () => {
       expect(mockAxiosInstance.get).toHaveBeenCalledWith('/markets/market-1');
       expect(result).toEqual(mockMarket);
     });
+
+    it('rejects an empty market id before issuing a request', async () => {
+      await expect(client.getMarket('  ')).rejects.toThrow(/marketId is required/);
+      expect(mockAxiosInstance.get).not.toHaveBeenCalled();
+    });
   });
 
   describe('getOrderBook', () => {
@@ -232,9 +200,11 @@ describe('PolymarketClient', () => {
     it('should fetch order book for market', async () => {
       mockAxiosInstance.get.mockResolvedValueOnce({ data: mockOrderBook });
 
-      const result = await client.getOrderBook('market-1');
+      const result = await client.getOrderBook('1234567890');
 
-      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/markets/market-1/orderbook');
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('https://clob.polymarket.com/book', {
+        params: { token_id: '1234567890' },
+      });
       expect(result).toEqual(mockOrderBook);
     });
 
@@ -246,10 +216,15 @@ describe('PolymarketClient', () => {
       };
       mockAxiosInstance.get.mockResolvedValueOnce({ data: emptyOrderBook });
 
-      const result = await client.getOrderBook('market-1');
+      const result = await client.getOrderBook('1234567890');
 
       expect(result.bids).toEqual([]);
       expect(result.asks).toEqual([]);
+    });
+
+    it('rejects a Gamma market id where a numeric CLOB token id is required', async () => {
+      await expect(client.getOrderBook('market-1')).rejects.toThrow(/numeric.*token id/i);
+      expect(mockAxiosInstance.get).not.toHaveBeenCalled();
     });
   });
 
@@ -292,73 +267,38 @@ describe('PolymarketClient', () => {
   });
 
   describe('getOrder', () => {
-    it('should fetch order details', async () => {
-      mockAxiosInstance.get.mockResolvedValueOnce({ data: mockOrderResponse });
-
-      const result = await client.getOrder('order-1');
-
-      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/orders/order-1');
-      expect(result).toEqual(mockOrderResponse);
+    it('requires the signed V2 adapter', async () => {
+      await expect(client.getOrder('order-1')).rejects.toThrow(/signed CLOB V2/);
+      expect(mockAxiosInstance.get).not.toHaveBeenCalled();
     });
   });
 
   describe('getOpenOrders', () => {
-    it('should fetch all open orders without market filter', async () => {
-      mockAxiosInstance.get.mockResolvedValueOnce({ data: [mockOrderResponse] });
-
-      const result = await client.getOpenOrders();
-
-      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/orders', { params: {} });
-      expect(result).toEqual([mockOrderResponse]);
+    it('requires the signed V2 adapter without a filter', async () => {
+      await expect(client.getOpenOrders()).rejects.toThrow(/signed CLOB V2/);
+      expect(mockAxiosInstance.get).not.toHaveBeenCalled();
     });
 
-    it('should fetch open orders for specific market', async () => {
-      mockAxiosInstance.get.mockResolvedValueOnce({ data: [mockOrderResponse] });
-
-      await client.getOpenOrders('market-1');
-
-      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/orders', {
-        params: { marketId: 'market-1' },
-      });
+    it('requires the signed V2 adapter with a filter', async () => {
+      await expect(client.getOpenOrders('market-1')).rejects.toThrow(/signed CLOB V2/);
+      expect(mockAxiosInstance.get).not.toHaveBeenCalled();
     });
   });
 
   describe('getBalances', () => {
-    it('should fetch account balances', async () => {
-      mockAxiosInstance.get.mockResolvedValueOnce({ data: [mockBalance] });
-
-      const result = await client.getBalances();
-
-      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/balance');
-      expect(result).toEqual([mockBalance]);
-    });
-
-    it('should handle multiple balances', async () => {
-      const balances: Balance[] = [
-        mockBalance,
-        { ...mockBalance, assetId: 'asset-2', symbol: 'ETH' },
-      ];
-      mockAxiosInstance.get.mockResolvedValueOnce({ data: balances });
-
-      const result = await client.getBalances();
-
-      expect(result).toHaveLength(2);
+    it('requires the signed V2 adapter', async () => {
+      await expect(client.getBalances()).rejects.toThrow(/signed CLOB V2/);
+      expect(mockAxiosInstance.get).not.toHaveBeenCalled();
     });
   });
 
   describe('getTrades', () => {
-    it('should fetch trades without params', async () => {
-      mockAxiosInstance.get.mockResolvedValueOnce({ data: [mockTrade] });
-
-      const result = await client.getTrades();
-
-      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/trades', { params: undefined });
-      expect(result).toEqual([mockTrade]);
+    it('requires an explicit user identity or signed client', async () => {
+      await expect(client.getTrades()).rejects.toThrow(/explicit Data API user/);
+      expect(mockAxiosInstance.get).not.toHaveBeenCalled();
     });
 
     it('should fetch trades with filters', async () => {
-      mockAxiosInstance.get.mockResolvedValueOnce({ data: [mockTrade] });
-
       const params = {
         marketId: 'market-1',
         limit: 50,
@@ -366,42 +306,96 @@ describe('PolymarketClient', () => {
         startDate: '2024-01-01',
         endDate: '2024-12-31',
       };
-      await client.getTrades(params);
-
-      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/trades', { params });
+      await expect(client.getTrades(params)).rejects.toThrow(/explicit Data API user/);
+      expect(mockAxiosInstance.get).not.toHaveBeenCalled();
     });
   });
 
   describe('getMarketPrices', () => {
-    const mockPrices = [
-      { timestamp: '2024-01-01T00:00:00Z', price: '0.6', volume: '100' },
-      { timestamp: '2024-01-01T01:00:00Z', price: '0.65', volume: '150' },
-    ];
+    const mockHistory = { history: [{ t: 1_704_067_200, p: 0.6 }] };
 
     it('should fetch market prices without params', async () => {
-      mockAxiosInstance.get.mockResolvedValueOnce({ data: mockPrices });
+      mockAxiosInstance.get.mockResolvedValueOnce({ data: mockHistory });
 
-      const result = await client.getMarketPrices('market-1');
+      const result = await client.getMarketPrices('1234567890');
 
-      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/markets/market-1/prices', {
-        params: undefined,
-      });
-      expect(result).toEqual(mockPrices);
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith(
+        'https://clob.polymarket.com/prices-history',
+        {
+          params: { market: '1234567890' },
+        }
+      );
+      expect(result).toEqual([
+        {
+          timestamp: '2024-01-01T00:00:00.000Z',
+          price: '0.6',
+          volume: '',
+        },
+      ]);
     });
 
-    it('should fetch market prices with interval', async () => {
-      mockAxiosInstance.get.mockResolvedValueOnce({ data: mockPrices });
+    it('should fetch market prices with an official interval', async () => {
+      mockAxiosInstance.get.mockResolvedValueOnce({ data: mockHistory });
 
-      const params = {
+      await client.getMarketPrices('1234567890', { interval: '1h' });
+
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith(
+        'https://clob.polymarket.com/prices-history',
+        {
+          params: { market: '1234567890', interval: '1h' },
+        }
+      );
+    });
+
+    it('should fetch an absolute date range using unix seconds', async () => {
+      mockAxiosInstance.get.mockResolvedValueOnce({ data: mockHistory });
+      await client.getMarketPrices('1234567890', {
         startDate: '2024-01-01',
         endDate: '2024-01-02',
-        interval: '1h' as const,
-      };
-      await client.getMarketPrices('market-1', params);
-
-      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/markets/market-1/prices', {
-        params,
       });
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith(
+        'https://clob.polymarket.com/prices-history',
+        {
+          params: {
+            market: '1234567890',
+            startTs: 1_704_067_200,
+            endTs: 1_704_153_600,
+          },
+        }
+      );
+    });
+
+    it('supports the official fidelity parameter', async () => {
+      mockAxiosInstance.get.mockResolvedValueOnce({ data: mockHistory });
+      await client.getMarketPrices('1234567890', { interval: 'all', fidelity: 5 });
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith(
+        'https://clob.polymarket.com/prices-history',
+        { params: { market: '1234567890', interval: 'all', fidelity: 5 } }
+      );
+    });
+
+    it('rejects contradictory or invalid history ranges locally', async () => {
+      await expect(
+        client.getMarketPrices('1234567890', {
+          interval: '1h',
+          startDate: '2024-01-01',
+        })
+      ).rejects.toThrow(/cannot be combined/);
+      await expect(
+        client.getMarketPrices('1234567890', {
+          startDate: '2024-01-02',
+          endDate: '2024-01-01',
+        })
+      ).rejects.toThrow(/must be before/);
+      await expect(client.getMarketPrices('1234567890', { fidelity: 0 })).rejects.toThrow(
+        /positive integer/
+      );
+      expect(mockAxiosInstance.get).not.toHaveBeenCalled();
+    });
+
+    it('rejects malformed public API data', async () => {
+      mockAxiosInstance.get.mockResolvedValueOnce({ data: { history: [{ t: 1, p: 2 }] } });
+      await expect(client.getMarketPrices('1234567890')).rejects.toThrow(/invalid point/);
     });
   });
 
@@ -411,7 +405,7 @@ describe('PolymarketClient', () => {
 
       const result = await client.healthCheck();
 
-      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/health');
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('https://clob.polymarket.com/ok');
       expect(result).toBe(true);
     });
 

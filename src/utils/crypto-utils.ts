@@ -24,7 +24,10 @@ function getMasterKey(): Buffer {
         "Generate a key with: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\""
     );
   }
-  return crypto.createHash('sha256').update(envKey).digest();
+  if (!/^[a-fA-F0-9]{64}$/.test(envKey)) {
+    throw new Error('CONFIG_ENCRYPTION_KEY must be exactly 32 random bytes encoded as 64 hex');
+  }
+  return Buffer.from(envKey, 'hex');
 }
 
 function deriveKey(masterKey: Buffer, salt: Buffer): Buffer {

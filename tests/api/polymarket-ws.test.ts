@@ -46,6 +46,10 @@ class MockWebSocket {
   pong(data: Buffer): void {
     // Mock pong
   }
+
+  terminate(): void {
+    this.readyState = MockWebSocket.CLOSED;
+  }
 }
 
 // Replace WebSocket with mock
@@ -120,6 +124,7 @@ describe('PolymarketWebSocketClient', () => {
       const mockWs = getMockWs();
       expect(mockWs).toBeTruthy();
       expect(mockWs?.url).toBe('wss://ws.polymarket.com');
+      expect(mockWs?.options).not.toHaveProperty('headers');
     });
 
     it('should warn if already connected', () => {
@@ -214,13 +219,13 @@ describe('PolymarketWebSocketClient', () => {
           mockWs.readyState = MockWebSocket.OPEN;
         }
 
-        const pingSpy = jest.spyOn(mockWs!, 'ping');
+        const sendSpy = jest.spyOn(mockWs!, 'send');
         mockWs?.emit('open');
 
         // Advance time to trigger heartbeat
-        jest.advanceTimersByTime(30000);
+        jest.advanceTimersByTime(10000);
 
-        expect(pingSpy).toHaveBeenCalled();
+        expect(sendSpy).toHaveBeenCalledWith('PING');
       });
 
       it('should resubscribe to markets on reconnect', () => {
@@ -280,6 +285,80 @@ describe('PolymarketWebSocketClient', () => {
         expect(handler).toHaveBeenCalledWith({
           type: 'orderbook',
           data: orderbookMessage.data,
+        });
+      });
+
+      it('maps an official CLOB book snapshot without credentials or legacy envelopes', () => {
+        const handler = jest.fn();
+        client.subscribe(handler);
+        getMockWs()?.emit(
+          'message',
+          JSON.stringify({
+            event_type: 'book',
+            asset_id: '1234567890',
+            bids: [{ price: '0.48', size: '30' }],
+            asks: [{ price: '0.52', size: '25' }],
+            timestamp: '1757908892351',
+          })
+        );
+
+        expect(handler).toHaveBeenCalledWith({
+          type: 'orderbook',
+          data: {
+            marketId: '1234567890',
+            bids: [{ price: '0.48', size: '30' }],
+            asks: [{ price: '0.52', size: '25' }],
+            timestamp: '1757908892351',
+            kind: 'snapshot',
+          },
+        });
+      });
+
+      it('maps official price-change deltas and last-trade messages', () => {
+        const handler = jest.fn();
+        client.subscribe(handler);
+        getMockWs()?.emit(
+          'message',
+          JSON.stringify({
+            event_type: 'price_change',
+            timestamp: '1757908892351',
+            price_changes: [
+              { asset_id: '123', price: '0.5', size: '20', side: 'BUY' },
+              { asset_id: '456', price: '0.6', size: '10', side: 'SELL' },
+            ],
+          })
+        );
+        getMockWs()?.emit(
+          'message',
+          JSON.stringify({
+            event_type: 'last_trade_price',
+            asset_id: '123',
+            price: '0.51',
+            size: '2',
+            side: 'BUY',
+            timestamp: '1757908892352',
+          })
+        );
+
+        expect(handler).toHaveBeenCalledWith({
+          type: 'orderbook',
+          data: {
+            marketId: '123',
+            bids: [{ price: '0.5', size: '20' }],
+            asks: [],
+            timestamp: '1757908892351',
+            kind: 'delta',
+          },
+        });
+        expect(handler).toHaveBeenCalledWith({
+          type: 'trade',
+          data: {
+            marketId: '123',
+            price: '0.51',
+            size: '2',
+            side: 'buy',
+            timestamp: '1757908892352',
+          },
         });
       });
 
@@ -566,9 +645,9 @@ describe('PolymarketWebSocketClient', () => {
 
       expect(sendSpy).toHaveBeenCalledWith(
         JSON.stringify({
-          type: 'subscribe',
-          channel: 'market',
-          marketId: 'market-1',
+          assets_ids: ['market-1'],
+          operation: 'subscribe',
+          custom_feature_enabled: true,
         })
       );
     });
@@ -612,9 +691,8 @@ describe('PolymarketWebSocketClient', () => {
 
       expect(sendSpy).toHaveBeenCalledWith(
         JSON.stringify({
-          type: 'unsubscribe',
-          channel: 'market',
-          marketId: 'market-1',
+          assets_ids: ['market-1'],
+          operation: 'unsubscribe',
         })
       );
     });
@@ -745,30 +823,32 @@ describe('PolymarketWebSocketClient', () => {
 
     it('should send periodic ping messages', () => {
       const mockWs = getMockWs();
-      const pingSpy = jest.spyOn(mockWs!, 'ping');
+      const sendSpy = jest.spyOn(mockWs!, 'send');
 
       mockWs!.readyState = MockWebSocket.OPEN;
       mockWs?.emit('open');
 
-      jest.advanceTimersByTime(30000);
-      expect(pingSpy).toHaveBeenCalledTimes(1);
+      jest.advanceTimersByTime(10000);
+      expect(sendSpy).toHaveBeenCalledTimes(1);
+      expect(sendSpy).toHaveBeenLastCalledWith('PING');
 
-      jest.advanceTimersByTime(30000);
-      expect(pingSpy).toHaveBeenCalledTimes(2);
+      mockWs?.emit('message', 'PONG');
+      jest.advanceTimersByTime(10000);
+      expect(sendSpy).toHaveBeenCalledTimes(2);
     });
 
     it('should not ping if connection is closed', () => {
       const mockWs = getMockWs();
-      const pingSpy = jest.spyOn(mockWs!, 'ping');
+      const sendSpy = jest.spyOn(mockWs!, 'send');
 
       mockWs!.readyState = MockWebSocket.OPEN;
       mockWs?.emit('open');
 
       mockWs!.readyState = MockWebSocket.CLOSED;
-      jest.advanceTimersByTime(30000);
+      jest.advanceTimersByTime(10000);
 
       // Ping should not be called when closed
-      expect(pingSpy).not.toHaveBeenCalled();
+      expect(sendSpy).not.toHaveBeenCalled();
     });
   });
 

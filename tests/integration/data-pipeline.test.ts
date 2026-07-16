@@ -102,7 +102,12 @@ describe('Data Pipeline Integration', () => {
       detector.updatePrice('market-yes', 0.52);
       detector.updatePrice('market-no', 0.42);
 
-      const opportunities = detector.findAllOpportunities();
+      const opportunities = detector.findAllOpportunities(
+        new Map([
+          ['market-yes', manager.getBook('market-yes')],
+          ['market-no', manager.getBook('market-no')],
+        ])
+      );
 
       // Should find arbitrage opportunity
       expect(opportunities.length).toBeGreaterThan(0);
@@ -225,13 +230,9 @@ describe('Data Pipeline Integration', () => {
       });
 
       // Simulate incoming data
-      manager.updateBook(
-        'yes-market',
-        [{ price: 0.55, size: 1000 }],
-        [{ price: 0.56, size: 1000 }]
-      );
+      manager.updateBook('yes-market', [{ price: 0.48, size: 1000 }], [{ price: 0.5, size: 1000 }]);
 
-      manager.updateBook('no-market', [{ price: 0.4, size: 1000 }], [{ price: 0.41, size: 1000 }]);
+      manager.updateBook('no-market', [{ price: 0.38, size: 1000 }], [{ price: 0.4, size: 1000 }]);
 
       detector.updatePrice('yes-market', 0.555);
       detector.updatePrice('no-market', 0.405);
@@ -247,7 +248,12 @@ describe('Data Pipeline Integration', () => {
       expect(noMid).toBeDefined();
 
       // Check for arbitrage
-      const opportunities = detector.findAllOpportunities();
+      const opportunities = detector.findAllOpportunities(
+        new Map([
+          ['yes-market', yesBook],
+          ['no-market', noBook],
+        ])
+      );
 
       // YES + NO = 0.555 + 0.405 = 0.96 < 1, should be arbitrage
       if (yesMid && noMid && yesMid + noMid < 0.99) {

@@ -14,7 +14,7 @@ export interface TradeOrder {
   size: number;
   price: number;
   orderType: 'limit' | 'market';
-  timeInForce?: 'GTC' | 'IOC' | 'FOK';
+  timeInForce?: 'GTC' | 'IOC' | 'FOK' | 'FAK';
 }
 
 /**

@@ -110,8 +110,10 @@ export const NetworkConfigSchema = z.object({
   /** Polygon chain id for CLOB signing */
   POLYMARKET_CHAIN_ID: z.union([z.literal(137), z.literal(80002)]).default(137),
 
-  /** Signature type for Polymarket CLOB orders: 0=EOA, 1=Proxy, 2=Gnosis Safe */
-  POLYMARKET_SIGNATURE_TYPE: z.union([z.literal(0), z.literal(1), z.literal(2)]).default(0),
+  /** Signature type: 0=EOA, 1=Proxy, 2=Gnosis Safe, 3=EIP-1271 contract wallet */
+  POLYMARKET_SIGNATURE_TYPE: z
+    .union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)])
+    .default(0),
 
   /** Polymarket profile/proxy funder address, required for proxy wallet modes */
   POLYMARKET_FUNDER_ADDRESS: z
@@ -270,19 +272,19 @@ export type AppConfig = z.infer<typeof AppConfigSchema>;
 export function parseConfigFromEnv(): AppConfig {
   return {
     algorithm: AlgorithmConfigSchema.parse({
-      ALPHA: parseFloat(process.env.ALPHA ?? '0.9'),
-      INITIAL_EPSILON: parseFloat(process.env.INITIAL_EPSILON ?? '0.1'),
-      CONVERGENCE_THRESHOLD: parseFloat(process.env.CONVERGENCE_THRESHOLD ?? '1e-6'),
-      MAX_ITERATIONS: parseInt(process.env.MAX_ITERATIONS ?? '150', 10),
-      MIN_PROFIT_THRESHOLD: parseFloat(process.env.MIN_PROFIT_THRESHOLD ?? '0.05'),
-      BARRIER_PARAMETER: parseFloat(process.env.BARRIER_PARAMETER ?? '1.0'),
+      ALPHA: optionalNumberEnv('ALPHA'),
+      INITIAL_EPSILON: optionalNumberEnv('INITIAL_EPSILON'),
+      CONVERGENCE_THRESHOLD: optionalNumberEnv('CONVERGENCE_THRESHOLD'),
+      MAX_ITERATIONS: optionalNumberEnv('MAX_ITERATIONS'),
+      MIN_PROFIT_THRESHOLD: optionalNumberEnv('MIN_PROFIT_THRESHOLD'),
+      BARRIER_PARAMETER: optionalNumberEnv('BARRIER_PARAMETER'),
     }),
     trading: TradingConfigSchema.parse({
-      MAX_POSITION_PCT: parseFloat(process.env.MAX_POSITION_PCT ?? '0.5'),
-      TIME_WINDOW_BLOCKS: parseInt(process.env.TIME_WINDOW_BLOCKS ?? '950', 10),
-      SLIPPAGE_TOLERANCE: parseFloat(process.env.SLIPPAGE_TOLERANCE ?? '0.02'),
-      MAX_CONCURRENT_TRADES: parseInt(process.env.MAX_CONCURRENT_TRADES ?? '5', 10),
-      MIN_ORDER_BOOK_DEPTH: parseFloat(process.env.MIN_ORDER_BOOK_DEPTH ?? '100'),
+      MAX_POSITION_PCT: optionalNumberEnv('MAX_POSITION_PCT'),
+      TIME_WINDOW_BLOCKS: optionalNumberEnv('TIME_WINDOW_BLOCKS'),
+      SLIPPAGE_TOLERANCE: optionalNumberEnv('SLIPPAGE_TOLERANCE'),
+      MAX_CONCURRENT_TRADES: optionalNumberEnv('MAX_CONCURRENT_TRADES'),
+      MIN_ORDER_BOOK_DEPTH: optionalNumberEnv('MIN_ORDER_BOOK_DEPTH'),
     }),
     network: NetworkConfigSchema.parse({
       RPC_URL: optionalEnv('RPC_URL'),
@@ -295,47 +297,43 @@ export function parseConfigFromEnv(): AppConfig {
       POLYMARKET_FUNDER_ADDRESS: optionalEnv('POLYMARKET_FUNDER_ADDRESS'),
       POLYMARKET_DEFAULT_TICK_SIZE: optionalEnv('POLYMARKET_DEFAULT_TICK_SIZE'),
       POLYMARKET_NEG_RISK: optionalBooleanEnv('POLYMARKET_NEG_RISK'),
-      CONNECTION_TIMEOUT: parseInt(process.env.CONNECTION_TIMEOUT ?? '30000', 10),
-      RECONNECT_INTERVAL: parseInt(process.env.RECONNECT_INTERVAL ?? '5000', 10),
-      MAX_RECONNECT_ATTEMPTS: parseInt(process.env.MAX_RECONNECT_ATTEMPTS ?? '10', 10),
+      CONNECTION_TIMEOUT: optionalNumberEnv('CONNECTION_TIMEOUT'),
+      RECONNECT_INTERVAL: optionalNumberEnv('RECONNECT_INTERVAL'),
+      MAX_RECONNECT_ATTEMPTS: optionalNumberEnv('MAX_RECONNECT_ATTEMPTS'),
     }),
     wallet: WalletConfigSchema.parse({
       PRIVATE_KEY: optionalEnv('PRIVATE_KEY'),
       WALLET_ADDRESS: optionalEnv('WALLET_ADDRESS'),
     }),
     logging: LogConfigSchema.parse({
-      LOG_LEVEL:
-        (process.env.LOG_LEVEL as 'debug' | 'info' | 'warn' | 'error' | undefined) ?? 'info',
-      SILENT: process.env.SILENT === 'true',
-      STRUCTURED_LOGGING: process.env.STRUCTURED_LOGGING === 'true',
+      LOG_LEVEL: optionalEnv('LOG_LEVEL'),
+      SILENT: optionalBooleanEnv('SILENT'),
+      STRUCTURED_LOGGING: optionalBooleanEnv('STRUCTURED_LOGGING'),
     }),
     kelly: KellyConfigSchema.parse({
-      KELLY_FRACTION: parseFloat(process.env.KELLY_FRACTION ?? '0.25'),
-      MIN_PROBABILITY: parseFloat(process.env.MIN_PROBABILITY ?? '0.51'),
-      MAX_BET_FRACTION: parseFloat(process.env.MAX_BET_FRACTION ?? '0.1'),
+      KELLY_FRACTION: optionalNumberEnv('KELLY_FRACTION'),
+      MIN_PROBABILITY: optionalNumberEnv('MIN_PROBABILITY'),
+      MAX_BET_FRACTION: optionalNumberEnv('MAX_BET_FRACTION'),
     }),
     risk: RiskConfigSchema.parse({
-      MAX_DAILY_LOSS: parseFloat(process.env.MAX_DAILY_LOSS ?? '1000'),
-      MAX_EXPOSURE: parseFloat(process.env.MAX_EXPOSURE ?? '10000'),
-      EMERGENCY_STOP_THRESHOLD: parseFloat(process.env.EMERGENCY_STOP_THRESHOLD ?? '500'),
-      CIRCUIT_BREAKER_ENABLED: process.env.CIRCUIT_BREAKER_ENABLED !== 'false',
+      MAX_DAILY_LOSS: optionalNumberEnv('MAX_DAILY_LOSS'),
+      MAX_EXPOSURE: optionalNumberEnv('MAX_EXPOSURE'),
+      EMERGENCY_STOP_THRESHOLD: optionalNumberEnv('EMERGENCY_STOP_THRESHOLD'),
+      CIRCUIT_BREAKER_ENABLED: optionalBooleanEnv('CIRCUIT_BREAKER_ENABLED'),
     }),
     blockchain: BlockchainConfigSchema.parse({
       RPC_URL: optionalEnv('RPC_URL') ?? optionalEnv('BLOCKCHAIN_RPC_URL'),
-      RPC_PROVIDER: (process.env.RPC_PROVIDER ?? 'custom') as 'helius' | 'alchemy' | 'custom',
-      RPC_TIMEOUT_MS: parseInt(process.env.RPC_TIMEOUT_MS ?? '30000', 10),
-      RPC_MAX_RETRIES: parseInt(process.env.RPC_MAX_RETRIES ?? '3', 10),
-      RPC_RETRY_DELAY_MS: parseInt(process.env.RPC_RETRY_DELAY_MS ?? '1000', 10),
-      CONFIRMATION_BLOCKS: parseInt(process.env.CONFIRMATION_BLOCKS ?? '12', 10),
-      FINALIZATION_BLOCKS: parseInt(process.env.FINALIZATION_BLOCKS ?? '128', 10),
-      STATE_STORE_TYPE: (process.env.STATE_STORE_TYPE ?? 'file') as 'file' | 'redis' | 'memory',
-      STATE_STORE_PATH: process.env.STATE_STORE_PATH ?? './data/transactions.json',
-      ENABLE_REORG_DETECTION: process.env.ENABLE_REORG_DETECTION !== 'false',
-      GAS_PRICE_THRESHOLD_GWEI: parseFloat(process.env.GAS_PRICE_THRESHOLD_GWEI ?? '0'),
-      STUCK_TRANSACTION_THRESHOLD_MS: parseInt(
-        process.env.STUCK_TRANSACTION_THRESHOLD_MS ?? '300000',
-        10
-      ),
+      RPC_PROVIDER: optionalEnv('RPC_PROVIDER'),
+      RPC_TIMEOUT_MS: optionalNumberEnv('RPC_TIMEOUT_MS'),
+      RPC_MAX_RETRIES: optionalNumberEnv('RPC_MAX_RETRIES'),
+      RPC_RETRY_DELAY_MS: optionalNumberEnv('RPC_RETRY_DELAY_MS'),
+      CONFIRMATION_BLOCKS: optionalNumberEnv('CONFIRMATION_BLOCKS'),
+      FINALIZATION_BLOCKS: optionalNumberEnv('FINALIZATION_BLOCKS'),
+      STATE_STORE_TYPE: optionalEnv('STATE_STORE_TYPE'),
+      STATE_STORE_PATH: optionalEnv('STATE_STORE_PATH'),
+      ENABLE_REORG_DETECTION: optionalBooleanEnv('ENABLE_REORG_DETECTION'),
+      GAS_PRICE_THRESHOLD_GWEI: optionalNumberEnv('GAS_PRICE_THRESHOLD_GWEI'),
+      STUCK_TRANSACTION_THRESHOLD_MS: optionalNumberEnv('STUCK_TRANSACTION_THRESHOLD_MS'),
     }),
   };
 }
