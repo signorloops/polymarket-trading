@@ -297,6 +297,45 @@ export function calculateSingleMarketArbitrageSize(
 }
 
 /**
+ * Estimate the executable dollar profit of a single-market YES/NO arbitrage from
+ * the order books, net of fees.
+ *
+ * The Frank-Wolfe `guaranteedProfit` (objective - gap) is a dimensionless KL-
+ * divergence bound in nats, NOT a dollar amount — yet the live gate compared it
+ * to a $0.05 threshold. This function is denominated in dollars using actual
+ * market prices (and book-constrained size), so its result CAN be compared to a
+ * dollar threshold. Returns size 0 / profit 0 / profitable=false when slippage
+ * or liquidity prevents a profitable fill.
+ *
+ * NOTE: profit assumes fills at the quoted yes/no prices (depth/slippage beyond
+ * `getMaxExecutableSize`'s tolerance is not modeled). Cross-market arbitrage
+ * cannot be priced this way without its payoff structure (separate work).
+ */
+export function estimateSingleMarketArbProfit(
+  yesPrice: number,
+  noPrice: number,
+  capital: number,
+  yesOrderBook: OrderBook,
+  noOrderBook: OrderBook,
+  feeRate = 0
+): { size: number; profit: number; profitable: boolean } {
+  const sizing = calculateSingleMarketArbitrageSize(
+    yesPrice,
+    noPrice,
+    capital,
+    yesOrderBook,
+    noOrderBook
+  );
+  const fees = sizing.yesSize * yesPrice * feeRate + sizing.noSize * noPrice * feeRate;
+  const profit = sizing.expectedProfit - fees;
+  return {
+    size: sizing.yesSize,
+    profit,
+    profitable: Number.isFinite(profit) && profit > 0,
+  };
+}
+
+/**
  * Validate position size against risk limits
  *
  * @param size Position size

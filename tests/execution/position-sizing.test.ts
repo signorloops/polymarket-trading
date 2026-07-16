@@ -6,6 +6,7 @@ import {
   calculatePositionSize,
   calculateMultiLegPositionSize,
   calculateSingleMarketArbitrageSize,
+  estimateSingleMarketArbProfit,
   validateRiskLimits,
   adjustForSlippage,
 } from '../../src/execution/position-sizing.js';
@@ -138,6 +139,53 @@ describe('Position Sizing', () => {
       expect(result.yesSize).toBe(0);
       expect(result.noSize).toBe(0);
       expect(result.expectedProfit).toBe(0);
+    });
+  });
+
+  describe('estimateSingleMarketArbProfit', () => {
+    // Books with asks within SLIPPAGE_TOLERANCE (default 2%) so executable size > 0.
+    function tightBook(id: string): OrderBook {
+      const book = new OrderBook(id);
+      book.update([{ price: 0.349, size: 10000 }], [{ price: 0.351, size: 10000 }]);
+      return book;
+    }
+
+    it('reports a dollar-denominated profit for a profitable YES+NO arb', () => {
+      const est = estimateSingleMarketArbProfit(
+        0.351,
+        0.351,
+        100000,
+        tightBook('y'),
+        tightBook('n')
+      );
+      expect(est.size).toBeGreaterThan(0);
+      expect(est.profit).toBeGreaterThan(0);
+      expect(est.profitable).toBe(true);
+      // profit (no fees) = size * (1 - 0.702)
+      expect(est.profit).toBeCloseTo(est.size * (1 - 0.702), 6);
+    });
+
+    it('becomes unprofitable when fees exceed the edge', () => {
+      // edge per pair ~0.298; a 100% fee on the 0.702 notional wipes it out.
+      const est = estimateSingleMarketArbProfit(
+        0.351,
+        0.351,
+        100000,
+        tightBook('y'),
+        tightBook('n'),
+        1
+      );
+      expect(est.profitable).toBe(false);
+    });
+
+    it('is not profitable when YES+NO >= 1 (no arbitrage)', () => {
+      const yesBook = new OrderBook('y');
+      const noBook = new OrderBook('n');
+      yesBook.update([{ price: 0.6, size: 1000 }], [{ price: 0.61, size: 1000 }]);
+      noBook.update([{ price: 0.6, size: 1000 }], [{ price: 0.61, size: 1000 }]);
+      const est = estimateSingleMarketArbProfit(0.61, 0.61, 100000, yesBook, noBook);
+      expect(est.size).toBe(0);
+      expect(est.profitable).toBe(false);
     });
   });
 

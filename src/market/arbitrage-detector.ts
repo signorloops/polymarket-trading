@@ -151,7 +151,17 @@ export class ArbitrageDetector {
       }
     );
 
-    // Check if profitable
+    // Check if profitable.
+    // WARNING: `guaranteedProfit` here is `objective - gap`, i.e. a KL-divergence
+    // bound in NATS (dimensionless) — NOT dollars. It is a useful pre-filter signal
+    // that the markets are mispriced relative to the marginal polytope, but it is
+    // not comparable to a dollar threshold and does not account for fills, depth,
+    // or fees. Converting it to a real dollar-payoff estimate requires modeling the
+    // cross-market arbitrage's payoff structure (which outcomes pay across markets),
+    // which this Frank-Wolfe-on-probabilities formulation does not expose. Until
+    // that payoff model exists, cross-market execution must be gated on a real
+    // fill simulation, not on this nats value. (Single-market arb IS dollar-based:
+    // profitPotential = |1 - sum|.)
     const guaranteedProfit = fwResult.objective - fwResult.gap;
 
     if (isProfitableArbitrage(fwResult, ALGORITHM_CONFIG.MIN_PROFIT_THRESHOLD)) {
