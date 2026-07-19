@@ -45,6 +45,10 @@ describe('OnchainBalanceReader', () => {
     );
   });
 
+  it('rejects plaintext HTTP RPC URLs that may embed API keys (EXEC-13)', () => {
+    expect(() => new OnchainBalanceReader('http://polygon.example.com')).toThrow(/HTTPS/);
+  });
+
   it('fails closed when the RPC is connected to the wrong chain', async () => {
     const client: OnchainReadPort = {
       getChainId: jest.fn().mockResolvedValue(80002),

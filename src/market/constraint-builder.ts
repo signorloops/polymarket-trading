@@ -7,6 +7,11 @@
  * - Implication constraints
  * - Conditional probability constraints
  * - Non-negativity constraints
+ *
+ * Cross-event relational constraints (ME / implies / conditional) never sum
+ * every market on a binary event (YES+NO). That would make ME infeasible and
+ * implies/conditional vacuous (MKT-2). Market-level edges constrain those
+ * markets directly; event-level edges use affirmative (Yes) representatives.
  */
 
 import type { MarketNode, EventNode, DependencyEdge } from './dependency-graph.js';
@@ -62,58 +67,48 @@ export function buildConstraintMatrix(
     descriptions.push(`Event ${event.id}: probability sum = 1`);
   }
 
-  // 2. Mutually exclusive event constraints
+  // 2. Mutually exclusive event constraints: P(A) + P(B) <= 1
   for (const edge of edges) {
-    if (edge.type === 'mutually_exclusive') {
-      const fromEventId = resolveEdgeEventId(edge.from, events, markets);
-      const toEventId = resolveEdgeEventId(edge.to, events, markets);
-      if (!fromEventId || !toEventId || fromEventId === toEventId) continue;
+    if (edge.type !== 'mutually_exclusive') continue;
 
-      const event1 = events.get(fromEventId);
-      const event2 = events.get(toEventId);
+    const sides = resolveRelationalMarketIds(edge.from, edge.to, events, markets);
+    if (!sides) continue;
 
-      if (event1 && event2) {
-        const constraint: number[] = new Array(n).fill(0) as number[];
-        for (const marketId of event1.markets) {
-          const idx = marketIndex.get(marketId) ?? -1;
-          if (idx >= 0) constraint[idx] = -1;
-        }
-        for (const marketId of event2.markets) {
-          const idx = marketIndex.get(marketId) ?? -1;
-          if (idx >= 0) constraint[idx] = -1;
-        }
-
-        coefficients.push(constraint);
-        rhs.push(-1);
-        types.push('inequality');
-        descriptions.push(`Mutually exclusive: ${fromEventId} + ${toEventId} <= 1`);
+    const constraint: number[] = new Array(n).fill(0) as number[];
+    let hasTerm = false;
+    for (const marketId of [...sides.fromMarketIds, ...sides.toMarketIds]) {
+      const idx = marketIndex.get(marketId) ?? -1;
+      if (idx >= 0) {
+        constraint[idx] = -1;
+        hasTerm = true;
       }
     }
+    if (!hasTerm) continue;
+
+    coefficients.push(constraint);
+    rhs.push(-1);
+    types.push('inequality');
+    descriptions.push(`Mutually exclusive: ${sides.fromLabel} + ${sides.toLabel} <= 1`);
   }
 
   // 3. Implication constraints: from => to → P(to) - P(from) >= 0
   for (const edge of edges) {
     if (edge.type !== 'implies') continue;
 
-    const fromEventId = resolveEdgeEventId(edge.from, events, markets);
-    const toEventId = resolveEdgeEventId(edge.to, events, markets);
-    if (!fromEventId || !toEventId || fromEventId === toEventId) continue;
-
-    const fromEvent = events.get(fromEventId);
-    const toEvent = events.get(toEventId);
-    if (!fromEvent || !toEvent) continue;
+    const sides = resolveRelationalMarketIds(edge.from, edge.to, events, markets);
+    if (!sides) continue;
 
     const constraint: number[] = new Array(n).fill(0) as number[];
     let hasTerm = false;
 
-    for (const marketId of toEvent.markets) {
+    for (const marketId of sides.toMarketIds) {
       const idx = marketIndex.get(marketId) ?? -1;
       if (idx >= 0) {
         constraint[idx] = 1;
         hasTerm = true;
       }
     }
-    for (const marketId of fromEvent.markets) {
+    for (const marketId of sides.fromMarketIds) {
       const idx = marketIndex.get(marketId) ?? -1;
       if (idx >= 0) {
         constraint[idx] = -1;
@@ -126,30 +121,33 @@ export function buildConstraintMatrix(
     coefficients.push(constraint);
     rhs.push(0);
     types.push('inequality');
-    descriptions.push(`Implication: ${fromEventId} <= ${toEventId}`);
+    descriptions.push(`Implication: ${sides.fromLabel} <= ${sides.toLabel}`);
   }
 
   // 4. Conditional probability constraints: P(child) <= P(parent)
   for (const event of events.values()) {
-    if (event.parentEvent) {
-      const parent = events.get(event.parentEvent);
-      if (parent) {
-        const constraint: number[] = new Array(n).fill(0) as number[];
-        for (const marketId of event.markets) {
-          const idx = marketIndex.get(marketId) ?? -1;
-          if (idx >= 0) constraint[idx] = -1;
-        }
-        for (const marketId of parent.markets) {
-          const idx = marketIndex.get(marketId) ?? -1;
-          if (idx >= 0) constraint[idx] = 1;
-        }
+    if (!event.parentEvent) continue;
+    const parent = events.get(event.parentEvent);
+    if (!parent) continue;
 
-        coefficients.push(constraint);
-        rhs.push(0);
-        types.push('inequality');
-        descriptions.push(`Conditional: ${event.id} <= ${parent.id}`);
-      }
+    const childMarkets = eventProbabilityMarketIds(event, markets);
+    const parentMarkets = eventProbabilityMarketIds(parent, markets);
+    if (childMarkets.length === 0 || parentMarkets.length === 0) continue;
+
+    const constraint: number[] = new Array(n).fill(0) as number[];
+    for (const marketId of childMarkets) {
+      const idx = marketIndex.get(marketId) ?? -1;
+      if (idx >= 0) constraint[idx] = -1;
     }
+    for (const marketId of parentMarkets) {
+      const idx = marketIndex.get(marketId) ?? -1;
+      if (idx >= 0) constraint[idx] = 1;
+    }
+
+    coefficients.push(constraint);
+    rhs.push(0);
+    types.push('inequality');
+    descriptions.push(`Conditional: ${event.id} <= ${parent.id}`);
   }
 
   // 5. Non-negativity constraints
@@ -173,4 +171,80 @@ function resolveEdgeEventId(
 ): string | undefined {
   if (events.has(id)) return id;
   return markets.get(id)?.eventId;
+}
+
+/**
+ * Resolve market IDs for a cross-event relational edge.
+ *
+ * Market→market edges constrain those markets directly. Event-level (or mixed)
+ * edges pick affirmative outcome representatives per event (MKT-2).
+ */
+function resolveRelationalMarketIds(
+  fromId: string,
+  toId: string,
+  events: Map<string, EventNode>,
+  markets: Map<string, MarketNode>
+): {
+  fromMarketIds: string[];
+  toMarketIds: string[];
+  fromLabel: string;
+  toLabel: string;
+} | null {
+  if (markets.has(fromId) && markets.has(toId)) {
+    const fromEventId = markets.get(fromId)?.eventId;
+    const toEventId = markets.get(toId)?.eventId;
+    if (!fromEventId || !toEventId || fromEventId === toEventId) return null;
+    return {
+      fromMarketIds: [fromId],
+      toMarketIds: [toId],
+      fromLabel: fromEventId,
+      toLabel: toEventId,
+    };
+  }
+
+  const fromEventId = resolveEdgeEventId(fromId, events, markets);
+  const toEventId = resolveEdgeEventId(toId, events, markets);
+  if (!fromEventId || !toEventId || fromEventId === toEventId) return null;
+
+  const fromEvent = events.get(fromEventId);
+  const toEvent = events.get(toEventId);
+  if (!fromEvent || !toEvent) return null;
+
+  const fromMarketIds = eventProbabilityMarketIds(fromEvent, markets);
+  const toMarketIds = eventProbabilityMarketIds(toEvent, markets);
+  if (fromMarketIds.length === 0 || toMarketIds.length === 0) return null;
+
+  return {
+    fromMarketIds,
+    toMarketIds,
+    fromLabel: fromEventId,
+    toLabel: toEventId,
+  };
+}
+
+/**
+ * Markets that represent P(event) for relational constraints.
+ *
+ * Prefers affirmative outcomes (Yes/Y/true/1). Falls back to the first
+ * non-negative (non-No) market, then the first present market. Never returns
+ * both YES and NO of a binary event.
+ */
+function eventProbabilityMarketIds(event: EventNode, markets: Map<string, MarketNode>): string[] {
+  const present = event.markets.filter((id) => markets.has(id));
+  if (present.length === 0) return [];
+
+  const affirmative = present.filter((id) => isAffirmativeOutcome(markets.get(id)?.outcome));
+  if (affirmative.length > 0) return affirmative;
+
+  const nonNegative = present.filter((id) => !isNegativeOutcome(markets.get(id)?.outcome));
+  const representative = nonNegative[0] ?? present[0];
+  return representative === undefined ? [] : [representative];
+}
+
+function isAffirmativeOutcome(outcome: string | undefined): boolean {
+  return /^(yes|y|true|1)$/i.test((outcome ?? '').trim());
+}
+
+function isNegativeOutcome(outcome: string | undefined): boolean {
+  return /^(no|n|false|0)$/i.test((outcome ?? '').trim());
 }

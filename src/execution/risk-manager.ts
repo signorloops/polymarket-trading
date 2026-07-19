@@ -358,7 +358,8 @@ export class RiskManager {
           ? this.calculatePnL(existingPosition, orderStatus.avgPrice, closedSize)
           : 0;
         if (costBasisKnown) this.dailyPnL += pnl;
-        if (Math.abs(newSize) < 1e-10) {
+        if (Math.abs(newSize) < 1e-6) {
+          // Treat dust (including tiny opposite-side overshoots) as flat (EXEC-12).
           this.positions.delete(marketId);
           this.marketPrices.delete(marketId);
           this.logger.info(`Position closed for ${marketId}`, { pnl });

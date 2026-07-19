@@ -323,6 +323,12 @@ export class DataPipeline {
   private handleOrderBookMessage(msg: Record<string, unknown>): void {
     const processStartTime = performance.now();
 
+    // Missing bids/asks means an incomplete frame — not an explicit empty book (MKT-5).
+    if (!Array.isArray(msg.bids) || !Array.isArray(msg.asks)) {
+      this.logger.warn('Ignoring book snapshot missing bids or asks arrays');
+      return;
+    }
+
     const toLevels = (arr: unknown): { price: number; size: number }[] => {
       if (!Array.isArray(arr)) return [];
       const levels: { price: number; size: number }[] = [];
@@ -506,14 +512,13 @@ export class DataPipeline {
   }
 
   /**
-   * Validate a price from an untrusted WebSocket message. Polymarket outcome-token
-   * prices live in [0, 1]; reject NaN/Infinity/out-of-range/missing values so a
-   * malformed or hostile message cannot poison the arbitrage detector. Number("abc")
-   * is NaN, Number("1e999") is Infinity, and a missing field must not default to 0.
+   * Validate a price from an untrusted WebSocket message. Outcome-token prices are
+   * open-interval (0, 1), matching OrderBook (MKT-4). Reject NaN/Infinity/edges/
+   * missing values so a malformed message cannot poison detection.
    */
   private isValidPrice(value: unknown): boolean {
     const num = typeof value === 'number' ? value : Number(value);
-    return Number.isFinite(num) && num >= 0 && num <= 1;
+    return Number.isFinite(num) && num > 0 && num < 1;
   }
 
   private isValidSize(value: unknown): boolean {

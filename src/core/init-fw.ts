@@ -18,8 +18,11 @@ export interface InitFWOptions {
   warmStart?: number[] | null;
   /** Number of initialization iterations */
   initIterations?: number;
-  /** Random seed for stochastic initialization */
-  randomSeed?: number;
+  /**
+   * Optional product-of-simplex group sizes. When set, warm-start validation
+   * requires each group to sum to 1 (multi-event polytopes, CORE-11).
+   */
+  groupSizes?: number[];
 }
 
 export interface InitFWResult {
@@ -47,11 +50,11 @@ export function initFW(
   options: InitFWOptions = {}
 ): InitFWResult {
   const logger = getLogger().child({ module: 'InitFW' });
-  const { warmStart = null, initIterations = 5 } = options;
+  const { warmStart = null, initIterations = 5, groupSizes } = options;
 
   // Try warm-start first if available
   if (warmStart !== null && warmStart.length === dimension) {
-    const isValid = validatePoint(warmStart);
+    const isValid = validatePoint(warmStart, groupSizes);
     if (isValid) {
       logger.debug('Using warm-start initialization');
       return {
@@ -175,21 +178,31 @@ function conditionalGradientInit(
 }
 
 /**
- * Validate that a point is in the probability simplex
+ * Validate a warm-start point.
+ * Default: single simplex (non-negative, sum ≈ 1).
+ * With groupSizes: product of simplices (each group sums to 1, CORE-11).
  */
-function validatePoint(point: number[]): boolean {
-  // Check non-negativity
+function validatePoint(point: number[], groupSizes?: number[]): boolean {
   if (point.some((x) => x < -1e-10)) {
     return false;
   }
 
-  // Check sum = 1
-  const sum = point.reduce((s, x) => s + x, 0);
-  if (Math.abs(sum - 1) > 1e-6) {
-    return false;
+  if (groupSizes && groupSizes.length > 0) {
+    let offset = 0;
+    for (const size of groupSizes) {
+      if (!Number.isInteger(size) || size <= 0) return false;
+      let groupSum = 0;
+      for (let i = 0; i < size; i++) {
+        groupSum += point[offset + i] ?? 0;
+      }
+      if (Math.abs(groupSum - 1) > 1e-6) return false;
+      offset += size;
+    }
+    return offset === point.length;
   }
 
-  return true;
+  const sum = point.reduce((s, x) => s + x, 0);
+  return Math.abs(sum - 1) <= 1e-6;
 }
 
 /**

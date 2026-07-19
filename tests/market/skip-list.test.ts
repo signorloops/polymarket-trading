@@ -183,5 +183,51 @@ describe('SkipList', () => {
         expect(items[i]!.price).toBeGreaterThanOrEqual(items[i - 1]!.price);
       }
     });
+
+    it('matches a naive sorted map under random insert/delete (MKT-9)', () => {
+      // Deterministic PRNG so CI failures are reproducible.
+      let state = 0x12345678;
+      const rand = (): number => {
+        state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+        return state / 0x100000000;
+      };
+
+      const naive = new Map<number, number>();
+      const steps = 8_000;
+
+      for (let i = 0; i < steps; i++) {
+        const price = Math.floor(rand() * 200) / 100; // [0, 1.99] in 0.01 steps
+        const size = Math.floor(rand() * 1000) + 1;
+        if (rand() < 0.65 || naive.size === 0) {
+          list.insert(price, size);
+          naive.set(price, size);
+        } else {
+          const keys = [...naive.keys()];
+          const victim = keys[Math.floor(rand() * keys.length)];
+          if (victim === undefined) continue;
+          list.delete(victim);
+          naive.delete(victim);
+        }
+
+        if (i % 500 === 499 || i === steps - 1) {
+          const expected = [...naive.entries()]
+            .sort((a, b) => a[0] - b[0])
+            .map(([price, size]) => ({ price, size }));
+          expect(list.toArray()).toEqual(expected);
+          expect(list.getSize()).toBe(naive.size);
+          const first = list.getFirst();
+          const last = list.getLast();
+          if (expected.length > 0) {
+            expect(first?.price).toBe(expected[0]?.price);
+            expect(first?.size).toBe(expected[0]?.size);
+            expect(last?.price).toBe(expected[expected.length - 1]?.price);
+            expect(last?.size).toBe(expected[expected.length - 1]?.size);
+          } else {
+            expect(first).toBeNull();
+            expect(last).toBeNull();
+          }
+        }
+      }
+    });
   });
 });

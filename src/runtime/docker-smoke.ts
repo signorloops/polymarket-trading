@@ -120,7 +120,8 @@ export function createDockerSmokePlan(options: DockerSmokeOptions): DockerSmokeP
       '--name',
       containerName,
       '--publish',
-      `${String(hostPort)}:${String(CONTAINER_PORT)}`,
+      // Bind smoke ports to loopback only (API-8).
+      `127.0.0.1:${String(hostPort)}:${String(CONTAINER_PORT)}`,
       '--mount',
       `type=bind,src=${configPath},dst=${CONTAINER_CONFIG_PATH},readonly`,
       '--env',
@@ -128,7 +129,7 @@ export function createDockerSmokePlan(options: DockerSmokeOptions): DockerSmokeP
       '--env',
       `HTTP_PORT=${String(CONTAINER_PORT)}`,
       '--env',
-      'HTTP_METRICS_TOKEN=docker-smoke-metrics-token',
+      `HTTP_METRICS_TOKEN=${process.env.DOCKER_SMOKE_METRICS_TOKEN ?? 'docker-smoke-metrics-token'}`,
       '--env',
       `TRADING_SYSTEM_CONFIG_PATH=${CONTAINER_CONFIG_PATH}`,
       imageTag,

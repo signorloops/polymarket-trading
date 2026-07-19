@@ -45,6 +45,19 @@ describe('InitFW', () => {
       expect(result.initialPoint).toEqual(warmStart);
     });
 
+    it('accepts multi-event warm-start when groupSizes are provided (CORE-11)', () => {
+      const warmStart = [0.6, 0.4, 0.3, 0.7];
+      const result = initFW(
+        4,
+        () => [0, 0, 0, 0],
+        () => 0,
+        { warmStart, groupSizes: [2, 2] }
+      );
+
+      expect(result.method).toBe('warm-start');
+      expect(result.initialPoint).toEqual(warmStart);
+    });
+
     it('should reject invalid warm-start', () => {
       const dimension = 3;
       const warmStart = [0.5, 0.5]; // Wrong dimension

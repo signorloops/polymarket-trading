@@ -6,8 +6,13 @@ import { z } from 'zod';
 
 import type { TradingSystemConfig } from '../index.js';
 
+/** Polymarket CLOB asset/token ids are decimal digit strings (API-11). */
+const ClobTokenIdSchema = z
+  .string()
+  .regex(/^\d+$/, 'market id must be a numeric Polymarket CLOB token id');
+
 const EventMarketConfigSchema = z.object({
-  id: z.string().min(1),
+  id: ClobTokenIdSchema,
   outcome: z.enum(['YES', 'NO']),
   price: z.number().min(0).max(1),
 });
@@ -19,7 +24,7 @@ const TradingEventConfigSchema = z.object({
 
 const CrossMarketPayoffModelSchema = z.object({
   id: z.string().min(1),
-  marketIds: z.array(z.string().min(1)).min(2),
+  marketIds: z.array(ClobTokenIdSchema).min(2),
   feeBufferBps: z.number().nonnegative(),
   targetPayoutUsd: z.number().positive().optional(),
   minGuaranteedProfitUsd: z.number().nonnegative().optional(),
@@ -36,7 +41,7 @@ const CrossMarketPayoffModelSchema = z.object({
 const TradingSystemRuntimeConfigSchema = z
   .object({
     liveTrading: z.boolean(),
-    markets: z.array(z.string().min(1)).min(1),
+    markets: z.array(ClobTokenIdSchema).min(1),
     events: z.array(TradingEventConfigSchema).min(1),
     payoffModels: z.array(CrossMarketPayoffModelSchema).optional(),
   })
@@ -243,13 +248,24 @@ export interface ValidatedTradingSystemConfigFile {
 export function createExampleTradingSystemConfig(): TradingSystemConfig {
   return {
     liveTrading: false,
-    markets: ['market-yes', 'market-no'],
+    markets: [
+      '12345678901234567890123456789012345678901234567890123456789012345678901234567890',
+      '98765432109876543210987654321098765432109876543210987654321098765432109876543210',
+    ],
     events: [
       {
         id: 'sample-event',
         markets: [
-          { id: 'market-yes', outcome: 'YES', price: 0.55 },
-          { id: 'market-no', outcome: 'NO', price: 0.4 },
+          {
+            id: '12345678901234567890123456789012345678901234567890123456789012345678901234567890',
+            outcome: 'YES',
+            price: 0.55,
+          },
+          {
+            id: '98765432109876543210987654321098765432109876543210987654321098765432109876543210',
+            outcome: 'NO',
+            price: 0.4,
+          },
         ],
       },
     ],

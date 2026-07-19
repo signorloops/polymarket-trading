@@ -871,7 +871,38 @@ describe('MarketDependencyGraph', () => {
       expect(implicationIdx).toBeGreaterThan(-1);
       expect(matrix.types[implicationIdx]).toBe('inequality');
       expect(matrix.rhs[implicationIdx]).toBe(0);
-      expect(matrix.coefficients[implicationIdx]).toEqual([-1, -1, 1, 1]);
+      // Market-level implies constrains the named YES markets only (MKT-2),
+      // not YES+NO on each event (which would be vacuous under sum=1).
+      expect(matrix.coefficients[implicationIdx]).toEqual([-1, 0, 1, 0]);
+    });
+
+    it('keeps mutually exclusive constraints feasible for binary YES+NO events (MKT-2)', () => {
+      const markets: MarketNode[] = [
+        { id: 'event-1-yes', eventId: 'event-1', outcome: 'Yes', price: 0.6, metadata: {} },
+        { id: 'event-1-no', eventId: 'event-1', outcome: 'No', price: 0.4, metadata: {} },
+        { id: 'event-2-yes', eventId: 'event-2', outcome: 'Yes', price: 0.3, metadata: {} },
+        { id: 'event-2-no', eventId: 'event-2', outcome: 'No', price: 0.7, metadata: {} },
+      ];
+      markets.forEach((m) => graph.addMarket(m));
+
+      graph.addEdge({
+        from: 'event-1',
+        to: 'event-2',
+        type: 'mutually_exclusive',
+        weight: 1,
+      });
+
+      const matrix = graph.buildConstraintMatrix();
+      const meIdx = matrix.descriptions.findIndex((d) => d.includes('Mutually exclusive'));
+      expect(meIdx).toBeGreaterThan(-1);
+      // Only Yes markets: P(e1-yes) + P(e2-yes) <= 1
+      expect(matrix.coefficients[meIdx]).toEqual([-1, 0, -1, 0]);
+      expect(matrix.rhs[meIdx]).toBe(-1);
+
+      // Feasible point with both event sums = 1 and ME satisfied
+      const x = [0.6, 0.4, 0.3, 0.7];
+      const meDot = matrix.coefficients[meIdx]!.reduce((s, c, i) => s + c * x[i]!, 0);
+      expect(meDot).toBeGreaterThanOrEqual(matrix.rhs[meIdx]! - 1e-12);
     });
 
     it('should include conditional probability constraints', () => {

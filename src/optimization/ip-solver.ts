@@ -37,7 +37,6 @@ export interface IPSolverOptions {
   timeoutMs?: number;
   tolerance?: number;
   mipGap?: number;
-  verbose?: boolean;
   nodeLimit?: number;
 }
 
@@ -61,7 +60,12 @@ export function solveIP(problem: IPProblem, options: IPSolverOptions = {}): IPSo
     const lpSolution = solveLP(problem, options);
 
     if (lpSolution.status !== 'optimal') {
-      return { ...lpSolution, integerFeasible: false, error: 'LP relaxation infeasible' };
+      const detail = lpSolution.error ? `: ${lpSolution.error}` : '';
+      return {
+        ...lpSolution,
+        integerFeasible: false,
+        error: `LP relaxation ${lpSolution.status}${detail}`,
+      };
     }
 
     if (!hasIntegerConstraints) {
@@ -75,9 +79,8 @@ export function solveIP(problem: IPProblem, options: IPSolverOptions = {}): IPSo
         optimal: false,
         status: 'error',
         integerFeasible: isIntegerFeasible(lpSolution.solution, problem),
-        relaxationGap: 0,
-        iterations: Math.max(0, nodeLimit),
-        error: 'Branch-and-bound node limit exceeded',
+        iterations: 0,
+        error: 'Branch-and-bound skipped: nodeLimit <= 1 (LP relaxation only)',
       };
     }
 
@@ -158,21 +161,15 @@ export function solveBinaryIP(
 }
 
 /**
- * Enumerate vertices of the marginal polytope for Frank-Wolfe.
+ * @deprecated OPT-8: previously ignored constraints and returned unit vectors.
+ * Removed — use the LP-backed LMO (`solveLMO` / `linearMinimizationOracle`) instead.
  */
 export function enumerateVertices(
   _constraints: { coefficients: number[]; rhs: number; type: 'equality' | 'inequality' }[],
-  n: number,
-  maxVertices = 100
+  _n: number,
+  _maxVertices = 100
 ): number[][] {
-  const vertices: number[][] = [];
-
-  for (let i = 0; i < n; i++) {
-    const vertex: number[] = new Array(n).fill(0) as number[];
-    vertex[i] = 1;
-    vertices.push(vertex);
-  }
-
-  logger.debug(`Enumerated ${String(vertices.length)} vertices`);
-  return vertices.slice(0, maxVertices);
+  throw new Error(
+    'enumerateVertices was a stub that ignored constraints (OPT-8); use solveLMO / linearMinimizationOracle'
+  );
 }

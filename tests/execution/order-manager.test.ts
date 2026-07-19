@@ -357,7 +357,7 @@ describe('OrderManager', () => {
       expect(orderManager.getStatus('old-filled')).toBeUndefined();
     });
 
-    it('should clear partial orders that are old', () => {
+    it('keeps old partial orders so the remainder can still be cancelled (EXEC-11)', () => {
       const now = Date.now();
       const oldTimestamp = now - 7200000;
 
@@ -373,7 +373,7 @@ describe('OrderManager', () => {
       orderManager.updateStatus(oldPartialStatus);
       orderManager.clearOldOrders(3600000);
 
-      expect(orderManager.getStatus('old-partial')).toBeUndefined();
+      expect(orderManager.getStatus('old-partial')).toEqual(oldPartialStatus);
     });
 
     it('should clear cancelled orders that are old', () => {

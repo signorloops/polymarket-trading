@@ -735,6 +735,8 @@ describe('PolymarketWebSocketClient', () => {
 
   describe('reconnection', () => {
     it('should reconnect with exponential backoff', () => {
+      // Pin jitter so delays equal the deterministic base (API-5).
+      jest.spyOn(Math, 'random').mockReturnValue(1);
       const connectSpy = jest.spyOn(client, 'connect');
 
       client.connect();
@@ -761,6 +763,7 @@ describe('PolymarketWebSocketClient', () => {
     });
 
     it('should cap reconnect delay at 60 seconds', () => {
+      jest.spyOn(Math, 'random').mockReturnValue(1);
       const mutableNetworkConfig = NETWORK_CONFIG as { MAX_RECONNECT_ATTEMPTS: number };
       const originalMaxReconnectAttempts = mutableNetworkConfig.MAX_RECONNECT_ATTEMPTS;
       const setTimeoutSpy = jest.spyOn(global, 'setTimeout');
@@ -783,6 +786,8 @@ describe('PolymarketWebSocketClient', () => {
 
     it('should stop reconnecting after max attempts', () => {
       const connectSpy = jest.spyOn(client, 'connect');
+      const handler = jest.fn();
+      client.subscribe(handler);
 
       client.connect();
 
@@ -798,6 +803,26 @@ describe('PolymarketWebSocketClient', () => {
 
       // Should not have created a new WebSocket
       expect(connectSpy).toHaveBeenCalledTimes(4); // Initial + 3 reconnects
+      expect(client.isReconnectExhausted()).toBe(true);
+      expect(handler).toHaveBeenCalledWith({ type: 'reconnect_exhausted', attempts: 3 });
+    });
+
+    it('resetReconnect clears exhaustion and schedules a fresh connect (API-1)', () => {
+      const connectSpy = jest.spyOn(client, 'connect');
+      client.connect();
+
+      for (let i = 0; i < 4; i++) {
+        const mockWs = getMockWs();
+        mockWs!.readyState = MockWebSocket.CLOSED;
+        mockWs?.emit('close', 1006, Buffer.from('Connection lost'));
+        jest.advanceTimersByTime(60000);
+      }
+      expect(client.isReconnectExhausted()).toBe(true);
+      const callsAfterExhaust = connectSpy.mock.calls.length;
+
+      client.resetReconnect();
+      expect(client.isReconnectExhausted()).toBe(false);
+      expect(connectSpy.mock.calls.length).toBeGreaterThan(callsAfterExhaust);
     });
 
     it('should cancel stale reconnect timers after repeated close events', () => {
@@ -849,6 +874,32 @@ describe('PolymarketWebSocketClient', () => {
 
       // Ping should not be called when closed
       expect(sendSpy).not.toHaveBeenCalled();
+    });
+
+    it('terminates the socket when PONG goes stale (API-4)', () => {
+      const mockWs = getMockWs();
+      const terminateSpy = jest.spyOn(mockWs!, 'terminate');
+
+      mockWs!.readyState = MockWebSocket.OPEN;
+      mockWs?.emit('open');
+      // open sets lastPongAt; threshold is strict > 30s
+      jest.advanceTimersByTime(40_000);
+
+      expect(terminateSpy).toHaveBeenCalled();
+    });
+
+    it('refreshes the dead-socket window on PONG text frames (API-4)', () => {
+      const mockWs = getMockWs();
+      const terminateSpy = jest.spyOn(mockWs!, 'terminate');
+
+      mockWs!.readyState = MockWebSocket.OPEN;
+      mockWs?.emit('open');
+
+      jest.advanceTimersByTime(20_000);
+      mockWs?.emit('message', 'PONG');
+      jest.advanceTimersByTime(20_000);
+
+      expect(terminateSpy).not.toHaveBeenCalled();
     });
   });
 

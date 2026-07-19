@@ -13,13 +13,13 @@ describe('loadTradingSystemConfigFromEnv', () => {
     const config = loadTradingSystemConfigFromEnv({
       TRADING_SYSTEM_CONFIG_JSON: JSON.stringify({
         liveTrading: false,
-        markets: ['market-yes', 'market-no'],
+        markets: ['111', '222'],
         events: [
           {
             id: 'event-1',
             markets: [
-              { id: 'market-yes', outcome: 'YES', price: 0.55 },
-              { id: 'market-no', outcome: 'NO', price: 0.4 },
+              { id: '111', outcome: 'YES', price: 0.55 },
+              { id: '222', outcome: 'NO', price: 0.4 },
             ],
           },
         ],
@@ -27,7 +27,7 @@ describe('loadTradingSystemConfigFromEnv', () => {
     });
 
     expect(config.liveTrading).toBe(false);
-    expect(config.markets).toEqual(['market-yes', 'market-no']);
+    expect(config.markets).toEqual(['111', '222']);
     expect(config.events).toHaveLength(1);
   });
 
@@ -38,13 +38,13 @@ describe('loadTradingSystemConfigFromEnv', () => {
       configPath,
       JSON.stringify({
         liveTrading: false,
-        markets: ['market-1', 'market-1-no'],
+        markets: ['101', '102'],
         events: [
           {
             id: 'event-1',
             markets: [
-              { id: 'market-1', outcome: 'YES', price: 0.5 },
-              { id: 'market-1-no', outcome: 'NO', price: 0.5 },
+              { id: '101', outcome: 'YES', price: 0.5 },
+              { id: '102', outcome: 'NO', price: 0.5 },
             ],
           },
         ],
@@ -55,8 +55,28 @@ describe('loadTradingSystemConfigFromEnv', () => {
       TRADING_SYSTEM_CONFIG_PATH: configPath,
     });
 
-    expect(config.markets).toEqual(['market-1', 'market-1-no']);
+    expect(config.markets).toEqual(['101', '102']);
     expect(config.events[0]?.id).toBe('event-1');
+  });
+
+  it('rejects non-numeric market token ids (API-11)', () => {
+    expect(() =>
+      loadTradingSystemConfigFromEnv({
+        TRADING_SYSTEM_CONFIG_JSON: JSON.stringify({
+          liveTrading: false,
+          markets: ['market-yes', 'market-no'],
+          events: [
+            {
+              id: 'event-1',
+              markets: [
+                { id: 'market-yes', outcome: 'YES', price: 0.55 },
+                { id: 'market-no', outcome: 'NO', price: 0.4 },
+              ],
+            },
+          ],
+        }),
+      })
+    ).toThrow(/numeric Polymarket CLOB token id/);
   });
 
   it('rejects daemon startup when runtime config is missing in all environments', () => {
@@ -73,13 +93,13 @@ describe('loadTradingSystemConfigFromEnv', () => {
       loadTradingSystemConfigFromEnv({
         TRADING_SYSTEM_CONFIG_JSON: JSON.stringify({
           liveTrading: true,
-          markets: ['market-1', 'market-1-no'],
+          markets: ['101', '102'],
           events: [
             {
               id: 'event-1',
               markets: [
-                { id: 'market-1', outcome: 'YES', price: 0.5 },
-                { id: 'market-1-no', outcome: 'NO', price: 0.5 },
+                { id: '101', outcome: 'YES', price: 0.5 },
+                { id: '102', outcome: 'NO', price: 0.5 },
               ],
             },
           ],
@@ -92,27 +112,27 @@ describe('loadTradingSystemConfigFromEnv', () => {
     const config = loadTradingSystemConfigFromEnv({
       TRADING_SYSTEM_CONFIG_JSON: JSON.stringify({
         liveTrading: false,
-        markets: ['a-yes', 'a-no', 'b-yes', 'b-no'],
+        markets: ['201', '202', '203', '204'],
         events: [
           {
             id: 'event-a',
             markets: [
-              { id: 'a-yes', outcome: 'YES', price: 0.4 },
-              { id: 'a-no', outcome: 'NO', price: 0.6 },
+              { id: '201', outcome: 'YES', price: 0.4 },
+              { id: '202', outcome: 'NO', price: 0.6 },
             ],
           },
           {
             id: 'event-b',
             markets: [
-              { id: 'b-yes', outcome: 'YES', price: 0.5 },
-              { id: 'b-no', outcome: 'NO', price: 0.5 },
+              { id: '203', outcome: 'YES', price: 0.5 },
+              { id: '204', outcome: 'NO', price: 0.5 },
             ],
           },
         ],
         payoffModels: [
           {
             id: 'a-implies-b',
-            marketIds: ['a-yes', 'b-no'],
+            marketIds: ['201', '204'],
             feeBufferBps: 100,
             scenarios: [
               { id: 'both', payouts: [1, 0] },
@@ -124,7 +144,7 @@ describe('loadTradingSystemConfigFromEnv', () => {
       }),
     });
 
-    expect(config.payoffModels?.[0]?.marketIds).toEqual(['a-yes', 'b-no']);
+    expect(config.payoffModels?.[0]?.marketIds).toEqual(['201', '204']);
   });
 
   it('rejects incomplete or dimensionally inconsistent payoff models', () => {
@@ -132,27 +152,27 @@ describe('loadTradingSystemConfigFromEnv', () => {
       loadTradingSystemConfigFromEnv({
         TRADING_SYSTEM_CONFIG_JSON: JSON.stringify({
           liveTrading: false,
-          markets: ['a-yes', 'a-no', 'b-yes', 'b-no'],
+          markets: ['201', '202', '203', '204'],
           events: [
             {
               id: 'event-a',
               markets: [
-                { id: 'a-yes', outcome: 'YES', price: 0.4 },
-                { id: 'a-no', outcome: 'NO', price: 0.6 },
+                { id: '201', outcome: 'YES', price: 0.4 },
+                { id: '202', outcome: 'NO', price: 0.6 },
               ],
             },
             {
               id: 'event-b',
               markets: [
-                { id: 'b-yes', outcome: 'YES', price: 0.5 },
-                { id: 'b-no', outcome: 'NO', price: 0.5 },
+                { id: '203', outcome: 'YES', price: 0.5 },
+                { id: '204', outcome: 'NO', price: 0.5 },
               ],
             },
           ],
           payoffModels: [
             {
               id: 'broken',
-              marketIds: ['a-yes', 'unknown'],
+              marketIds: ['201', '999'],
               feeBufferBps: 100,
               scenarios: [
                 { id: 'one', payouts: [1, 0] },

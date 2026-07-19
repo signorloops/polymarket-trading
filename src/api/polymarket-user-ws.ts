@@ -64,6 +64,13 @@ interface ReadyWaiter {
   timer: NodeJS.Timeout;
 }
 
+interface OrderUpdateWaiter {
+  orderId: string;
+  unsubscribe: () => void;
+  reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
+}
+
 export function getUserWebSocketCredentialsFromEnv(): UserWebSocketCredentials {
   const credentials = {
     apiKey: NETWORK_CONFIG.POLYMARKET_API_KEY ?? '',
@@ -93,6 +100,7 @@ export class PolymarketUserWebSocketClient {
   private readonly webSocketFactory: (url: string, options: WebSocket.ClientOptions) => WebSocket;
   private readonly handlers = new Set<UserEventHandler>();
   private readonly readyWaiters = new Set<ReadyWaiter>();
+  private readonly orderUpdateWaiters = new Set<OrderUpdateWaiter>();
   private readonly lastOrderUpdates = new Map<string, UserOrderUpdate>();
   private ws: WebSocket | undefined;
   private heartbeatTimer: NodeJS.Timeout | undefined;
@@ -150,7 +158,10 @@ export class PolymarketUserWebSocketClient {
     this.openedAt = 0;
     this.logger.info('Connecting to authenticated Polymarket user channel', { url: this.url });
     try {
-      const ws = this.webSocketFactory(this.url, { handshakeTimeout: this.connectionTimeoutMs });
+      const ws = this.webSocketFactory(this.url, {
+        handshakeTimeout: this.connectionTimeoutMs,
+        maxPayload: 1_048_576,
+      });
       this.ws = ws;
       this.setupEventHandlers(ws, generation);
     } catch (error) {
@@ -166,6 +177,7 @@ export class PolymarketUserWebSocketClient {
     this.generation++;
     this.clearTimers();
     this.rejectReadyWaiters(new Error('Authenticated user WebSocket disconnected'));
+    this.rejectOrderUpdateWaiters(new Error('Authenticated user WebSocket disconnected'));
     const ws = this.ws;
     this.ws = undefined;
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
@@ -240,18 +252,26 @@ export class PolymarketUserWebSocketClient {
     const existing = this.lastOrderUpdates.get(orderId);
     if (existing && predicate(existing)) return Promise.resolve(existing);
     return new Promise((resolve, reject) => {
-      const unsubscribe = this.subscribe((event) => {
+      const waiter: OrderUpdateWaiter = {
+        orderId,
+        unsubscribe: () => undefined,
+        reject,
+        timer: setTimeout(() => {
+          this.orderUpdateWaiters.delete(waiter);
+          waiter.unsubscribe();
+          reject(new Error(`Timed out waiting for user-channel update for order ${orderId}`));
+        }, timeoutMs),
+      };
+      waiter.unsubscribe = this.subscribe((event) => {
         if (event.type !== 'order' || event.data.orderId !== orderId || !predicate(event.data)) {
           return;
         }
-        clearTimeout(timer);
-        unsubscribe();
+        clearTimeout(waiter.timer);
+        this.orderUpdateWaiters.delete(waiter);
+        waiter.unsubscribe();
         resolve(event.data);
       });
-      const timer = setTimeout(() => {
-        unsubscribe();
-        reject(new Error(`Timed out waiting for user-channel update for order ${orderId}`));
-      }, timeoutMs);
+      this.orderUpdateWaiters.add(waiter);
     });
   }
 
@@ -366,7 +386,9 @@ export class PolymarketUserWebSocketClient {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       this.reconnectExhausted = true;
       this.logger.error('Authenticated user WebSocket exhausted reconnect attempts');
-      this.rejectReadyWaiters(new Error('Authenticated user WebSocket reconnect limit reached'));
+      const exhausted = new Error('Authenticated user WebSocket reconnect limit reached');
+      this.rejectReadyWaiters(exhausted);
+      this.rejectOrderUpdateWaiters(exhausted);
       for (const handler of this.handlers) {
         try {
           handler({ type: 'reconnect_exhausted', attempts: this.reconnectAttempts });
@@ -379,7 +401,9 @@ export class PolymarketUserWebSocketClient {
       return;
     }
     this.reconnectAttempts++;
-    const delay = this.reconnectIntervalMs * Math.min(2 ** (this.reconnectAttempts - 1), 16);
+    const baseDelay = this.reconnectIntervalMs * Math.min(2 ** (this.reconnectAttempts - 1), 16);
+    // Full-jitter backoff to avoid thundering herds across instances (API-5).
+    const delay = Math.floor(baseDelay * (0.5 + Math.random() * 0.5));
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined;
       if (!this.manualClose && generation === this.generation) this.connect();
@@ -405,6 +429,15 @@ export class PolymarketUserWebSocketClient {
       waiter.reject(error);
     }
     this.readyWaiters.clear();
+  }
+
+  private rejectOrderUpdateWaiters(error: Error): void {
+    for (const waiter of this.orderUpdateWaiters) {
+      clearTimeout(waiter.timer);
+      waiter.unsubscribe();
+      waiter.reject(error);
+    }
+    this.orderUpdateWaiters.clear();
   }
 
   private clearHeartbeat(): void {

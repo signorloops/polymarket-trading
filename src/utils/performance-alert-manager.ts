@@ -213,7 +213,8 @@ export class PerformanceAlertManager {
       },
       timestamp: new Date(),
       source: 'PerformanceAlertManager',
-      id: `metric-alert-${config.metricName}-${String(Date.now())}`,
+      // Stable id so notification-service dedup can coalesce repeats (INFRA-7).
+      id: `metric-alert-${config.metricName}`,
     };
 
     this.alertHistory.push(notification);

@@ -57,9 +57,10 @@ describe('IPSolver', () => {
 
       const result = solveIP(problem, { nodeLimit: 1 });
 
-      // When node limit is exceeded, status should be 'error'
+      // When node limit skips B&B, status should be 'error' with no fake iterations
       expect(result.status).toBe('error');
-      expect(result.iterations).toBeLessThanOrEqual(1);
+      expect(result.iterations).toBe(0);
+      expect(result.error).toMatch(/nodeLimit/i);
     });
 
     it('should handle problem with only inequality constraints', () => {
@@ -220,49 +221,10 @@ describe('IPSolver', () => {
   });
 
   describe('enumerateVertices', () => {
-    it('should return unit vectors for simplex', () => {
-      const constraints = [{ coefficients: [1, 1, 1], rhs: 1, type: 'equality' as const }];
-
-      const vertices = enumerateVertices(constraints, 3, 100);
-
-      expect(vertices.length).toBe(3);
-      // Check unit vectors
-      expect(vertices[0]).toEqual([1, 0, 0]);
-      expect(vertices[1]).toEqual([0, 1, 0]);
-      expect(vertices[2]).toEqual([0, 0, 1]);
-    });
-
-    it('should respect maxVertices limit', () => {
-      const constraints: {
-        coefficients: number[];
-        rhs: number;
-        type: 'equality' | 'inequality';
-      }[] = [];
-
-      const vertices = enumerateVertices(constraints, 10, 5);
-
-      expect(vertices.length).toBe(5);
-    });
-
-    it('should handle empty constraints', () => {
-      const vertices = enumerateVertices([], 3, 100);
-
-      expect(vertices.length).toBe(3);
-      expect(vertices[0]).toEqual([1, 0, 0]);
-    });
-
-    it('should handle maxVertices of 0', () => {
-      const vertices = enumerateVertices([], 5, 0);
-
-      expect(vertices.length).toBe(0);
-    });
-
-    it('should handle inequality constraints', () => {
-      const constraints = [{ coefficients: [1, 1], rhs: 1, type: 'inequality' as const }];
-
-      const vertices = enumerateVertices(constraints, 2, 100);
-
-      expect(vertices.length).toBe(2);
+    it('throws instead of returning the old constraint-ignoring stub (OPT-8)', () => {
+      expect(() =>
+        enumerateVertices([{ coefficients: [1, 1, 1], rhs: 1, type: 'equality' }], 3, 100)
+      ).toThrow(/solveLMO|linearMinimizationOracle|OPT-8/);
     });
   });
 
@@ -620,22 +582,6 @@ describe('IPSolver', () => {
       const result = solveIP(problem, { nodeLimit: 50 });
 
       expect(result.solution).toBeDefined();
-    });
-  });
-
-  describe('verbose mode', () => {
-    it('should run without error in verbose mode', () => {
-      const problem: IPProblem = {
-        objective: [1, 1],
-        lowerBounds: [0, 0],
-        upperBounds: [1, 1],
-        integerIndices: [0, 1],
-      };
-
-      // Should not throw when verbose is true
-      expect(() => {
-        solveIP(problem, { verbose: true, nodeLimit: 10 });
-      }).not.toThrow();
     });
   });
 

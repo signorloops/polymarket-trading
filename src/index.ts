@@ -306,8 +306,15 @@ export class PolymarketTradingSystem {
   private handleDataEvent(event: DataPipelineEvent): void {
     switch (event.type) {
       case 'trade':
-        // Update detector with new price
-        this.detector.updatePrice(event.data.marketId, event.data.price);
+        // Unknown market ids must not abort the rest of this handler (MKT-3).
+        try {
+          this.detector.updatePrice(event.data.marketId, event.data.price);
+        } catch (error) {
+          this.logger.debug('Ignoring trade for unregistered market', {
+            marketId: event.data.marketId,
+            error: getErrorMessage(error),
+          });
+        }
         getRiskManager().updateMarketPrice(event.data.marketId, event.data.price);
         if (Number.isFinite(event.data.price) && event.data.price > 0) {
           this.latestPrices.set(event.data.marketId, event.data.price);

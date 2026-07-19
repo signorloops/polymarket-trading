@@ -12,7 +12,7 @@
   2. **资金安全逻辑**：常规风控拒绝会误触全局熔断（EXEC-1）；断线重连后无快照门控，陈旧订单簿可被当成新鲜（MKT-1）。
   3. **测试假象**：1162 个测试全绿，但大量测试只断言"形状/不抛异常"，**几乎没有"对照已知最优解"的数值锚定测试**——上述严重数学 bug 全部与全绿测试并存。
 - 已验证**正确**的部分也很多（skip-list、订单簿、FW 主循环、canary 防御、HTTP 认证、CI），见 §8，**不要重复审计**。
-- **修复进度（2026-07-19）**：P0/P1 已落地；P2（CORE-4/5/6/7/9、EXEC-5/6/7、INFRA-1..5、OPT-6/7、API-12）已落地（见 §3 台账 ✅）；验证：`npm run typecheck` ✅、`npm test` 65 套件 / **1176** 用例全绿、`npm run lint` ✅。剩余见 P2/P3（INFRA-1、CORE-4..7、EXEC-5..7、API-12 完整 staleness 门槛、测试补强等）。
+- **修复进度（2026-07-19 续 2）**：P0–P3 主体已落地。本轮低优：CORE-11、OPT-8/9、MKT-3..6 文档/边界、EXEC-9/11/12/13、API-5/8/9/10/11、INFRA-7/9 + Dockerfile.dev 风险注释。验证：`npm run typecheck` ✅、`npm test` 65 套件 / **1189** 用例全绿、`npm run lint` ✅。仍可选：EXEC-10 费用统一、API-7 REST 重试、INFRA-6/8、INFRA-10 实改（非注释）。
 
 ## 1. 项目速览
 
@@ -63,7 +63,7 @@ npm run lint && npm run build
 | EXEC-3 | 🟠 高 | execution | position-sizing 美元与份额单位混用，流动性约束/EV 系统性失真 | ✅ 已修复（2026-07-19） |
 | INFRA-1 | 🟠 高 | utils | 配置加密功能端到端断裂：能加密、运行时无解密消费（死功能） | ✅ 已修复（2026-07-19） |
 | MKT-1 | 🟡 中 | market | 重连/首连后无快照-增量门控，陈旧订单簿可被 delta 刷新为"新鲜" | ✅ 已修复（2026-07-19） |
-| MKT-2 | 🟡 中 | market | constraint-builder 对事件全部 markets 求和，双市场事件建模下不可行/空洞 | |
+| MKT-2 | 🟡 中 | market | constraint-builder 对事件全部 markets 求和，双市场事件建模下不可行/空洞 | ✅ 已修复（2026-07-19） |
 | CORE-4 | 🟡 中 | core | `barrierFrankWolfe` 返回的 objective/gap 含障碍项，违反结果语义与下界性质 | ✅ 已修复（2026-07-19） |
 | CORE-5 | 🟡 中 | core | `MarginalPolytope.getBarycenter` 多事件返回不可行点 | ✅ 已修复（2026-07-19） |
 | CORE-6 | 🟡 中 | core | `MarginalPolytope.project` 对非正组和输入返回不可行点 | ✅ 已修复（2026-07-19） |
@@ -174,30 +174,30 @@ npm run lint && npm run build
 - **CORE-6（中）** `MarginalPolytope.project`（`marginal-polytope.ts:205-215`）对非正组和输入返回不可行点（`project([-0.5,0.2,0.2]) → [0,0.2,0.2]`，组和 0.4）；`arbitrage-detector.ts:192` 用它生成 FW 初始点，市场数据异常时 FW 从不可行点出发且 FW 无可行性校验。修复：组和 ≤ 0 回退组内均匀；FW 入口断言初始点可行。
 - **CORE-7（中）** `dualFunctionValue`（`bregman-projection.ts:246-261`）是伪对偶：`divergence − Σ|c·μ − r|` 无推导支持，且对不等式不分类型取 `|·|`（对 `x_i ≥ 0` 满足时仍计"违反"），注释却称 "guaranteed profit"。修复：删除或改名 `divergenceMinusEqualityViolation`，不等式按 `max(0, rhs − c·μ)` 计。
 - **CORE-8（中，测试缺口）** core 测试从未断言"输出依赖输入 θ"/"对照已知最优解"：bregman 全部断言仅"和为 1/非负/converged"；FW 收敛用例只断言 ±0.05 精度。116 个测试全绿与"数学正确"几乎无相关性。修复：为每个算法件加已知闭式最优解的对照测试。
-- **CORE-9（中，文档不一致）** "guaranteed profit" 旧语义残留：`arbitrage-utils.ts:21`、`bregman-projection.ts:8-9/271` 与 `docs/core-algorithm-theory-guide.md` §7/§11.4 直接矛盾（该量是 nats 单位的 incoherence，不能当美元利润）。修复：注释/命名统一为 incoherence 语义（`isSignificantIncoherence` 是正确范本）。
-- **CORE-10（低）** `lineSearchKL` docstring 名不副实（`line-search.ts:8-35`）：实为恒等 Hessian 单步二次近似，非真线搜索（真 γ=0.200 vs 近似 0.406）。src 内无调用方。改 docstring 或删除。
-- **CORE-11（低）** 杂项：`frank-wolfe.ts:162` 收敛判据 `gap ≤ tol·(1−ALPHA)·max(1,|f|)` 使有效阈值严 10 倍（文档 §3.2 有记载但配置注释牵强）；docs §6 步骤 3"全局归一化"代码并不做；`marginal-polytope.ts:100-103` 注释声称 "price consistency" 约束实际只有等式+盒子；`init-fw.ts:186-190` `validatePoint` 硬编码 `sum=1` 拒绝多事件 warm start（总和=k）；`init-fw.ts:22` `randomSeed` 声明未用、`initFWBarrier` 用 `Math.random()` 不可复现；`arbitrage-detector.ts:74` `lastResults` 死字段。
+- **CORE-9（中，文档不一致）✅** bregman/arbitrage-utils 注释已统一为 nats incoherence（非美元利润）。
+- **CORE-10（低）✅** `lineSearchKL` docstring 已标明为恒等 Hessian 二次近似启发式。
+- **CORE-11（低）✅** 已删 `randomSeed`；`groupSizes` 支持多事件 warm-start；`lastResults` 已删。
 
 ### 6.2 src/optimization
 
 - **OPT-5（中）** 非有限 rhs 与 matrix/rhs 不成对被静默吞掉：`lp-solver-utils.ts:76`（NaN rhs 直接 return）、`122/140`（两者同时存在才建约束）；实证 `inequalityRhs:[NaN]` → 约束消失仍报 optimal；只传 matrix 不传 rhs → 整组不等式静默消失。套利语境下等于保护性约束无声失效。修复：`validateProblem` 对 NaN/Infinity 与不成对输入抛错。
 - **OPT-6（中）** `maxIterations` 语义错误且无效：`lp-solver-utils.ts:96-98` 把它映射为库 `timeout`（wall-clock 毫秒，且只有 branch-and-cut 读它）；MILP 路径 `solveWithMilpBackend(problem, _options)` 完全不用 options。修复：删除或正确映射毫秒并文档化；MILP 传 `mipGap→tolerance` 与 timeout。
 - **OPT-7（中）** MILP 后端结果零校验：`ip-solver-utils.ts:202-221` 无 `checkFeasibility` 重代入（对比 `solveLP` 有），`optimal:true` 可与 `integerFeasible:false` 同时成立；`solveIP`（`ip-solver.ts:79-88`）直接信任；`relaxationGap` 只在 `lpObjectiveValue > 0` 时计算，负目标恒报 0。修复：复用重代入；gap 分母用 `|lpObj|`。
-- **OPT-8（低）** `enumerateVertices`（`ip-solver.ts:159-174`）完全忽略约束参数，恒返回单位向量——误导性死代码（测试还把该行为固化了）。
-- **OPT-9（低）** 杂项：`ip-solver.ts:58-59` LP 非 optimal 时 error 恒为 'LP relaxation infeasible'（误导）；`ip-solver.ts:66-77` `nodeLimit ≤ 1` 早退报 `relaxationGap:0` 且 `iterations` 填的是 nodeLimit；`lp-solver.ts:129` `solveLMO` 空梯度返回 `[1]` 与 n 维契约不一致；`verbose` 选项定义未读；`checkFeasibility` 绝对容差 1e-6 不适配大数值规模（宜 `max(1,|rhs|)` 相对容差）；`javascript-lp-solver.d.ts` 弱类型导致到处 `as unknown as`。
-- **OPT-10（中，测试缺口）** LP 测试无 unbounded/infeasible 用例；IP 93 个用例几乎无"已知整数最优值"精确断言；无"整数最优≠LP 松弛最优"、无"LP 可行整数不可行"、无 `binaryIndices ⊄ integerIndices` 用例；多处"占位符实现"宽松断言注释已过时。建议直接把 OPT-2 反例固化。
+- **OPT-8（低）✅** `enumerateVertices` 改为 throw，引导使用 LMO。
+- **OPT-9（低）✅** error 文案、nodeLimit 早退、`solveLMO([])`、删 verbose、相对容差已修；`.d.ts` 弱类型仍可后续清。
+- **OPT-10（中，测试缺口）** 部分已由 P0/P1 回归覆盖；更多锚定仍可加。
 
 ### 6.3 src/market
 
 - **MKT-1（中）** 重连/首连后无快照门控：`data-pipeline.ts:345-377`（price_change → delta）、`order-book.ts:121`（任何 update 都刷 `lastUpdate`）、`index.ts:346-348`（'disconnected' 仅记日志不清书）。断线期间旧书保留，重连后 delta 可能先于快照到达并把整本书 `lastUpdate` 刷成当前 → `isStale` 通过，但其余档位全是断线前陈旧值。首连时 delta 先于首个快照会在空书上长出孤立档位。**影响：门控放开后是资金风险**（幻影深度 → 虚假套利信号）。修复：按 marketId 维护 awaitingSnapshot 状态，首个快照前忽略 delta 或标记不可用；或 disconnected 时清书。
-- **MKT-2（中）** `constraint-builder.ts:77-84/109-122/137-145`（ME/implies/conditional）对 `event.markets` **全体**置 ±1：双市场（YES+NO）事件下 ME 约束使多面体不可行、implies/conditional 恒真空洞；只有"每事件仅挂单一 YES 市场"建模下语义才正确。当前死代码（仅 re-export）。修复：约束作用于显式 outcome 子集，或校验并文档化前提。
-- **MKT-3（低）** `detector.updatePrice` 对未注册市场抛错（`index.ts:309-313` → `marginal-polytope.ts:63`），被 `data-pipeline.ts:464-474` 吞掉，同事件后续 risk manager/latestPrices 更新被跳过；`config.markets` 与 `config.events[].markets` 包含关系无校验。
-- **MKT-4（低）** pipeline 价格校验闭区间 [0,1]（`data-pipeline.ts:498-501`）与 OrderBook 开区间（`order-book.ts:407-419`）不一致：含 0/1 档的整条快照被静默丢弃。建议统一开区间 + 逐档过滤。
-- **MKT-5（低）** 残缺 book 消息（缺 bids/asks）经 `toLevels → []` 仍 emit snapshot，`replace([],[])` 清空真实流动性（`data-pipeline.ts:310-333`、`order-book.ts:126-134`）。字段缺失 ≠ 显式为空。
-- **MKT-6（低）** `findArbitrageCycles` 的 `expectedReturn = Σ|price_i − price_{i+1}|`（`dependency-graph.ts:289-308`）无金融含义；DFS visited 全局标记只能发现部分环。死代码。
-- **MKT-7（低）** `scoreOpportunity`（`arbitrage-detector.ts:316-341`）：`urgencyFactor = timeRemaining/60000` 恒 ≤ ~0.083（分母应为 `maxOrderBookAgeMs`）；`liquidityFactor` 用两侧深度 min/1000 硬编码（应按方向取单侧）。
-- **MKT-8（低）** 死代码/资源错配：`arbitrage-detector.ts:74` `lastResults` 只清不写；`dependency-graph.ts` + `constraint-builder.ts` 全模块无生产调用却有 1387 行测试。
-- **MKT-9（测试缺口）** 无乱序/重连场景测试（MKT-1 无覆盖）；skip-list 无删除边界与随机差分测试；order-book 无 snapshot/delta 高频交替一致性测试；`detectSingleMarketArbitrage` 基于 last-trade 价（两腿异步易假信号）无注释/测试说明。子代理已在 /tmp 用 16 万随机操作差分验证 skip-list/order-book 正确，建议把该差分测试固化进仓库。
+- **MKT-2（中）✅** ME/implies/conditional 改为 market 边直接约束命名市场、event 边只用 Yes 代表元；双市场 YES+NO 下 ME 可行。
+- **MKT-3（低）✅** trade handler 对未注册市场 try/catch，不再阻断 risk/latestPrices。
+- **MKT-4（低）✅** pipeline `isValidPrice` 改为开区间 (0,1)。
+- **MKT-5（低）✅** 缺 bids/asks 的 snapshot 不再 emit。
+- **MKT-6（低）✅** 已文档化为非生产启发式；实现未删（测试仍依赖）。
+- **MKT-7（低）✅** `scoreOpportunity` urgency 分母改为 `maxOrderBookAgeMs`；liquidity 按 `tradeDirection` 取单侧深度。
+- **MKT-8（低）✅** 已删除 `lastResults` 死字段；`dependency-graph`/`constraint-builder` 仍为非生产路径（保留供图建模）。
+- **MKT-9（测试缺口）部分✅** skip-list 已固化随机 insert/delete 差分（对照 naive Map）；order-book 高频交替与 MKT-1 乱序场景仍可再补。
 
 ### 6.4 src/execution
 
@@ -206,26 +206,26 @@ npm run lint && npm run build
 - **EXEC-6（中）** `order-lifecycle.ts:131-199` cancel 与 poll 同处一个 try：`pollOrderUntilTerminal` 内 `getOrder` 瞬时网络错误会被记为 `cancelSucceeded:false`，状态失真，可能误导人工处置。修复：分两个 try，poll 失败应记 `cancelSucceeded:true, cancelConfirmed:false`。
 - **EXEC-7（中）** 成交成本基础用限价而非实际成交均价：`execution-engine.ts:473/340/353`（`avgPrice: response.price`）根源 `signed-clob-client.ts:594`。价格改善不反映 → 买入成本高估、浮亏高估、应急止损偏方向误触发。修复：从 getOrder/成交明细算实际 VWAP；至少文档标注近似方向。
 - **EXEC-8（中，测试缺口）** Kelly 只有 `>=0` 断言无数值锚定（EXEC-2/3 因此漏网）；无 `capital=0`/零流动性用例（此时 `fraction`/`riskAdjustedReturn` 为 NaN，已实证）；无"风控拒绝不触发熔断"回归测试；无陈旧 `.lock` 恢复测试；无乱序/重复终态回报测试；并发 claim 仅单进程/pg-mem 无双进程 fork 用例。
-- **EXEC-9（低）** `riskAdjustedReturn`/`sharpeRatio` 失真：`position-sizing.ts:154-155/240` 方差漏乘 b²、分母可 0/0=NaN、`sharpeRatio = expectedProfit/maxLoss` 无标准差项名不符实。
-- **EXEC-10（低）** 费用硬编码 exponent=1 峰值 0.25（`risk-manager.ts:99/199/393-397`），与 canary 路径的可变 exponent ∈ [0,10]（`canary-trade.ts:584-588`）脱节；exponent<1 时"保守"预留反欠费。
-- **EXEC-11（低）** `clearOldOrders` 清 `partial` 状态与引擎可撤语义冲突（`order-manager.ts:73` vs `execution-engine.ts:538-542`），且 `riskReservations` 条目泄漏永驻内存虚占敞口。
-- **EXEC-12（低）** 尘埃级超卖（<1e-6 容差内）仓位滞留原值：`risk-manager.ts:319-368` `newSize` 微小负值时既不删除也不更新。
-- **EXEC-13（低，安全）** `onchain-balance-reader.ts:109-111` 放行明文 `http://` RPC（URL 常内嵌 API key）。
+- **EXEC-9（低）✅** 单腿 EV/stdev 按美元结果算；`capital=0` 早退；多腿 `sharpeRatio` 注明为 profit/maxLoss。
+- **EXEC-10（低）** 费用硬编码 exponent 峰值 0.25 与 canary 可变 exponent 仍脱节——启用前需统一。
+- **EXEC-11（低）✅** 保留 partial；清理时同步丢弃无订单的 riskReservations。
+- **EXEC-12（低）✅** |newSize|<1e-6 视为平仓删除。
+- **EXEC-13（低，安全）✅** RPC 仅允许 HTTPS。
 
 ### 6.5 src/api + src/runtime + src/index.ts
 
 - **API-1（中）** WS 重连耗尽后通道永久静默死亡：`polymarket-ws.ts:354-357`、`polymarket-user-ws.ts:350-353` 仅记一行 error，不向订阅者发终态事件、无 `onGiveUp`；`reconnectAttempts` 只在 open 时重置。连续故障 ~10 次后永久关闭，仅靠 `/ready` 503 由编排层兜底。修复：耗尽时广播 terminal/error 事件、提供 `resetReconnect()`、状态接口暴露 `reconnectExhausted`。
 - **API-2（中）** 市价单 price=0 问题：`polymarket-user-ws.ts:510-514` 要求 `0<p<1` → 市价单更新被当 malformed 静默丢弃（canary `waitForOrderUpdate` 等到超时）；`signed-clob-client.ts:306` `getOrder` 对市价单抛错——若启动对账遇遗留市价单 `submitted` 记录，`startupReconciliation`（`:431-434` 缓存记忆化）成为**永久 rejected Promise**，之后所有 `placeOrder` 永远失败。修复：按 order type 分支校验；对账区分"解析失败"与"账簿歧义"。
-- **API-3（中，测试缺口）** user-ws 重连/心跳/超时几乎无测试（全文仅 4 用例）：退避重连、心跳 stale→terminate、订阅拒绝、waitUntilReady 超时、disconnect 拒绝 readyWaiters 全未覆盖——恰是重连状态机最复杂的模块。
-- **API-4（中，测试缺口）** market-ws 死连检测（30s 无 PONG → terminate）与 PONG 文本帧刷新、重连后订阅重放/快照自愈路径无测试。
-- **API-5（低）** 两个 WS 客户端退避均无抖动（`polymarket-ws.ts:364-368`、`polymarket-user-ws.ts:356`），多实例雷鸣群。
-- **API-6（低）** user-ws `lastOrderUpdates` Map 只增不删（`:95/339`）；`disconnect()` 不 reject `waitForOrderUpdate` 等待者（`:161-174` vs `:216-241`）。
-- **API-7（低）** REST 客户端无重试/限流，429/5xx 直接抛错无 Retry-After（`polymarket-client.ts:96-106/147-160`）。
-- **API-8（低，安全）** `docker-smoke.ts:122-131` 端口发布 0.0.0.0 且 metrics token 硬编码源码固定值。
-- **API-9（低）** WS 未设 maxPayload（默认 100MiB）；解析失败把完整原始报文写日志（`polymarket-ws.ts:73-75/161-167/207`）。
-- **API-10（低）** `polymarket-ws.disconnect()` 不等待 close 完成（`:84-93`），语义弱于 DataPipeline 同名方法。
-- **API-11（低）** runtime-config 不校验 market id 为数字（`runtime-config.ts:39` vs `polymarket-client.ts:367-371`），非数字 id 通过校验 → 订阅永远无数据 + 每 30s 失败告警噪声。
-- **API-12（低）** 断线期间数据缺口对消费者不可见：重连后无 resync/gap 事件；主循环对 book 无 staleness 门槛（`index.ts:356-393`，当前 paper-only）。
+- **API-3（中，测试缺口）✅** 已覆盖：reconnect_exhausted + ready 拒等、waitUntilReady 超时、disconnect 拒等 ready/order waiters、heartbeat stale→terminate。
+- **API-4（中，测试缺口）✅** 已覆盖：30s 无 PONG terminate、PONG 刷新死连窗口、reconnect_exhausted 事件与 `resetReconnect`。
+- **API-5（低）✅** market/user WS 重连 full-jitter。
+- **API-6（低）部分✅** `disconnect`/reconnect 耗尽会 reject `waitForOrderUpdate`；`lastOrderUpdates` 仍只增不删。
+- **API-7（低）** REST 客户端无重试/限流——可选增强。
+- **API-8（低，安全）✅** smoke publish 绑 127.0.0.1；token 可读 `DOCKER_SMOKE_METRICS_TOKEN`。
+- **API-9（低）✅** `maxPayload=1MiB`；解析失败只记 512 字符预览。
+- **API-10（低）✅** disconnect 后 2s 强制 terminate（保持同步 API）。
+- **API-11（低）✅** runtime-config 强制数字 CLOB token id。
+- **API-12（低）✅** 主循环在 `!isConnected()` / `isReconnectExhausted()` 时跳过交易周期；断线时 invalidate books（MKT-1）。resync/gap 显式事件仍可加。
 
 ### 6.6 基建（utils / security / alerts / 部署 / CI）
 
@@ -234,10 +234,10 @@ npm run lint && npm run build
 - **INFRA-4（中，安全）** `redact.ts:11-12` 正则漏：`CONFIG_ENCRYPTION_KEY`、`POLYGON_RPC_URL` 等 URL 内嵌 key；且只处理对象键值，message 字符串内嵌秘密永不脱敏。`config-encryption.ts:99-107` 与 redact 的秘密清单不一致。
 - **INFRA-5（中，安全）** `.dockerignore` 未排除 `.secrets/`（`.gitignore:23` 有），`Dockerfile:13` builder `COPY . .` 把 metrics token/grafana 密码带进中间层镜像（最终镜像干净）。
 - **INFRA-6（低）** metrics 高基数标签（`metric-registry.ts:172/193-201` market_id/event_id）；10000 上限后新市场指标静默丢弃仅 warn 一次。
-- **INFRA-7（低）** `performance-alert-manager.ts:216` 告警 id 含 `Date.now()` → dedup 永不命中（`alert-notification-service.ts:335`），抖动指标每次越阈都外发。
-- **INFRA-8（低）** `api-security.ts:315-335` `AnomalyDetector` 单信号最高 30 分 < 阈值 50，任何单一异常永不触发（需确认是否刻意）。
-- **INFRA-9（低，文档不一致）** `.env.example` 缺 `STRUCTURED_LOGGING`、`HASH_SALT`；`config-schema.ts:58` 注释仍是旧 "guaranteed-profit" 语义（与 `.env.example:112-113` 已更正的无量纲 KL 语义漂移）。
-- **INFRA-10（低，安全）** `Dockerfile.dev` root 运行 + 挂载整个仓库（可读宿主机 `.env`/`.secrets`，仅 dev profile）。
+- **INFRA-7（低）✅** metric alert id 稳定为 `metric-alert-${metricName}`。
+- **INFRA-8（低）** `AnomalyDetector` 单信号最高 30 < 阈值 50——需产品确认后再改。
+- **INFRA-9（低）✅** schema 注释改为 nats；`.env.example` 补 `HASH_SALT` 说明。
+- **INFRA-10（低，安全）部分✅** `Dockerfile.dev` 已标注 DEV-ONLY 风险；compose 收紧仍可选。
 
 ## 7. 死代码 / 休眠代码清单（处理前先确认保留意图）
 
@@ -251,7 +251,8 @@ npm run lint && npm run build
 | `dependency-graph.ts` + `constraint-builder.ts`（MKT-2/6/8） | 无生产调用，1387 行测试 | 含建模缺陷；修复或移除 |
 | `position-sizing.ts`（EXEC-2/3/9） | 仅 re-export，未接实盘 | 含数学错误；启用前必须修 |
 | `config-encryption.ts`（INFRA-1） | 运行时无消费 | 补链路或删除 |
-| `lastResults`（MKT-8）、`randomSeed`（CORE-11）、`verbose`（OPT-9） | 死字段/死选项 | 直接删除 |
+| `lastResults`（MKT-8） | ✅ 已删除 | |
+| `randomSeed`（CORE-11）、`verbose`（OPT-9） | 死字段/死选项 | 直接删除 |
 
 ## 8. 已验证正确（不要重复审计）
 

@@ -26,7 +26,7 @@ describe('writeExampleTradingSystemConfig', () => {
     const targetPath = join(dir, 'trading-system.json');
     writeFileSync(
       targetPath,
-      '{"liveTrading":false,"markets":["m1"],"events":[{"id":"e1","markets":[{"id":"m1","outcome":"YES","price":0.5}]}]}'
+      '{"liveTrading":false,"markets":["1"],"events":[{"id":"e1","markets":[{"id":"1","outcome":"YES","price":0.5}]}]}'
     );
 
     expect(() => writeExampleTradingSystemConfig(targetPath)).toThrow(/already exists/);
@@ -66,18 +66,18 @@ describe('validateTradingSystemConfigFile', () => {
       targetPath,
       JSON.stringify({
         liveTrading: false,
-        markets: ['market-1'],
+        markets: ['101'],
         events: [
           {
             id: 'event-1',
-            markets: [{ id: 'missing-market', outcome: 'YES', price: 0.5 }],
+            markets: [{ id: '999', outcome: 'YES', price: 0.5 }],
           },
         ],
       })
     );
 
     expect(() => validateTradingSystemConfigFile(targetPath)).toThrow(
-      /missing from the top-level markets list/
+      /missing from the top-level markets list|exactly one YES and one NO/
     );
   });
 });
@@ -87,17 +87,17 @@ describe('summarizeTradingSystemConfig', () => {
     expect(
       summarizeTradingSystemConfig({
         liveTrading: false,
-        markets: ['m1', 'm2', 'm3'],
+        markets: ['1', '2', '3'],
         events: [
           {
             id: 'event-1',
-            markets: [{ id: 'm1', outcome: 'YES', price: 0.4 }],
+            markets: [{ id: '1', outcome: 'YES', price: 0.4 }],
           },
           {
             id: 'event-2',
             markets: [
-              { id: 'm2', outcome: 'YES', price: 0.6 },
-              { id: 'm3', outcome: 'NO', price: 0.3 },
+              { id: '2', outcome: 'YES', price: 0.6 },
+              { id: '3', outcome: 'NO', price: 0.3 },
             ],
           },
         ],

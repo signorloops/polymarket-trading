@@ -670,12 +670,12 @@ describe('ArbitrageDetector', () => {
       expect(score).toBe(opportunity.guaranteedProfit * opportunity.confidence);
     });
 
-    it('should apply time decay factor', () => {
-      const detector = new ArbitrageDetector();
+    it('should apply time decay relative to the book freshness window (MKT-7)', () => {
+      const detector = new ArbitrageDetector([], { maxOrderBookAgeMs: 5000 });
 
       const orderBooks = new Map();
 
-      // Opportunity about to expire
+      // Opportunity about to expire (20% of freshness window left)
       const expiringOpportunity: ArbitrageOpportunity = {
         id: 'test-opp',
         type: 'single-market',
@@ -684,11 +684,11 @@ describe('ArbitrageDetector', () => {
         guaranteedProfit: 0.09,
         confidence: 0.9,
         tradeDirection: [1],
-        timestamp: Date.now() - 55000, // Created 55 seconds ago
-        expiresAt: Date.now() + 5000, // Expires in 5 seconds
+        timestamp: Date.now() - 4000,
+        expiresAt: Date.now() + 1000,
       };
 
-      // Fresh opportunity
+      // Fresh opportunity (full freshness window remaining)
       const freshOpportunity: ArbitrageOpportunity = {
         id: 'test-opp-2',
         type: 'single-market',
@@ -698,7 +698,7 @@ describe('ArbitrageDetector', () => {
         confidence: 0.9,
         tradeDirection: [1],
         timestamp: Date.now(),
-        expiresAt: Date.now() + 60000,
+        expiresAt: Date.now() + 5000,
       };
 
       const expiringScore = detector.scoreOpportunity(expiringOpportunity, orderBooks);
@@ -706,6 +706,8 @@ describe('ArbitrageDetector', () => {
 
       // Fresh opportunity should have higher score
       expect(freshScore).toBeGreaterThan(expiringScore);
+      expect(freshScore).toBeCloseTo(0.09 * 0.9, 10);
+      expect(expiringScore).toBeCloseTo(0.09 * 0.9 * 0.2, 10);
     });
 
     it('should return zero score for expired opportunity', () => {

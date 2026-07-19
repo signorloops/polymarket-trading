@@ -442,6 +442,12 @@ export class ExecutionEngine {
    */
   clearOldOrders(maxAgeMs = 3600000) {
     this.orderManager.clearOldOrders(maxAgeMs);
+    // Drop reservations whose order records were purged (EXEC-11).
+    for (const orderId of this.riskReservations.keys()) {
+      if (!this.orderManager.hasOrder(orderId)) {
+        this.riskReservations.delete(orderId);
+      }
+    }
   }
 
   private async submitOrder(order: TradeOrder, compensatingRecovery = false): Promise<OrderStatus> {

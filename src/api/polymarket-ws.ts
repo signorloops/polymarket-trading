@@ -75,6 +75,7 @@ export class PolymarketWebSocketClient {
       // authenticated user-channel subscription body and must never be sent here.
       this.ws = new WebSocket(this.url, {
         handshakeTimeout: NETWORK_CONFIG.CONNECTION_TIMEOUT,
+        maxPayload: 1_048_576,
       });
 
       this.setupEventHandlers();
@@ -88,11 +89,22 @@ export class PolymarketWebSocketClient {
     this.isManualClose = true;
     this.clearTimers();
 
-    if (this.ws) {
-      this.logger.info('Disconnecting WebSocket');
-      this.ws.close();
-      this.ws = null;
+    const currentWs = this.ws;
+    this.ws = null;
+    if (!currentWs || currentWs.readyState === WebSocket.CLOSED) {
+      return;
     }
+
+    this.logger.info('Disconnecting WebSocket');
+    currentWs.close();
+    // Best-effort force-close if the peer never ACKs (API-10). Non-blocking so
+    // callers/tests keep a synchronous disconnect contract.
+    const forceCloseTimer = setTimeout(() => {
+      if (currentWs.readyState !== WebSocket.CLOSED && typeof currentWs.terminate === 'function') {
+        currentWs.terminate();
+      }
+    }, 2_000);
+    forceCloseTimer.unref();
   }
 
   subscribe(handler: WsHandler): () => void {
@@ -183,7 +195,7 @@ export class PolymarketWebSocketClient {
         const dataStr = this.webSocketDataToString(data);
         this.logger.error('Failed to parse message', {
           error: getErrorMessage(error),
-          data: dataStr,
+          dataPreview: dataStr.slice(0, 512),
         });
       }
     });
@@ -388,10 +400,12 @@ export class PolymarketWebSocketClient {
     }
 
     this.reconnectAttempts++;
-    const delay = Math.min(
+    const baseDelay = Math.min(
       NETWORK_CONFIG.RECONNECT_INTERVAL * Math.pow(2, this.reconnectAttempts - 1),
       60000
     );
+    // Full-jitter backoff to avoid thundering herds across instances (API-5).
+    const delay = Math.floor(baseDelay * (0.5 + Math.random() * 0.5));
 
     this.logger.info(`Scheduling reconnect in ${String(delay)}ms`, {
       attempt: this.reconnectAttempts,

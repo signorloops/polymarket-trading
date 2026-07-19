@@ -222,6 +222,7 @@ export function checkFeasibility(
   tolerance = 1e-6
 ): { feasible: boolean; violations: string[] } {
   const violations: string[] = [];
+  const absTol = (scale: number): number => tolerance * Math.max(1, Math.abs(scale));
 
   if (problem.inequalityMatrix && problem.inequalityRhs) {
     for (let i = 0; i < problem.inequalityMatrix.length; i++) {
@@ -229,7 +230,7 @@ export function checkFeasibility(
       const rhs = problem.inequalityRhs[i];
       if (!row || rhs === undefined) continue;
       const value = dotProduct(row, solution);
-      if (value > rhs + tolerance) {
+      if (value > rhs + absTol(rhs)) {
         violations.push('Inequality ' + String(i) + ': ' + String(value) + ' > ' + String(rhs));
       }
     }
@@ -241,7 +242,7 @@ export function checkFeasibility(
       const rhs = problem.equalityRhs[i];
       if (!row || rhs === undefined) continue;
       const value = dotProduct(row, solution);
-      if (Math.abs(value - rhs) > tolerance) {
+      if (Math.abs(value - rhs) > absTol(rhs)) {
         violations.push('Equality ' + String(i) + ': ' + String(value) + ' != ' + String(rhs));
       }
     }
@@ -252,7 +253,7 @@ export function checkFeasibility(
       const solVal = solution[i];
       const lb = problem.lowerBounds[i];
       if (solVal === undefined || lb === undefined) continue;
-      if (solVal < lb - tolerance) {
+      if (solVal < lb - absTol(lb)) {
         violations.push('Lower bound ' + String(i) + ': ' + String(solVal) + ' < ' + String(lb));
       }
     }
@@ -263,7 +264,7 @@ export function checkFeasibility(
       const solVal = solution[i];
       const ub = problem.upperBounds[i];
       if (solVal === undefined || ub === undefined) continue;
-      if (solVal > ub + tolerance) {
+      if (solVal > ub + absTol(ub)) {
         violations.push('Upper bound ' + String(i) + ': ' + String(solVal) + ' > ' + String(ub));
       }
     }

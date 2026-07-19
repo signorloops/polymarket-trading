@@ -195,6 +195,102 @@ describe('PolymarketUserWebSocketClient', () => {
         })
     ).toThrow(/missing secret/);
   });
+
+  it('emits reconnect_exhausted and rejects ready waiters after max attempts (API-3)', async () => {
+    // Drop the peer immediately so the client schedules reconnect with a zero budget.
+    server.on('connection', (socket) => {
+      socket.close();
+    });
+
+    client = new PolymarketUserWebSocketClient(credentials, {
+      url: url(),
+      maxReconnectAttempts: 0,
+      reconnectIntervalMs: 10,
+      connectionTimeoutMs: 500,
+    });
+    const events: UserWebSocketEvent[] = [];
+    client.subscribe((event) => events.push(event));
+
+    const ready = client.waitUntilReady(500);
+    client.connect();
+
+    await expect(ready).rejects.toThrow(/reconnect limit reached/);
+    await waitFor(() => events.some((e) => e.type === 'reconnect_exhausted'));
+    expect(client.isReconnectExhausted()).toBe(true);
+    expect(events).toContainEqual({ type: 'reconnect_exhausted', attempts: 0 });
+  });
+
+  it('rejects waitUntilReady when readiness times out (API-3)', async () => {
+    // Accept the TCP connection but never reply PONG.
+    client = new PolymarketUserWebSocketClient(credentials, {
+      url: url(),
+      maxReconnectAttempts: 0,
+      connectionTimeoutMs: 50,
+    });
+    client.connect();
+    await expect(client.waitUntilReady(80)).rejects.toThrow(/Timed out waiting/);
+  });
+
+  it('rejects pending ready waiters on disconnect (API-3)', async () => {
+    client = new PolymarketUserWebSocketClient(credentials, {
+      url: url(),
+      maxReconnectAttempts: 0,
+      connectionTimeoutMs: 2000,
+    });
+    const ready = client.waitUntilReady(2000);
+    client.connect();
+    // Disconnect before PONG arrives.
+    client.disconnect();
+    await expect(ready).rejects.toThrow(/disconnected/);
+  });
+
+  it('rejects pending order-update waiters on disconnect (API-6)', async () => {
+    server.on('connection', (socket) => {
+      socket.on('message', (data) => {
+        if (rawDataToString(data) === 'PING') socket.send('PONG');
+      });
+    });
+    client = new PolymarketUserWebSocketClient(credentials, {
+      url: url(),
+      maxReconnectAttempts: 0,
+    });
+    client.connect();
+    await client.waitUntilReady(2000);
+
+    const pending = client.waitForOrderUpdate('order-pending', () => true, 5000);
+    client.disconnect();
+    await expect(pending).rejects.toThrow(/disconnected/);
+  });
+
+  it('terminates when the heartbeat becomes stale (API-3)', async () => {
+    client = new PolymarketUserWebSocketClient(credentials, {
+      url: url(),
+      maxReconnectAttempts: 0,
+      heartbeatIntervalMs: 1000,
+      heartbeatDeadThresholdMs: 2000,
+      connectionTimeoutMs: 2000,
+    });
+
+    // Respond to the initial PING so the client becomes ready, then go silent.
+    let pongsSent = 0;
+    server.on('connection', (socket) => {
+      socket.on('message', (data) => {
+        if (rawDataToString(data) === 'PING' && pongsSent === 0) {
+          pongsSent++;
+          socket.send('PONG');
+        }
+      });
+    });
+
+    client.connect();
+    await client.waitUntilReady(2000);
+    expect(client.isReady()).toBe(true);
+
+    const socket = serverSocket;
+    expect(socket).toBeDefined();
+    await once(socket!, 'close');
+    expect(client.isConnected()).toBe(false);
+  }, 10_000);
 });
 
 function safeParse(value: string): unknown {

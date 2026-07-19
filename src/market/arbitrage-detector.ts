@@ -9,7 +9,6 @@
  */
 
 import { MarginalPolytope, Event } from '../core/marginal-polytope.js';
-import { BregmanProjectionResult } from '../core/bregman-projection.js';
 import {
   frankWolfe,
   isSignificantIncoherence,
@@ -71,7 +70,6 @@ export interface ArbitrageDetectorOptions {
 export class ArbitrageDetector {
   private polytope: MarginalPolytope;
   private logger = getLogger().child({ module: 'ArbitrageDetector' });
-  private lastResults: Map<string, BregmanProjectionResult> = new Map();
   private payoffModels: CrossMarketPayoffModel[];
   private readonly maxOrderBookAgeMs: number;
   private readonly maxSingleMarketShares: number;
@@ -316,26 +314,27 @@ export class ArbitrageDetector {
   scoreOpportunity(opportunity: ArbitrageOpportunity, orderBooks: Map<string, OrderBook>): number {
     let score = opportunity.guaranteedProfit;
 
-    // Adjust for liquidity
-    for (const marketId of opportunity.markets) {
+    // Adjust for executable-side liquidity (buy asks / sell bids), not both sides.
+    for (let i = 0; i < opportunity.markets.length; i++) {
+      const marketId = opportunity.markets[i];
+      if (!marketId) continue;
       const book = orderBooks.get(marketId);
-      if (book) {
-        const liquidity = book.getLiquidityMetrics();
-        if (liquidity) {
-          // Reduce score for low liquidity
-          const liquidityFactor = Math.min(liquidity.bidDepth, liquidity.askDepth) / 1000;
-          score *= Math.min(liquidityFactor, 1);
-        }
-      }
+      if (!book) continue;
+      const direction = opportunity.tradeDirection[i] ?? 0;
+      const liquidity = book.getLiquidityMetrics();
+      if (!liquidity) continue;
+      const sideDepth = direction >= 0 ? liquidity.askDepth : liquidity.bidDepth;
+      const liquidityFactor = sideDepth / 1000;
+      score *= Math.min(Math.max(liquidityFactor, 0), 1);
     }
 
     // Adjust for confidence
     score *= opportunity.confidence;
 
-    // Time decay (urgency)
+    // Time decay relative to the book freshness window (MKT-7).
     const timeRemaining = opportunity.expiresAt - Date.now();
-    const urgencyFactor = Math.max(0, timeRemaining / 60000);
-    score *= urgencyFactor;
+    const urgencyFactor = Math.max(0, timeRemaining / this.maxOrderBookAgeMs);
+    score *= Math.min(urgencyFactor, 1);
 
     return score;
   }
@@ -345,7 +344,6 @@ export class ArbitrageDetector {
    */
   clear(): void {
     this.polytope.clear();
-    this.lastResults.clear();
     this.takerFeeSchedules.clear();
   }
 

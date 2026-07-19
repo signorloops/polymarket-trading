@@ -165,8 +165,11 @@ export class MarketDependencyGraph {
   }
 
   /**
-   * Find arbitrage cycles in the dependency graph
-   * A cycle represents a potential arbitrage opportunity
+   * Find cycles in the dependency graph (diagnostic / non-production).
+   *
+   * `expectedReturn` is a price-diff heuristic with no financial meaning (MKT-6);
+   * DFS with a global visited set also misses some cycles. Prefer payoff-model USD
+   * detection for trading decisions.
    */
   findArbitrageCycles(): ArbitrageCycle[] {
     const cycles: ArbitrageCycle[] = [];

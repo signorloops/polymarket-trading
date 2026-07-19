@@ -82,6 +82,15 @@ export function calculatePositionSize(input: PositionSizingInput): PositionSizin
   if (capital < 0) {
     throw new Error('Capital must be non-negative');
   }
+  if (capital === 0) {
+    return {
+      size: 0,
+      fraction: 0,
+      expectedValue: 0,
+      riskAdjustedReturn: 0,
+      constraint: 'kelly',
+    };
+  }
 
   // Calculate Kelly fraction. `probability` is the win probability for the chosen side.
   const b = side === 'buy' ? (1 - price) / price : price / (1 - price);
@@ -144,20 +153,18 @@ export function calculatePositionSize(input: PositionSizingInput): PositionSizin
     constraint = 'risk';
   }
 
-  // Expected value in dollars for `size` shares
-  const expectedValue =
-    side === 'buy'
-      ? size * (probability * (1 - price) - (1 - probability) * price)
-      : size * ((1 - probability) * price - probability * (1 - price));
-
-  // Calculate risk-adjusted return (simplified Sharpe-like ratio)
-  const variance = probability * (1 - probability);
-  const riskAdjustedReturn = variance > 0 ? expectedValue / (size * Math.sqrt(variance)) : 0;
+  // Dollar outcomes for `size` shares (EXEC-9): include odds scale in stdev.
+  const winDollar = side === 'buy' ? size * (1 - price) : size * price;
+  const loseDollar = side === 'buy' ? -size * price : -size * (1 - price);
+  const expectedValue = probability * winDollar + (1 - probability) * loseDollar;
+  const secondMoment = probability * winDollar ** 2 + (1 - probability) * loseDollar ** 2;
+  const stdev = Math.sqrt(Math.max(0, secondMoment - expectedValue ** 2));
+  const riskAdjustedReturn = stdev > 0 ? expectedValue / stdev : 0;
 
   const notional = size * price;
   return {
     size,
-    fraction: capital > 0 ? notional / capital : 0,
+    fraction: notional / capital,
     expectedValue,
     riskAdjustedReturn,
     constraint,
@@ -242,7 +249,7 @@ export function calculateMultiLegPositionSize(
     expectedProfit += profit;
   }
 
-  // Simplified Sharpe ratio
+  // profit / maxLoss — not a true Sharpe (no stdev); kept as sharpeRatio for API compat (EXEC-9).
   const sharpeRatio = maxLoss > 0 ? expectedProfit / maxLoss : 0;
 
   return {

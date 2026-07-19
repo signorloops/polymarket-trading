@@ -5,8 +5,8 @@
  * the KL divergence to a given price vector. This corresponds to finding the
  * "closest" valid probability distribution.
  *
- * Profit guarantee: Profit >= D_KL(μ̂ || θ) - gap
- * where μ̂ is the projection and θ is the price vector
+ * The quantity D_KL(μ̂ || θ) − gap is a dimensionless incoherence lower bound
+ * (nats), not dollar profit (CORE-9).
  */
 
 import { vectorDot, klDivergence } from '../utils/math.js';

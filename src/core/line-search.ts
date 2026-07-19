@@ -5,20 +5,21 @@
  */
 
 /**
- * Line search for KL divergence minimization
- * Finds optimal step size γ that minimizes D((1-γ)μ + γs || θ)
+ * One-step quadratic step-size heuristic (identity Hessian), not a true
+ * line search over D_KL((1-γ)μ + γs ‖ θ). Prefer `lineSearchObjective` when
+ * the objective is available (CORE-10).
  *
  * @param mu Current point
  * @param s Search direction (vertex from LMO)
  * @param gradient Gradient at current point
- * @returns Optimal step size γ ∈ [0, 1]
+ * @returns Step size γ ∈ [0, 1]
  */
 export function lineSearchKL(mu: number[], s: number[], gradient: number[]): number {
   if (mu.length !== s.length || mu.length !== gradient.length) {
     throw new Error('Line search dimension mismatch');
   }
 
-  // Fallback (objective-free): one-step quadratic approximation around current point.
+  // Objective-free quadratic approximation around the current point.
   let numer = 0;
   let denom = 0;
   for (let i = 0; i < mu.length; i++) {

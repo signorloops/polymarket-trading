@@ -49,7 +49,6 @@ export interface LPSolverOptions {
    */
   maxIterations?: number;
   tolerance?: number;
-  verbose?: boolean;
 }
 
 export interface SolveLMOOptions {
@@ -145,7 +144,7 @@ export function solveLMO(
   options: SolveLMOOptions = {}
 ): number[] {
   const n = gradient.length;
-  if (n === 0) return [1];
+  if (n === 0) return [];
 
   if (constraints.length === 0) return fallbackSimplexVertex(gradient);
 

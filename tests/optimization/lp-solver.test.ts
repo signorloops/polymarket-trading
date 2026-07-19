@@ -161,8 +161,8 @@ describe('LPSolver', () => {
 
       const vertex = solveLMO(gradient, constraints);
 
-      // 空梯度时返回 [1]（实现细节：返回一个包含单个1的数组）
-      expect(vertex).toEqual([1]);
+      // Empty gradient has dimension 0 — return an empty vertex (OPT-9).
+      expect(vertex).toEqual([]);
     });
 
     it('处理单元素梯度', () => {
@@ -424,15 +424,6 @@ describe('LPSolver', () => {
       const solution = solveLP(problem, { tolerance: 1e-8 });
 
       expect(solution.status).toBe('optimal');
-    });
-
-    it('verbose选项不抛出错误', () => {
-      const problem: LPProblem = {
-        objective: [1, 1],
-        lowerBounds: [0, 0],
-      };
-
-      expect(() => solveLP(problem, { verbose: true })).not.toThrow();
     });
   });
 

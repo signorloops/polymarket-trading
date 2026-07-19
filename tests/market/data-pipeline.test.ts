@@ -451,7 +451,7 @@ describe('DataPipeline', () => {
       });
     });
 
-    it('should handle orderbook without bids/asks arrays', () => {
+    it('ignores book snapshots missing bids or asks arrays (MKT-5)', () => {
       const handler = jest.fn();
       pipeline.subscribe(handler);
 
@@ -463,16 +463,7 @@ describe('DataPipeline', () => {
 
       mockState.wsInstance?.eventHandlers['message']?.(JSON.stringify(orderbookMessage));
 
-      expect(handler).toHaveBeenCalledWith({
-        type: 'orderbook',
-        data: {
-          marketId: 'market-1',
-          bids: [],
-          asks: [],
-          kind: 'snapshot',
-          timestamp: 1234567890,
-        },
-      });
+      expect(handler).not.toHaveBeenCalled();
     });
 
     it('should not emit orderbook without market_id', () => {

@@ -106,8 +106,9 @@ function validateRpcUrl(value: string): void {
   } catch (error) {
     throw new Error('POLYGON_RPC_URL must be a valid URL', { cause: error });
   }
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-    throw new Error('POLYGON_RPC_URL must use HTTPS or HTTP');
+  // Plain HTTP RPC URLs often embed API keys; refuse them (EXEC-13).
+  if (parsed.protocol !== 'https:') {
+    throw new Error('POLYGON_RPC_URL must use HTTPS (HTTP endpoints may leak API keys)');
   }
 }
 

@@ -70,7 +70,13 @@ export class OrderManager {
     let cleared = 0;
 
     for (const [orderId, status] of this.orderStatuses.entries()) {
-      if (status.timestamp < cutoff && status.status !== 'pending' && status.status !== 'open') {
+      // Keep partial fills — the engine may still cancel the remainder (EXEC-11).
+      if (
+        status.timestamp < cutoff &&
+        status.status !== 'pending' &&
+        status.status !== 'open' &&
+        status.status !== 'partial'
+      ) {
         this.orderStatuses.delete(orderId);
         cleared++;
       }
