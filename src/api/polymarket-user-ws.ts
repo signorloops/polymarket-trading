@@ -42,7 +42,8 @@ export interface UserTradeUpdate {
 
 export type UserWebSocketEvent =
   | { type: 'order'; data: UserOrderUpdate }
-  | { type: 'trade'; data: UserTradeUpdate };
+  | { type: 'trade'; data: UserTradeUpdate }
+  | { type: 'reconnect_exhausted'; attempts: number };
 
 export interface PolymarketUserWebSocketOptions {
   url?: string;
@@ -97,6 +98,7 @@ export class PolymarketUserWebSocketClient {
   private heartbeatTimer: NodeJS.Timeout | undefined;
   private reconnectTimer: NodeJS.Timeout | undefined;
   private reconnectAttempts = 0;
+  private reconnectExhausted = false;
   private generation = 0;
   private manualClose = false;
   private receivedPong = false;
@@ -141,6 +143,7 @@ export class PolymarketUserWebSocketClient {
       return;
     }
     this.manualClose = false;
+    this.reconnectExhausted = false;
     const generation = ++this.generation;
     this.receivedPong = false;
     this.lastPongAt = 0;
@@ -180,6 +183,18 @@ export class PolymarketUserWebSocketClient {
 
   isConnected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN;
+  }
+
+  isReconnectExhausted(): boolean {
+    return this.reconnectExhausted;
+  }
+
+  resetReconnect(): void {
+    this.reconnectExhausted = false;
+    this.reconnectAttempts = 0;
+    if (!this.manualClose && !this.isConnected()) {
+      this.connect();
+    }
   }
 
   isReady(now = Date.now()): boolean {
@@ -244,6 +259,7 @@ export class PolymarketUserWebSocketClient {
     ws.on('open', () => {
       if (!this.isCurrent(ws, generation)) return;
       this.reconnectAttempts = 0;
+      this.reconnectExhausted = false;
       this.openedAt = Date.now();
       this.logger.info('Authenticated user WebSocket connected');
       this.sendSubscription(ws);
@@ -348,8 +364,18 @@ export class PolymarketUserWebSocketClient {
   private scheduleReconnect(generation: number): void {
     if (this.manualClose || generation !== this.generation || this.reconnectTimer) return;
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      this.reconnectExhausted = true;
       this.logger.error('Authenticated user WebSocket exhausted reconnect attempts');
       this.rejectReadyWaiters(new Error('Authenticated user WebSocket reconnect limit reached'));
+      for (const handler of this.handlers) {
+        try {
+          handler({ type: 'reconnect_exhausted', attempts: this.reconnectAttempts });
+        } catch (error) {
+          this.logger.warn('Ignored error from reconnect_exhausted handler', {
+            error: getErrorMessage(error),
+          });
+        }
+      }
       return;
     }
     this.reconnectAttempts++;
@@ -426,7 +452,7 @@ function parseOrderUpdate(record: Record<string, unknown>): UserOrderUpdate {
     status: requiredString(record.status, 'order status'),
     originalSize: nonNegativeNumber(record.original_size, 'original order size'),
     matchedSize: nonNegativeNumber(record.size_matched, 'matched order size'),
-    price: price(record.price),
+    price: orderPrice(record.price),
     observedAt: timestamp(record.timestamp),
   };
 }
@@ -510,6 +536,13 @@ function nonNegativeNumber(value: unknown, field: string): number {
 function price(value: unknown): number {
   const result = nonNegativeNumber(value, 'price');
   if (result <= 0 || result >= 1) throw new Error('price is outside the binary contract range');
+  return result;
+}
+
+/** Limit prices are (0,1); market orders may report price 0 (API-2). */
+function orderPrice(value: unknown): number {
+  const result = nonNegativeNumber(value, 'price');
+  if (result < 0 || result >= 1) throw new Error('price is outside the binary contract range');
   return result;
 }
 

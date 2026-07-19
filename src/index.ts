@@ -344,7 +344,16 @@ export class PolymarketTradingSystem {
         break;
 
       case 'disconnected':
-        this.logger.warn('Data pipeline disconnected');
+        // Stale books + post-reconnect deltas would refresh lastUpdate without
+        // replacing depth (MKT-1). Force a full snapshot before trading again.
+        getOrderBookManager().invalidateAll('data pipeline disconnected');
+        this.logger.warn('Data pipeline disconnected; order books invalidated');
+        break;
+
+      case 'reconnect_exhausted':
+        this.logger.error('Data pipeline reconnect exhausted; channel is silent until reset', {
+          attempts: event.attempts,
+        });
         break;
 
       case 'error':

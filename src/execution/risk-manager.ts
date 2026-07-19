@@ -13,6 +13,7 @@ import { RISK_CONFIG } from '../utils/config.js';
 import { OrderStatus } from './execution-engine.js';
 import { createSingleton } from '../utils/singleton.js';
 import { TradingMetrics } from '../utils/metrics.js';
+import { acquireFileLock } from '../utils/file-lock.js';
 import {
   closeSync,
   existsSync,
@@ -765,11 +766,11 @@ export class RiskManager {
       maxDrawdown: this.maxDrawdown,
     };
     const lockPath = `${this.stateFilePath}.lock`;
-    let lockFd: number | undefined;
+    let lock: ReturnType<typeof acquireFileLock> | undefined;
     let tmp: string | undefined;
     try {
       mkdirSync(dirname(this.stateFilePath), { recursive: true, mode: 0o700 });
-      lockFd = openSync(lockPath, 'wx', 0o600);
+      lock = acquireFileLock(lockPath);
       tmp = `${this.stateFilePath}.${String(process.pid)}.${String(Date.now())}.tmp`;
       writeFileSync(tmp, JSON.stringify(state), { encoding: 'utf8', mode: 0o600 });
       const tmpFd = openSync(tmp, 'r');
@@ -798,14 +799,7 @@ export class RiskManager {
           // The rename may already have consumed the temp file.
         }
       }
-      if (lockFd !== undefined) {
-        closeSync(lockFd);
-        try {
-          unlinkSync(lockPath);
-        } catch {
-          // Preserve the original persistence result.
-        }
-      }
+      lock?.release();
     }
   }
 }

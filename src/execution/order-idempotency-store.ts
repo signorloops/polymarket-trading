@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import type { OrderRequest } from '../api/polymarket-client.js';
 import { getErrorMessage } from '../utils/errors.js';
+import { acquireFileLock } from '../utils/file-lock.js';
 
 export type IdempotentOrderState = 'claimed' | 'submitted' | 'unknown' | 'terminal';
 
@@ -188,9 +189,9 @@ export class FileOrderIdempotencyStore implements OrderIdempotencyPort {
     const filePath = this.filePath(normalizedKey);
     const lockPath = `${filePath}.lock`;
     const tempPath = `${filePath}.${String(process.pid)}.${String(Date.now())}.tmp`;
-    let lock: number | undefined;
+    let lock: ReturnType<typeof acquireFileLock> | undefined;
     try {
-      lock = fs.openSync(lockPath, 'wx', 0o600);
+      lock = acquireFileLock(lockPath);
       const current = this.get(normalizedKey);
       if (!current) {
         throw new Error(`Order idempotency key ${normalizedKey} was not claimed`);
@@ -218,14 +219,7 @@ export class FileOrderIdempotencyStore implements OrderIdempotencyPort {
         cause: error,
       });
     } finally {
-      if (lock !== undefined) {
-        fs.closeSync(lock);
-        try {
-          fs.unlinkSync(lockPath);
-        } catch {
-          // Preserve the update outcome.
-        }
-      }
+      lock?.release();
     }
   }
 

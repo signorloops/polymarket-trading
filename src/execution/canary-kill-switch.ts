@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getLogger } from '../utils/logger.js';
 import { getErrorMessage } from '../utils/errors.js';
+import { acquireFileLock } from '../utils/file-lock.js';
 
 export interface CanaryKillSwitchState {
   active: boolean;
@@ -67,11 +68,11 @@ export class CanaryKillSwitchPersistence implements CanaryKillSwitchStatePort {
     }
 
     const lockPath = `${this.stateFilePath}.lock`;
-    let lock: number | undefined;
+    let lock: ReturnType<typeof acquireFileLock> | undefined;
     let tempPath: string | undefined;
     try {
       fs.mkdirSync(path.dirname(this.stateFilePath), { recursive: true, mode: 0o700 });
-      lock = fs.openSync(lockPath, 'wx', 0o600);
+      lock = acquireFileLock(lockPath);
       tempPath = `${this.stateFilePath}.${String(process.pid)}.${String(Date.now())}.tmp`;
       fs.writeFileSync(tempPath, JSON.stringify(state, null, 2), {
         encoding: 'utf8',
@@ -101,14 +102,7 @@ export class CanaryKillSwitchPersistence implements CanaryKillSwitchStatePort {
           // Preserve the persistence result.
         }
       }
-      if (lock !== undefined) {
-        fs.closeSync(lock);
-        try {
-          fs.unlinkSync(lockPath);
-        } catch {
-          // Preserve the persistence result.
-        }
-      }
+      lock?.release();
     }
   }
 

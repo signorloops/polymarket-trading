@@ -40,6 +40,7 @@ export type DataPipelineEvent =
   | { type: 'market-resolved'; marketId: string; timestamp: number }
   | { type: 'connected' }
   | { type: 'disconnected' }
+  | { type: 'reconnect_exhausted'; attempts: number }
   | { type: 'error'; error: Error };
 
 type EventHandler = (event: DataPipelineEvent) => void;
@@ -55,6 +56,7 @@ export class DataPipeline {
   private handlers: Set<EventHandler> = new Set();
   private logger = getLogger().child({ module: 'DataPipeline' });
   private isManualClose = false;
+  private reconnectExhausted = false;
 
   constructor(url: string = NETWORK_CONFIG.WS_URL, assetIds: string[] = []) {
     this.url = url;
@@ -74,6 +76,7 @@ export class DataPipeline {
     }
 
     this.isManualClose = false;
+    this.reconnectExhausted = false;
     this.logger.info('Connecting to WebSocket', { url: this.url });
 
     try {
@@ -151,6 +154,18 @@ export class DataPipeline {
     return this.ws?.readyState === WebSocket.OPEN;
   }
 
+  isReconnectExhausted(): boolean {
+    return this.reconnectExhausted;
+  }
+
+  resetReconnect(): void {
+    this.reconnectExhausted = false;
+    this.reconnectAttempts = 0;
+    if (!this.isManualClose && !this.isConnected()) {
+      this.connect();
+    }
+  }
+
   private setupEventHandlers(): void {
     if (!this.ws) return;
     const currentWs = this.ws;
@@ -161,6 +176,7 @@ export class DataPipeline {
       }
       this.logger.info('WebSocket connected');
       this.reconnectAttempts = 0;
+      this.reconnectExhausted = false;
       this.lastPongAt = Date.now();
       this.startHeartbeat();
       this.emit({ type: 'connected' });
@@ -511,7 +527,12 @@ export class DataPipeline {
     }
 
     if (this.reconnectAttempts >= NETWORK_CONFIG.MAX_RECONNECT_ATTEMPTS) {
+      this.reconnectExhausted = true;
       this.logger.error('Max reconnection attempts reached');
+      this.emit({
+        type: 'reconnect_exhausted',
+        attempts: this.reconnectAttempts,
+      });
       return;
     }
 

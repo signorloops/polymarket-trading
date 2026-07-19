@@ -139,15 +139,16 @@ export function bregmanProjection(
 
   const n = priceVector.length;
 
-  // Initialize with uniform distribution
-  const mu: number[] = new Array<number>(n).fill(1 / n);
-
-  // Ensure price vector is positive
+  // Ensure price vector is positive (reference measure θ for I-projection).
   const theta: number[] = new Array<number>(n);
   for (let i = 0; i < n; i++) {
     const price = priceVector[i];
     theta[i] = Math.max(price ?? 0, 1e-10);
   }
+
+  // Initialize μ from θ so IPF converges to the I-projection argmin D(μ‖θ),
+  // not the maximum-entropy point of a uniform start (CORE-1).
+  const mu: number[] = theta.slice();
 
   // Preprocess constraints to sparse structure
   const sparseConstraints = preprocessConstraints(constraints, n);

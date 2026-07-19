@@ -542,7 +542,13 @@ describe('Trading System Integration', () => {
     it('should update order books from market data', () => {
       const manager = getOrderBookManager();
 
-      manager.updateBook('test-market', [{ price: 0.6, size: 100 }], [{ price: 0.65, size: 100 }]);
+      manager.updateBook(
+        'test-market',
+        [{ price: 0.6, size: 100 }],
+        [{ price: 0.65, size: 100 }],
+        undefined,
+        'snapshot'
+      );
 
       const book = manager.getBook('test-market');
       const snapshot = book.getSnapshot();
@@ -565,7 +571,9 @@ describe('Trading System Integration', () => {
           { price: 0.61, size: 100 },
           { price: 0.62, size: 200 },
           { price: 0.63, size: 300 },
-        ]
+        ],
+        undefined,
+        'snapshot'
       );
 
       const book = manager.getBook('vwap-market');
@@ -581,7 +589,9 @@ describe('Trading System Integration', () => {
       manager.updateBook(
         'liquidity-market',
         [{ price: 0.6, size: 1000 }],
-        [{ price: 0.61, size: 1000 }]
+        [{ price: 0.61, size: 1000 }],
+        undefined,
+        'snapshot'
       );
 
       const book = manager.getBook('liquidity-market');

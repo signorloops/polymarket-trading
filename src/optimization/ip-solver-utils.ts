@@ -63,7 +63,7 @@ export function isIntegerFeasible(
   problem: IPProblem,
   tolerance = 1e-5
 ): boolean {
-  const indices = problem.integerIndices ?? problem.binaryIndices ?? [];
+  const indices = getDiscreteIndices(problem);
 
   for (const idx of indices) {
     const value = solution[idx];
@@ -77,6 +77,15 @@ export function isIntegerFeasible(
   }
 
   return true;
+}
+
+/** Union of integerIndices and binaryIndices (OPT-4). */
+export function getDiscreteIndices(problem: IPProblem): number[] {
+  const indices = new Set<number>([
+    ...(problem.integerIndices ?? []),
+    ...(problem.binaryIndices ?? []),
+  ]);
+  return [...indices];
 }
 
 function addBoundConstraint(
@@ -199,6 +208,17 @@ export function solveWithMilpBackend(
       };
     }
 
+    // Mirror solveLP unbounded detection (OPT-1).
+    if (raw.bounded === false || !Number.isFinite(Number(raw.result))) {
+      return {
+        solution: Array<number>(n).fill(0),
+        objectiveValue: Infinity,
+        optimal: false,
+        status: 'unbounded',
+        integerFeasible: false,
+      };
+    }
+
     const solution = variableNames.map((name) => {
       const val = raw[name];
       return Number.isFinite(val as number) ? Number(val) : 0;
@@ -233,7 +253,8 @@ interface BBNode {
   solution: number[];
   objectiveValue: number;
   depth: number;
-  fixedIndices: Map<number, number>;
+  lowerBounds: number[];
+  upperBounds: number[];
 }
 
 export function branchAndBound(
@@ -242,17 +263,25 @@ export function branchAndBound(
   options: IPSolverOptions
 ): IPSolution {
   const { mipGap = 0.01, nodeLimit = 1000 } = options;
+  const n = problem.objective.length;
 
-  let bestSolution = lpSolution.solution;
+  let bestSolution: number[] | undefined;
   let bestValue = Infinity;
   let nodeCount = 0;
+  let foundInteger = false;
+
+  const initialLower = problem.lowerBounds ? [...problem.lowerBounds] : Array<number>(n).fill(0);
+  const initialUpper = problem.upperBounds
+    ? [...problem.upperBounds]
+    : Array<number>(n).fill(Infinity);
 
   const queue: BBNode[] = [
     {
       solution: lpSolution.solution,
       objectiveValue: lpSolution.objectiveValue,
       depth: 0,
-      fixedIndices: new Map(),
+      lowerBounds: initialLower,
+      upperBounds: initialUpper,
     },
   ];
 
@@ -265,6 +294,7 @@ export function branchAndBound(
       if (node.objectiveValue < bestValue) {
         bestSolution = node.solution;
         bestValue = node.objectiveValue;
+        foundInteger = true;
       }
       continue;
     }
@@ -277,20 +307,22 @@ export function branchAndBound(
     const floor = Math.floor(value);
     const ceil = Math.ceil(value);
 
-    const leftFixed = new Map(node.fixedIndices);
-    leftFixed.set(branchIdx, floor);
-    const rightFixed = new Map(node.fixedIndices);
-    rightFixed.set(branchIdx, ceil);
+    // Standard B&B: tighten bounds, do not fix variables to a single point (OPT-2).
+    const leftUpper = [...node.upperBounds];
+    leftUpper[branchIdx] = Math.min(leftUpper[branchIdx] ?? Infinity, floor);
+    const rightLower = [...node.lowerBounds];
+    rightLower[branchIdx] = Math.max(rightLower[branchIdx] ?? -Infinity, ceil);
 
-    const leftResult = solveLP(createSubproblem(problem, leftFixed), options);
-    const rightResult = solveLP(createSubproblem(problem, rightFixed), options);
+    const leftResult = solveLP(createSubproblem(problem, node.lowerBounds, leftUpper), options);
+    const rightResult = solveLP(createSubproblem(problem, rightLower, node.upperBounds), options);
 
     if (leftResult.status === 'optimal' && leftResult.objectiveValue < bestValue * (1 - mipGap)) {
       queue.push({
         solution: leftResult.solution,
         objectiveValue: leftResult.objectiveValue,
         depth: node.depth + 1,
-        fixedIndices: leftFixed,
+        lowerBounds: [...node.lowerBounds],
+        upperBounds: leftUpper,
       });
     }
     if (rightResult.status === 'optimal' && rightResult.objectiveValue < bestValue * (1 - mipGap)) {
@@ -298,29 +330,41 @@ export function branchAndBound(
         solution: rightResult.solution,
         objectiveValue: rightResult.objectiveValue,
         depth: node.depth + 1,
-        fixedIndices: rightFixed,
+        lowerBounds: rightLower,
+        upperBounds: [...node.upperBounds],
       });
     }
   }
 
-  const relaxationGap =
-    lpSolution.objectiveValue > 0
-      ? (bestValue - lpSolution.objectiveValue) / lpSolution.objectiveValue
-      : 0;
+  // No integer-feasible incumbent found (OPT-3).
+  if (!foundInteger || bestSolution === undefined || !Number.isFinite(bestValue)) {
+    return {
+      solution: lpSolution.solution,
+      objectiveValue: Infinity,
+      optimal: false,
+      status: 'infeasible',
+      integerFeasible: false,
+      relaxationGap: 0,
+      iterations: nodeCount,
+    };
+  }
+
+  const denom = Math.abs(lpSolution.objectiveValue);
+  const relaxationGap = denom > 0 ? (bestValue - lpSolution.objectiveValue) / denom : 0;
 
   return {
     solution: bestSolution,
     objectiveValue: bestValue,
     optimal: nodeCount < nodeLimit,
     status: nodeCount < nodeLimit ? 'optimal' : 'error',
-    integerFeasible: isIntegerFeasible(bestSolution, problem),
+    integerFeasible: true,
     relaxationGap,
     iterations: nodeCount,
   };
 }
 
 function findBranchingVariable(solution: number[], problem: IPProblem): number {
-  const indices = problem.integerIndices ?? problem.binaryIndices ?? [];
+  const indices = getDiscreteIndices(problem);
   let maxFractional = 0;
   let branchIdx = -1;
 
@@ -337,8 +381,12 @@ function findBranchingVariable(solution: number[], problem: IPProblem): number {
   return branchIdx;
 }
 
-function createSubproblem(problem: IPProblem, fixedIndices: Map<number, number>): LPProblem {
-  const subproblem: LPProblem = {
+function createSubproblem(
+  problem: IPProblem,
+  lowerBounds: number[],
+  upperBounds: number[]
+): LPProblem {
+  return {
     ...problem,
     ...(problem.inequalityMatrix
       ? { inequalityMatrix: problem.inequalityMatrix.map((row) => [...row]) }
@@ -348,22 +396,7 @@ function createSubproblem(problem: IPProblem, fixedIndices: Map<number, number>)
       ? { equalityMatrix: problem.equalityMatrix.map((row) => [...row]) }
       : {}),
     ...(problem.equalityRhs ? { equalityRhs: [...problem.equalityRhs] } : {}),
-    ...(problem.lowerBounds ? { lowerBounds: [...problem.lowerBounds] } : {}),
-    ...(problem.upperBounds ? { upperBounds: [...problem.upperBounds] } : {}),
+    lowerBounds: [...lowerBounds],
+    upperBounds: [...upperBounds],
   };
-
-  for (const [idx, value] of fixedIndices) {
-    const constraint: number[] = new Array(problem.objective.length).fill(0) as number[];
-    constraint[idx] = 1;
-
-    if (!subproblem.equalityMatrix) {
-      subproblem.equalityMatrix = [];
-      subproblem.equalityRhs = [];
-    }
-
-    subproblem.equalityMatrix.push(constraint);
-    if (subproblem.equalityRhs) subproblem.equalityRhs.push(value);
-  }
-
-  return subproblem;
 }

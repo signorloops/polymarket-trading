@@ -27,7 +27,13 @@ describe('Data Pipeline Integration', () => {
       const manager = getOrderBookManager();
 
       // Simulate pipeline updating order book
-      manager.updateBook('market-1', [{ price: 0.6, size: 100 }], [{ price: 0.65, size: 100 }]);
+      manager.updateBook(
+        'market-1',
+        [{ price: 0.6, size: 100 }],
+        [{ price: 0.65, size: 100 }],
+        undefined,
+        'snapshot'
+      );
 
       const book = manager.getBook('market-1');
       const snapshot = book.getSnapshot();
@@ -41,9 +47,21 @@ describe('Data Pipeline Integration', () => {
     it('should maintain multiple order books', () => {
       const manager = getOrderBookManager();
 
-      manager.updateBook('market-yes', [{ price: 0.6, size: 100 }], [{ price: 0.65, size: 100 }]);
+      manager.updateBook(
+        'market-yes',
+        [{ price: 0.6, size: 100 }],
+        [{ price: 0.65, size: 100 }],
+        undefined,
+        'snapshot'
+      );
 
-      manager.updateBook('market-no', [{ price: 0.35, size: 100 }], [{ price: 0.4, size: 100 }]);
+      manager.updateBook(
+        'market-no',
+        [{ price: 0.35, size: 100 }],
+        [{ price: 0.4, size: 100 }],
+        undefined,
+        'snapshot'
+      );
 
       const yesBook = manager.getBook('market-yes');
       const noBook = manager.getBook('market-no');
@@ -55,7 +73,13 @@ describe('Data Pipeline Integration', () => {
     it('should calculate mid price correctly', () => {
       const manager = getOrderBookManager();
 
-      manager.updateBook('market-1', [{ price: 0.6, size: 100 }], [{ price: 0.7, size: 100 }]);
+      manager.updateBook(
+        'market-1',
+        [{ price: 0.6, size: 100 }],
+        [{ price: 0.7, size: 100 }],
+        undefined,
+        'snapshot'
+      );
 
       const book = manager.getBook('market-1');
       const midPrice = book.getMidPrice();
@@ -67,10 +91,22 @@ describe('Data Pipeline Integration', () => {
       const manager = getOrderBookManager();
 
       // Initial update
-      manager.updateBook('market-1', [{ price: 0.6, size: 100 }], [{ price: 0.7, size: 100 }]);
+      manager.updateBook(
+        'market-1',
+        [{ price: 0.6, size: 100 }],
+        [{ price: 0.7, size: 100 }],
+        undefined,
+        'snapshot'
+      );
 
       // Update with new prices
-      manager.updateBook('market-1', [{ price: 0.61, size: 150 }], [{ price: 0.69, size: 150 }]);
+      manager.updateBook(
+        'market-1',
+        [{ price: 0.61, size: 150 }],
+        [{ price: 0.69, size: 150 }],
+        undefined,
+        'snapshot'
+      );
 
       const book = manager.getBook('market-1');
       expect(book.getBestBid()?.price).toBe(0.61);
@@ -94,9 +130,21 @@ describe('Data Pipeline Integration', () => {
       });
 
       // Update order books
-      manager.updateBook('market-yes', [{ price: 0.5, size: 100 }], [{ price: 0.52, size: 100 }]);
+      manager.updateBook(
+        'market-yes',
+        [{ price: 0.5, size: 100 }],
+        [{ price: 0.52, size: 100 }],
+        undefined,
+        'snapshot'
+      );
 
-      manager.updateBook('market-no', [{ price: 0.4, size: 100 }], [{ price: 0.42, size: 100 }]);
+      manager.updateBook(
+        'market-no',
+        [{ price: 0.4, size: 100 }],
+        [{ price: 0.42, size: 100 }],
+        undefined,
+        'snapshot'
+      );
 
       // Update prices in detector
       detector.updatePrice('market-yes', 0.52);
@@ -230,9 +278,21 @@ describe('Data Pipeline Integration', () => {
       });
 
       // Simulate incoming data
-      manager.updateBook('yes-market', [{ price: 0.48, size: 1000 }], [{ price: 0.5, size: 1000 }]);
+      manager.updateBook(
+        'yes-market',
+        [{ price: 0.48, size: 1000 }],
+        [{ price: 0.5, size: 1000 }],
+        undefined,
+        'snapshot'
+      );
 
-      manager.updateBook('no-market', [{ price: 0.38, size: 1000 }], [{ price: 0.4, size: 1000 }]);
+      manager.updateBook(
+        'no-market',
+        [{ price: 0.38, size: 1000 }],
+        [{ price: 0.4, size: 1000 }],
+        undefined,
+        'snapshot'
+      );
 
       detector.updatePrice('yes-market', 0.555);
       detector.updatePrice('no-market', 0.405);
@@ -276,7 +336,9 @@ describe('Data Pipeline Integration', () => {
           { price: 0.61, size: 100 },
           { price: 0.62, size: 200 },
           { price: 0.63, size: 300 },
-        ]
+        ],
+        undefined,
+        'snapshot'
       );
 
       const book = manager.getBook('market-1');
@@ -295,7 +357,13 @@ describe('Data Pipeline Integration', () => {
     it('should calculate slippage correctly', () => {
       const manager = getOrderBookManager();
 
-      manager.updateBook('market-1', [{ price: 0.6, size: 1000 }], [{ price: 0.61, size: 1000 }]);
+      manager.updateBook(
+        'market-1',
+        [{ price: 0.6, size: 1000 }],
+        [{ price: 0.61, size: 1000 }],
+        undefined,
+        'snapshot'
+      );
 
       const book = manager.getBook('market-1');
 

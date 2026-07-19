@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getLogger } from '../utils/logger.js';
 import { getErrorMessage } from '../utils/errors.js';
+import { acquireFileLock } from '../utils/file-lock.js';
 
 export type CanaryTradeRecordStatus =
   | 'dry-run'
@@ -69,11 +70,11 @@ export class CanaryTradePersistence implements CanaryTradePersistencePort {
     }
 
     const lockPath = `${this.stateFilePath}.lock`;
-    let lock: number | undefined;
+    let lock: ReturnType<typeof acquireFileLock> | undefined;
     let tempPath: string | undefined;
     try {
       fs.mkdirSync(path.dirname(this.stateFilePath), { recursive: true, mode: 0o700 });
-      lock = fs.openSync(lockPath, 'wx', 0o600);
+      lock = acquireFileLock(lockPath);
       const records = this.loadRecords();
       const nextRecords = upsertRecord(records, record);
       tempPath = `${this.stateFilePath}.${String(process.pid)}.${String(Date.now())}.tmp`;
@@ -110,14 +111,7 @@ export class CanaryTradePersistence implements CanaryTradePersistencePort {
           // Preserve the persistence result.
         }
       }
-      if (lock !== undefined) {
-        fs.closeSync(lock);
-        try {
-          fs.unlinkSync(lockPath);
-        } catch {
-          // Preserve the persistence result.
-        }
-      }
+      lock?.release();
     }
   }
 

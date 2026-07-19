@@ -422,6 +422,56 @@ describe('IPSolver', () => {
   });
 
   describe('branch and bound edge cases', () => {
+    it('finds the true integer optimum with bound branching (OPT-2)', () => {
+      // min 3x - 3y - 2z
+      // s.t. 2x + 3y + 2z <= 7, 2x + 2y <= 6, x,y,z in {0..4}
+      // True optimum -7 at e.g. (2,1,2); point-fixing B&B wrongly returned -6.
+      const problem: IPProblem = {
+        objective: [3, -3, -2],
+        inequalityMatrix: [
+          [2, 3, 2],
+          [2, 2, 0],
+        ],
+        inequalityRhs: [7, 6],
+        lowerBounds: [0, 0, 0],
+        upperBounds: [4, 4, 4],
+        integerIndices: [0, 1, 2],
+      };
+
+      const result = solveIP(problem, { nodeLimit: 500, mipGap: 0 });
+
+      expect(result.status).toBe('optimal');
+      expect(result.integerFeasible).toBe(true);
+      expect(result.objectiveValue).toBeCloseTo(-7, 5);
+    });
+
+    it('reports infeasible when LP is feasible but no integer solution exists (OPT-3)', () => {
+      const problem: IPProblem = {
+        objective: [1],
+        equalityMatrix: [[1]],
+        equalityRhs: [0.5],
+        lowerBounds: [0],
+        upperBounds: [1],
+        integerIndices: [0],
+      };
+
+      const result = solveIP(problem, { nodeLimit: 50 });
+
+      expect(result.status).toBe('infeasible');
+      expect(result.optimal).toBe(false);
+      expect(result.integerFeasible).toBe(false);
+    });
+
+    it('checks binaryIndices even when integerIndices is also set (OPT-4)', () => {
+      expect(
+        isIntegerFeasible([0, 0.5], {
+          objective: [1, 1],
+          integerIndices: [0],
+          binaryIndices: [1],
+        })
+      ).toBe(false);
+    });
+
     it('should handle when all fractional variables are undefined', () => {
       // Create a problem where solution values might be undefined
       const problem: IPProblem = {

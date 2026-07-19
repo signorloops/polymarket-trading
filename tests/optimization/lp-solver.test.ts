@@ -47,6 +47,29 @@ describe('LPSolver', () => {
       expect(solution.solution[1]).toBeLessThanOrEqual(1);
     });
 
+    it('reports unbounded instead of optimal when the ray is open (OPT-1)', () => {
+      const solution = solveLP({
+        objective: [-1],
+        lowerBounds: [0],
+      });
+
+      expect(solution.status).toBe('unbounded');
+      expect(solution.optimal).toBe(false);
+    });
+
+    it('rejects non-finite inequality RHS instead of silently dropping it (OPT-5)', () => {
+      const solution = solveLP({
+        objective: [1],
+        inequalityMatrix: [[1]],
+        inequalityRhs: [NaN],
+        lowerBounds: [0],
+        upperBounds: [1],
+      });
+
+      expect(solution.optimal).toBe(false);
+      expect(solution.status).toBe('error');
+    });
+
     it('解决带不等式约束的LP问题', () => {
       const problem: LPProblem = {
         objective: [1, 1],

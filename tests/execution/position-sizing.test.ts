@@ -52,6 +52,53 @@ describe('Position Sizing', () => {
       expect(result.constraint).toBe('kelly');
     });
 
+    it('sizes sell legs with complementary win probability (EXEC-2)', () => {
+      // Outcome prob 0.75 at price 0.8 → sell; Kelly win probability must be 0.25.
+      const sellBook = new OrderBook('sell-market');
+      sellBook.update([{ price: 0.8, size: 100_000 }], [{ price: 0.81, size: 100_000 }]);
+
+      const wrongWinRate = calculatePositionSize({
+        probability: 0.75,
+        price: 0.8,
+        capital: 10_000,
+        orderBook: sellBook,
+        side: 'sell',
+      });
+      const correctWinRate = calculatePositionSize({
+        probability: 0.25,
+        price: 0.8,
+        capital: 10_000,
+        orderBook: sellBook,
+        side: 'sell',
+      });
+
+      expect(correctWinRate.size).toBeGreaterThan(0);
+      expect(correctWinRate.size).toBeLessThan(wrongWinRate.size);
+      // Handoff anchor: modified Kelly with p=0.25, b=4 is far below the old ~1000 cap.
+      expect(correctWinRate.size).toBeLessThan(500);
+
+      const multi = calculateMultiLegPositionSize([0.75], [0.8], 10_000, [sellBook]);
+      // Multi-leg must use 1-prob for the sell side (not outcome prob as win rate).
+      expect(multi.sizes[0]).toBeGreaterThan(0);
+    });
+
+    it('converts Kelly dollars to shares before liquidity checks (EXEC-3)', () => {
+      const book = new OrderBook('unit-market');
+      book.update([], [{ price: 0.1, size: 1_000_000 }]);
+
+      const result = calculatePositionSize({
+        probability: 0.5,
+        price: 0.1,
+        capital: 1000,
+        orderBook: book,
+        side: 'buy',
+      });
+
+      // size is in shares; notional = size * price should be ≤ capital.
+      expect(result.size * 0.1).toBeLessThanOrEqual(1000 + 1e-9);
+      expect(result.fraction).toBeLessThanOrEqual(1 + 1e-9);
+    });
+
     it('should throw for invalid probability', () => {
       const input = {
         probability: 1.5,

@@ -64,6 +64,22 @@ describe('Bregman Projection', () => {
       expect(group1).toBeCloseTo(1, 6);
       expect(group2).toBeCloseTo(1, 6);
     });
+
+    it('returns the I-projection of θ, not the max-entropy point (CORE-1)', () => {
+      const constraints = [{ coefficients: [1, 1], rhs: 1, type: 'equality' as const }];
+
+      const nearCorner = bregmanProjection([0.99, 0.01], constraints, 200, 1e-10);
+      expect(nearCorner.projection[0]).toBeCloseTo(0.99, 5);
+      expect(nearCorner.projection[1]).toBeCloseTo(0.01, 5);
+      expect(nearCorner.divergence).toBeCloseTo(0, 5);
+
+      const balanced = bregmanProjection([0.6, 0.4], constraints, 200, 1e-10);
+      expect(balanced.projection[0]).toBeCloseTo(0.6, 5);
+      expect(balanced.divergence).toBeCloseTo(0, 5);
+
+      // Different θ on the same constraint set must yield different projections.
+      expect(nearCorner.projection[0]).not.toBeCloseTo(balanced.projection[0]!, 2);
+    });
   });
 
   describe('klGradient', () => {

@@ -83,7 +83,7 @@ export function calculatePositionSize(input: PositionSizingInput): PositionSizin
     throw new Error('Capital must be non-negative');
   }
 
-  // Calculate Kelly fraction
+  // Calculate Kelly fraction. `probability` is the win probability for the chosen side.
   const b = side === 'buy' ? (1 - price) / price : price / (1 - price);
   const p = probability;
   const q = 1 - p;
@@ -117,18 +117,18 @@ export function calculatePositionSize(input: PositionSizingInput): PositionSizin
     };
   }
 
-  // Calculate raw position size
-  let size = adjustedFraction * capital;
+  // Kelly fraction · capital is dollars; convert to outcome-token shares (EXEC-3).
+  let size = (adjustedFraction * capital) / price;
   let constraint: PositionSizingResult['constraint'] = 'kelly';
 
-  // Apply maximum bet fraction limit
-  const maxBetSize = KELLY_CONFIG.MAX_BET_FRACTION * capital;
+  // Apply maximum bet fraction limit (dollars → shares)
+  const maxBetSize = (KELLY_CONFIG.MAX_BET_FRACTION * capital) / price;
   if (size > maxBetSize) {
     size = maxBetSize;
     constraint = 'max_bet';
   }
 
-  // Check liquidity constraints
+  // Check liquidity constraints (shares)
   const maxLiquiditySize = orderBook.getMaxExecutableSize(side);
   const liquidityLimit = maxLiquiditySize * TRADING_CONFIG.MAX_POSITION_PCT;
 
@@ -137,14 +137,14 @@ export function calculatePositionSize(input: PositionSizingInput): PositionSizin
     constraint = 'liquidity';
   }
 
-  // Check risk limits
-  const maxRiskSize = RISK_CONFIG.MAX_EXPOSURE * TRADING_CONFIG.MAX_POSITION_PCT;
+  // Check risk limits (dollars → shares)
+  const maxRiskSize = (RISK_CONFIG.MAX_EXPOSURE * TRADING_CONFIG.MAX_POSITION_PCT) / price;
   if (size > maxRiskSize) {
     size = maxRiskSize;
     constraint = 'risk';
   }
 
-  // Calculate expected value
+  // Expected value in dollars for `size` shares
   const expectedValue =
     side === 'buy'
       ? size * (probability * (1 - price) - (1 - probability) * price)
@@ -154,9 +154,10 @@ export function calculatePositionSize(input: PositionSizingInput): PositionSizin
   const variance = probability * (1 - probability);
   const riskAdjustedReturn = variance > 0 ? expectedValue / (size * Math.sqrt(variance)) : 0;
 
+  const notional = size * price;
   return {
     size,
-    fraction: size / capital,
+    fraction: capital > 0 ? notional / capital : 0,
     expectedValue,
     riskAdjustedReturn,
     constraint,
@@ -195,12 +196,17 @@ export function calculateMultiLegPositionSize(
       continue;
     }
 
+    // Outcome probability vs ask/bid mid: buy when undervalued, sell when overvalued.
+    // For sell legs, Kelly win probability is 1 - outcomeProb (EXEC-2).
+    const side = prob > price ? 'buy' : 'sell';
+    const winProbability = side === 'buy' ? prob : 1 - prob;
+
     const result = calculatePositionSize({
-      probability: prob,
+      probability: winProbability,
       price: price,
       capital: capital / n, // Split capital equally
       orderBook: orderBook,
-      side: prob > price ? 'buy' : 'sell',
+      side,
     });
 
     sizes[i] = result.size;

@@ -79,6 +79,17 @@ export function solveLP(problem: LPProblem, options: LPSolverOptions = {}): LPSo
       };
     }
 
+    // javascript-lp-solver reports unbounded as feasible:true, bounded:false with
+    // a non-finite result. Treat that as unbounded instead of "optimal" (OPT-1).
+    if (raw.bounded === false || !Number.isFinite(Number(raw.result))) {
+      return {
+        solution: Array<number>(n).fill(0),
+        objectiveValue: Infinity,
+        optimal: false,
+        status: 'unbounded',
+      };
+    }
+
     const solution = variableNames.map((name) => {
       const val = raw[name];
       return Number.isFinite(val as number) ? Number(val) : 0;

@@ -470,6 +470,46 @@ describe('ExecutionEngine', () => {
       engine.stop();
     });
 
+    it('should not trip the circuit breaker when risk limits reject an order (EXEC-1)', async () => {
+      const mockPlaceOrder = jest.fn().mockResolvedValue({
+        id: 'should-not-be-called',
+        marketId: 'test-market',
+        side: 'buy',
+        size: 100,
+        price: 0.6,
+        status: 'filled',
+        filledSize: 100,
+        remainingSize: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      const mockClient = {
+        placeOrder: mockPlaceOrder,
+      } as unknown as PolymarketClient;
+
+      const riskManager = new RiskManager({ maxExposure: 1 });
+      const engine = new ExecutionEngine(new OrderManager(), mockClient, riskManager);
+
+      const order: TradeOrder = {
+        id: 'order-risk-blocked',
+        marketId: 'test-market',
+        side: 'buy',
+        size: 100,
+        price: 0.6,
+        orderType: 'limit',
+      };
+
+      const result = await engine.executeOrder(order);
+
+      expect(result.status).toBe('error');
+      expect(result.error).toMatch(/Order blocked by risk manager/);
+      expect(mockPlaceOrder).not.toHaveBeenCalled();
+      expect(riskManager.isCircuitBreakerActive()).toBe(false);
+
+      engine.stop();
+    });
+
     it('should handle partial fill from API client', async () => {
       const mockPlaceOrder = jest.fn().mockResolvedValue({
         id: 'api-order-partial',

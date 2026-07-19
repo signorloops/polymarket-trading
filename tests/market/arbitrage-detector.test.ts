@@ -490,8 +490,8 @@ describe('ArbitrageDetector', () => {
       });
 
       const manager = getOrderBookManager();
-      manager.updateBook('event-a-yes', [], [{ price: 0.4, size: 10 }]);
-      manager.updateBook('event-b-no', [], [{ price: 0.5, size: 10 }]);
+      manager.updateBook('event-a-yes', [], [{ price: 0.4, size: 10 }], undefined, 'snapshot');
+      manager.updateBook('event-b-no', [], [{ price: 0.5, size: 10 }], undefined, 'snapshot');
       const orderBooks = new Map([
         ['event-a-yes', manager.getBook('event-a-yes')],
         ['event-b-no', manager.getBook('event-b-no')],
@@ -539,8 +539,20 @@ describe('ArbitrageDetector', () => {
       const manager = getOrderBookManager();
 
       // Setup order books
-      manager.updateBook('market-1', [{ price: 0.6, size: 5000 }], [{ price: 0.61, size: 5000 }]);
-      manager.updateBook('market-2', [{ price: 0.4, size: 5000 }], [{ price: 0.41, size: 5000 }]);
+      manager.updateBook(
+        'market-1',
+        [{ price: 0.6, size: 5000 }],
+        [{ price: 0.61, size: 5000 }],
+        undefined,
+        'snapshot'
+      );
+      manager.updateBook(
+        'market-2',
+        [{ price: 0.4, size: 5000 }],
+        [{ price: 0.41, size: 5000 }],
+        undefined,
+        'snapshot'
+      );
 
       const orderBooks = new Map();
       orderBooks.set('market-1', manager.getBook('market-1'));
@@ -569,8 +581,20 @@ describe('ArbitrageDetector', () => {
       const manager = getOrderBookManager();
 
       // Setup order books with low liquidity
-      manager.updateBook('market-1', [{ price: 0.6, size: 100 }], [{ price: 0.61, size: 100 }]);
-      manager.updateBook('market-2', [{ price: 0.4, size: 100 }], [{ price: 0.41, size: 100 }]);
+      manager.updateBook(
+        'market-1',
+        [{ price: 0.6, size: 100 }],
+        [{ price: 0.61, size: 100 }],
+        undefined,
+        'snapshot'
+      );
+      manager.updateBook(
+        'market-2',
+        [{ price: 0.4, size: 100 }],
+        [{ price: 0.41, size: 100 }],
+        undefined,
+        'snapshot'
+      );
 
       const orderBooks = new Map();
       orderBooks.set('market-1', manager.getBook('market-1'));
@@ -623,7 +647,7 @@ describe('ArbitrageDetector', () => {
       const manager = getOrderBookManager();
 
       // Setup empty order book (no bids/asks)
-      manager.updateBook('market-1', [], []);
+      manager.updateBook('market-1', [], [], undefined, 'snapshot');
 
       const orderBooks = new Map();
       orderBooks.set('market-1', manager.getBook('market-1'));

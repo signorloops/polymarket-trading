@@ -217,10 +217,59 @@ describe('OrderBookManager', () => {
     it('should update existing book', () => {
       const manager = getOrderBookManager();
 
-      manager.updateBook('market-1', [{ price: 0.6, size: 100 }], [{ price: 0.7, size: 150 }]);
+      manager.updateBook(
+        'market-1',
+        [{ price: 0.6, size: 100 }],
+        [{ price: 0.7, size: 150 }],
+        undefined,
+        'snapshot'
+      );
 
       const book = manager.getBook('market-1');
       expect(book.getBestBid()).toEqual({ price: 0.6, size: 100 });
+    });
+
+    it('ignores deltas until a snapshot arrives (MKT-1)', () => {
+      const manager = getOrderBookManager();
+
+      manager.updateBook(
+        'market-1',
+        [{ price: 0.55, size: 10 }],
+        [{ price: 0.65, size: 10 }],
+        Date.now(),
+        'delta'
+      );
+      expect(manager.peekBook('market-1')).toBeUndefined();
+      expect(manager.isSynced('market-1')).toBe(false);
+
+      manager.updateBook(
+        'market-1',
+        [{ price: 0.6, size: 100 }],
+        [{ price: 0.7, size: 100 }],
+        Date.now(),
+        'snapshot'
+      );
+      expect(manager.isSynced('market-1')).toBe(true);
+      expect(manager.peekBook('market-1')?.getBestBid()).toEqual({ price: 0.6, size: 100 });
+
+      manager.updateBook('market-1', [{ price: 0.61, size: 50 }], [], Date.now(), 'delta');
+      expect(manager.peekBook('market-1')?.getBestBid()).toEqual({ price: 0.61, size: 50 });
+    });
+
+    it('invalidates synced books so post-disconnect deltas cannot refresh stale depth', () => {
+      const manager = getOrderBookManager();
+      manager.updateBook(
+        'market-1',
+        [{ price: 0.6, size: 100 }],
+        [{ price: 0.7, size: 100 }],
+        Date.now() - 60_000,
+        'snapshot'
+      );
+      manager.invalidateAll('test disconnect');
+      expect(manager.peekBook('market-1')).toBeUndefined();
+
+      manager.updateBook('market-1', [{ price: 0.99, size: 1 }], [], Date.now(), 'delta');
+      expect(manager.peekBook('market-1')).toBeUndefined();
     });
   });
 
@@ -228,8 +277,20 @@ describe('OrderBookManager', () => {
     it('should return all books', () => {
       const manager = getOrderBookManager();
 
-      manager.getBook('market-1');
-      manager.getBook('market-2');
+      manager.updateBook(
+        'market-1',
+        [{ price: 0.5, size: 1 }],
+        [{ price: 0.6, size: 1 }],
+        undefined,
+        'snapshot'
+      );
+      manager.updateBook(
+        'market-2',
+        [{ price: 0.4, size: 1 }],
+        [{ price: 0.5, size: 1 }],
+        undefined,
+        'snapshot'
+      );
 
       expect(manager.getAllBooks()).toHaveLength(2);
     });

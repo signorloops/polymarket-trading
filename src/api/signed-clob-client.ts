@@ -305,7 +305,8 @@ export class SignedClobTradingClient implements TradingBalanceClient, HeartbeatT
     }
     const size = parsePositiveDecimal(response.original_size, 'original_size');
     const filledSize = parseNonNegativeDecimal(response.size_matched, 'size_matched');
-    const price = parsePositiveDecimal(response.price, 'price');
+    // Market orders may report price 0; reject only prices outside [0, 1) (API-2).
+    const price = parseNonNegativeDecimal(response.price, 'price');
     if (price >= 1 || filledSize > size + 1e-8) {
       throw new Error('Signed CLOB order response contains inconsistent size or price values');
     }
@@ -429,7 +430,13 @@ export class SignedClobTradingClient implements TradingBalanceClient, HeartbeatT
   }
 
   private async ensureStartupJournalSafe(): Promise<void> {
-    this.startupReconciliation ??= this.reconcileStartupJournal();
+    // Cache only successful reconciliation. A rejected Promise must not permanently
+    // lock placeOrder after a transient parse/lookup failure (API-2); true journal
+    // ambiguity still fails closed on every attempt until the operator cleans it.
+    this.startupReconciliation ??= this.reconcileStartupJournal().catch((error: unknown) => {
+      this.startupReconciliation = undefined;
+      throw error;
+    });
     return this.startupReconciliation;
   }
 

@@ -119,28 +119,39 @@ export class ExecutionEngine {
 
     let reserved = false;
 
-    try {
-      if (this.apiClient && !compensatingRecovery) {
-        const reservation = {
-          marketId: order.marketId,
-          size: order.size,
-          side: order.side,
-          estimatedNotional: order.size * order.price,
-        };
-        const riskCheck = this.riskManager.checkTrades([
-          ...this.riskReservations.values(),
-          reservation,
-        ]);
-        if (!riskCheck.allowed) {
-          throw new Error(`Order blocked by risk manager: ${riskCheck.reason ?? 'unknown reason'}`);
-        }
-        if (this.riskReservations.has(order.id)) {
-          throw new Error(`Duplicate in-flight order id: ${order.id}`);
-        }
-        this.riskReservations.set(order.id, reservation);
-        reserved = true;
+    // Pre-submission gates (risk limits, duplicate ids) must return error status
+    // without tripping the global circuit breaker — only ambiguous post-submit
+    // failures warrant a trading halt (EXEC-1).
+    if (this.apiClient && !compensatingRecovery) {
+      const reservation = {
+        marketId: order.marketId,
+        size: order.size,
+        side: order.side,
+        estimatedNotional: order.size * order.price,
+      };
+      const riskCheck = this.riskManager.checkTrades([
+        ...this.riskReservations.values(),
+        reservation,
+      ]);
+      if (!riskCheck.allowed) {
+        return this.buildPreSubmissionError(
+          order,
+          `Order blocked by risk manager: ${riskCheck.reason ?? 'unknown reason'}`,
+          startTime
+        );
       }
+      if (this.riskReservations.has(order.id)) {
+        return this.buildPreSubmissionError(
+          order,
+          `Duplicate in-flight order id: ${order.id}`,
+          startTime
+        );
+      }
+      this.riskReservations.set(order.id, reservation);
+      reserved = true;
+    }
 
+    try {
       this.orderManager.addPending(order);
       const status = await this.submitOrder(order, compensatingRecovery);
       const executionTime = performance.now() - startTime;
@@ -190,6 +201,26 @@ export class ExecutionEngine {
     } finally {
       if (reserved) this.riskReservations.delete(order.id);
     }
+  }
+
+  private buildPreSubmissionError(
+    order: TradeOrder,
+    error: string,
+    startTime: number
+  ): OrderStatus {
+    const errorStatus: OrderStatus = {
+      orderId: order.id,
+      status: 'error',
+      filledSize: 0,
+      remainingSize: order.size,
+      avgPrice: 0,
+      timestamp: Date.now(),
+      error,
+    };
+    this.orderManager.updateStatus(errorStatus);
+    recordOrderMetrics(order, errorStatus, performance.now() - startTime);
+    this.logger.warn(`Order ${order.id} rejected before submission`, { error });
+    return errorStatus;
   }
 
   /**

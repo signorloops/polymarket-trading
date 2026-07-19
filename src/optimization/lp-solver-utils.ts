@@ -31,16 +31,41 @@ export interface SolverResult {
 export function validateProblem(problem: LPProblem): void {
   const n = problem.objective.length;
 
+  for (let i = 0; i < n; i++) {
+    if (!Number.isFinite(problem.objective[i])) {
+      throw new Error(`Objective coefficient ${String(i)} is not finite`);
+    }
+  }
+
   if (problem.inequalityMatrix) {
     for (const row of problem.inequalityMatrix) {
       if (row.length !== n) throw new Error('Inequality matrix dimension mismatch');
+      for (const value of row) {
+        if (!Number.isFinite(value))
+          throw new Error('Inequality matrix contains non-finite values');
+      }
     }
   }
 
   if (problem.equalityMatrix) {
     for (const row of problem.equalityMatrix) {
       if (row.length !== n) throw new Error('Equality matrix dimension mismatch');
+      for (const value of row) {
+        if (!Number.isFinite(value)) throw new Error('Equality matrix contains non-finite values');
+      }
     }
+  }
+
+  const hasIneqMatrix = Boolean(problem.inequalityMatrix?.length);
+  const hasIneqRhs = Boolean(problem.inequalityRhs?.length);
+  if (hasIneqMatrix !== hasIneqRhs) {
+    throw new Error('Inequality matrix and RHS must both be provided together');
+  }
+
+  const hasEqMatrix = Boolean(problem.equalityMatrix?.length);
+  const hasEqRhs = Boolean(problem.equalityRhs?.length);
+  if (hasEqMatrix !== hasEqRhs) {
+    throw new Error('Equality matrix and RHS must both be provided together');
   }
 
   if (
@@ -59,10 +84,36 @@ export function validateProblem(problem: LPProblem): void {
     throw new Error('Equality RHS dimension mismatch');
   }
 
+  if (problem.inequalityRhs) {
+    for (const rhs of problem.inequalityRhs) {
+      if (!Number.isFinite(rhs)) throw new Error('Inequality RHS contains non-finite values');
+    }
+  }
+  if (problem.equalityRhs) {
+    for (const rhs of problem.equalityRhs) {
+      if (!Number.isFinite(rhs)) throw new Error('Equality RHS contains non-finite values');
+    }
+  }
+
   if (problem.lowerBounds && problem.lowerBounds.length !== n)
     throw new Error('Lower bounds dimension mismatch');
   if (problem.upperBounds && problem.upperBounds.length !== n)
     throw new Error('Upper bounds dimension mismatch');
+
+  if (problem.lowerBounds) {
+    for (const bound of problem.lowerBounds) {
+      if (!Number.isFinite(bound) && bound !== -Infinity) {
+        throw new Error('Lower bounds contain non-finite values');
+      }
+    }
+  }
+  if (problem.upperBounds) {
+    for (const bound of problem.upperBounds) {
+      if (!Number.isFinite(bound) && bound !== Infinity) {
+        throw new Error('Upper bounds contain non-finite values');
+      }
+    }
+  }
 }
 
 function addConstraint(
@@ -73,7 +124,9 @@ function addConstraint(
   value: number,
   coefficient: number
 ): void {
-  if (!Number.isFinite(value)) return;
+  if (!Number.isFinite(value)) {
+    throw new Error(`Constraint ${name} has a non-finite RHS`);
+  }
   model.constraints[name] ??= {};
   model.constraints[name][type] = value;
   variable[name] = coefficient;
@@ -113,8 +166,12 @@ export function buildSolverModel(
 
     const variable = model.variables[varName];
     if (!variable) continue;
-    addConstraint(model, variable, `lb_${String(i)}`, 'min', lb, 1);
-    if (ub !== undefined) addConstraint(model, variable, `ub_${String(i)}`, 'max', ub, 1);
+    if (Number.isFinite(lb)) {
+      addConstraint(model, variable, `lb_${String(i)}`, 'min', lb, 1);
+    }
+    if (ub !== undefined && Number.isFinite(ub)) {
+      addConstraint(model, variable, `ub_${String(i)}`, 'max', ub, 1);
+    }
   }
 
   if (Object.keys(unrestricted).length > 0) model.unrestricted = unrestricted;

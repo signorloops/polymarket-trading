@@ -30,7 +30,8 @@ export interface WsOrderBookUpdate {
 export type WsMessage =
   | { type: 'trade'; data: WsTrade }
   | { type: 'orderbook'; data: WsOrderBookUpdate }
-  | { type: 'price'; data: { marketId: string; price: string; timestamp: string } };
+  | { type: 'price'; data: { marketId: string; price: string; timestamp: string } }
+  | { type: 'reconnect_exhausted'; attempts: number };
 
 type WsHandler = (message: WsMessage) => void;
 
@@ -49,6 +50,7 @@ export class PolymarketWebSocketClient {
   private isManualClose = false;
   private subscribedMarkets: Set<string> = new Set();
   private lastPongAt = 0;
+  private reconnectExhausted = false;
   private logger = getLogger().child({ module: 'PolymarketWebSocket' });
 
   constructor(url?: string, _apiKey?: string) {
@@ -65,6 +67,7 @@ export class PolymarketWebSocketClient {
     }
 
     this.isManualClose = false;
+    this.reconnectExhausted = false;
     this.logger.info('Connecting to Polymarket WebSocket', { url: this.url });
 
     try {
@@ -118,6 +121,23 @@ export class PolymarketWebSocketClient {
     return this.ws?.readyState === WebSocket.OPEN;
   }
 
+  /** True after reconnect attempts are exhausted until resetReconnect()/connect(). */
+  isReconnectExhausted(): boolean {
+    return this.reconnectExhausted;
+  }
+
+  /**
+   * Clear the exhausted state and allow a fresh reconnect sequence (API-1).
+   * Call after operator intervention or orchestration restart.
+   */
+  resetReconnect(): void {
+    this.reconnectExhausted = false;
+    this.reconnectAttempts = 0;
+    if (!this.isManualClose && !this.isConnected()) {
+      this.connect();
+    }
+  }
+
   private setupEventHandlers(): void {
     if (!this.ws) return;
     const currentWs = this.ws;
@@ -128,6 +148,7 @@ export class PolymarketWebSocketClient {
       }
       this.logger.info('WebSocket connected');
       this.reconnectAttempts = 0;
+      this.reconnectExhausted = false;
       this.lastPongAt = Date.now();
       this.startHeartbeat();
 
@@ -352,7 +373,12 @@ export class PolymarketWebSocketClient {
     }
 
     if (this.reconnectAttempts >= NETWORK_CONFIG.MAX_RECONNECT_ATTEMPTS) {
+      this.reconnectExhausted = true;
       this.logger.error('Max reconnection attempts reached');
+      this.emit({
+        type: 'reconnect_exhausted',
+        attempts: this.reconnectAttempts,
+      });
       return;
     }
 
