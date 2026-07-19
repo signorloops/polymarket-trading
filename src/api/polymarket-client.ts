@@ -6,10 +6,20 @@
  * and must use the signed CLOB V2 adapter.
  */
 
-import axios, { AxiosInstance, AxiosError } from 'axios';
+import axios, {
+  AxiosInstance,
+  AxiosError,
+  type AxiosRequestConfig,
+  type InternalAxiosRequestConfig,
+} from 'axios';
 import { getLogger } from '../utils/logger.js';
 import { NETWORK_CONFIG } from '../utils/config.js';
 import { createSingleton } from '../utils/singleton.js';
+
+const MAX_RETRY_ATTEMPTS = 3;
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503]);
+
+type RetryAxiosConfig = InternalAxiosRequestConfig & { __retryCount?: number };
 
 export interface PolymarketMarket {
   id: string;
@@ -124,7 +134,7 @@ export class PolymarketClient {
       }
     );
 
-    // Response interceptor
+    // Response interceptor — retry idempotent GETs on 429/5xx before failing (API-7).
     this.client.interceptors.response.use(
       (response) => {
         this.logger.debug(
@@ -132,11 +142,54 @@ export class PolymarketClient {
         );
         return response;
       },
-      (error: AxiosError) => {
+      async (error: AxiosError) => {
+        const config = error.config as RetryAxiosConfig | undefined;
+        if (config && this.shouldRetryRequest(error, config)) {
+          config.__retryCount = (config.__retryCount ?? 0) + 1;
+          const delayMs = this.retryDelayMs(error, config.__retryCount);
+          this.logger.warn('Retrying Polymarket REST request', {
+            url: config.url,
+            status: error.response?.status,
+            attempt: config.__retryCount,
+            delayMs,
+          });
+          await sleep(delayMs);
+          return this.client.request(config as AxiosRequestConfig);
+        }
         this.handleApiError(error);
         return Promise.reject(error);
       }
     );
+  }
+
+  private shouldRetryRequest(error: AxiosError, config: RetryAxiosConfig): boolean {
+    const method = (config.method ?? 'get').toLowerCase();
+    if (method !== 'get' && method !== 'head') return false;
+    const attempt = config.__retryCount ?? 0;
+    if (attempt >= MAX_RETRY_ATTEMPTS) return false;
+    const status = error.response?.status;
+    if (status !== undefined) return RETRYABLE_STATUS.has(status);
+    // Transient network failures (no response) are also worth a bounded retry.
+    return Boolean(error.request) && !error.response;
+  }
+
+  private retryDelayMs(error: AxiosError, attempt: number): number {
+    const headers = error.response?.headers as Record<string, unknown> | undefined;
+    const rawHeader = headers?.['retry-after'] ?? headers?.['Retry-After'];
+    const header = typeof rawHeader === 'string' ? rawHeader : undefined;
+    if (header !== undefined && header.trim() !== '') {
+      const asSeconds = Number(header);
+      if (Number.isFinite(asSeconds) && asSeconds >= 0) {
+        return Math.min(Math.floor(asSeconds * 1000), 30_000);
+      }
+      const asDate = Date.parse(header);
+      if (Number.isFinite(asDate)) {
+        return Math.min(Math.max(0, asDate - Date.now()), 30_000);
+      }
+    }
+    // Full-jitter exponential backoff: base 200ms · 2^(attempt-1)
+    const base = 200 * 2 ** Math.max(0, attempt - 1);
+    return Math.floor(Math.min(base, 8_000) * (0.5 + Math.random() * 0.5));
   }
 
   private handleApiError(error: AxiosError): void {
@@ -356,6 +409,15 @@ export class PolymarketClient {
 }
 
 // Singleton instance
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    if (typeof timer.unref === 'function') {
+      timer.unref();
+    }
+  });
+}
+
 const polymarketClientSingleton = createSingleton(() => new PolymarketClient());
 
 export function getPolymarketClient(_apiKey?: string): PolymarketClient {

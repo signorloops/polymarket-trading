@@ -162,14 +162,15 @@ export const TradingMetrics = {
  * Record a trade execution
  */
 export function recordTrade(
-  marketId: string,
+  _marketId: string,
   side: 'buy' | 'sell',
   _size: number,
   _price: number,
   executionTimeMs: number,
   success: boolean
 ): void {
-  const labels = { market_id: marketId, side };
+  // Drop per-market labels — token ids are unbounded cardinality (INFRA-6).
+  const labels = { side };
 
   TradingMetrics.ordersSubmitted.inc(labels);
   TradingMetrics.orderExecutionTime.observe(labels, executionTimeMs / 1000);
@@ -185,20 +186,21 @@ export function recordTrade(
  * Record arbitrage opportunity and execution
  */
 export function recordArbitrage(
-  eventId: string,
+  _eventId: string,
   _profitEstimate: number,
   executed: boolean,
   actualProfit?: number
 ): void {
-  TradingMetrics.arbitrageOpportunitiesFound.inc({ event_id: eventId });
+  // Aggregate without event_id labels to bound time-series growth (INFRA-6).
+  TradingMetrics.arbitrageOpportunitiesFound.inc({});
 
   if (executed) {
-    TradingMetrics.arbitrageExecuted.inc({ event_id: eventId });
+    TradingMetrics.arbitrageExecuted.inc({});
     if (actualProfit !== undefined && actualProfit > 0) {
-      TradingMetrics.arbitrageProfit.inc({ event_id: eventId }, actualProfit);
+      TradingMetrics.arbitrageProfit.inc({}, actualProfit);
     }
   } else {
-    TradingMetrics.arbitrageFailed.inc({ event_id: eventId });
+    TradingMetrics.arbitrageFailed.inc({});
   }
 }
 

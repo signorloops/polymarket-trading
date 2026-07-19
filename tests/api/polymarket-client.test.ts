@@ -15,6 +15,7 @@ const mockAxiosInstance = {
   get: jest.fn(),
   post: jest.fn(),
   delete: jest.fn(),
+  request: jest.fn(),
   interceptors: {
     request: { use: jest.fn().mockReturnValue(0), eject: jest.fn() },
     response: { use: jest.fn().mockReturnValue(0), eject: jest.fn() },
@@ -106,6 +107,7 @@ describe('PolymarketClient', () => {
     mockAxiosInstance.get.mockReset();
     mockAxiosInstance.post.mockReset();
     mockAxiosInstance.delete.mockReset();
+    mockAxiosInstance.request.mockReset();
     mockAxiosInstance.interceptors.request.use.mockClear();
     mockAxiosInstance.interceptors.response.use.mockClear();
 
@@ -495,82 +497,117 @@ describe('PolymarketClient', () => {
   });
 
   describe('error handling', () => {
-    const createAxiosError = (status: number, data?: unknown): AxiosError => {
+    const createAxiosError = (
+      status: number,
+      data?: unknown,
+      extras: { retryCount?: number; method?: string; retryAfter?: string } = {}
+    ): AxiosError => {
       const error = new Error(`Request failed with status code ${status}`) as AxiosError;
+      const config = {
+        url: '/test',
+        method: extras.method ?? 'get',
+        // Exhaust retries by default so unit tests hit the final error path.
+        __retryCount: extras.retryCount ?? 3,
+      } as InternalAxiosRequestConfig & { __retryCount?: number };
       error.response = {
         status,
         data,
-        headers: {},
-        config: { url: '/test' } as InternalAxiosRequestConfig,
+        headers: extras.retryAfter ? { 'retry-after': extras.retryAfter } : {},
+        config,
       };
-      error.config = { url: '/test' } as InternalAxiosRequestConfig;
+      error.config = config;
       return error;
     };
 
-    it('should throw authentication error on 401', () => {
+    it('should throw authentication error on 401', async () => {
       const error = createAxiosError(401);
       const errorHandler = mockAxiosInstance.interceptors.response.use.mock.calls[0][1];
 
-      expect(() => errorHandler(error)).toThrow('Authentication failed: Invalid API key');
+      await expect(errorHandler(error)).rejects.toThrow('Authentication failed: Invalid API key');
     });
 
-    it('should throw authorization error on 403', () => {
+    it('should throw authorization error on 403', async () => {
       const error = createAxiosError(403);
       const errorHandler = mockAxiosInstance.interceptors.response.use.mock.calls[0][1];
 
-      expect(() => errorHandler(error)).toThrow('Authorization failed: Insufficient permissions');
+      await expect(errorHandler(error)).rejects.toThrow(
+        'Authorization failed: Insufficient permissions'
+      );
     });
 
-    it('should throw rate limit error on 429', () => {
+    it('should throw rate limit error on 429 after retries are exhausted', async () => {
       const error = createAxiosError(429);
       const errorHandler = mockAxiosInstance.interceptors.response.use.mock.calls[0][1];
 
-      expect(() => errorHandler(error)).toThrow('Rate limit exceeded');
+      await expect(errorHandler(error)).rejects.toThrow('Rate limit exceeded');
     });
 
-    it('should throw service unavailable error on 500', () => {
+    it('retries GET requests on 429 before failing (API-7)', async () => {
+      jest.spyOn(Math, 'random').mockReturnValue(1);
+      const error = createAxiosError(429, undefined, { retryCount: 0 });
+      const errorHandler = mockAxiosInstance.interceptors.response.use.mock.calls[0][1];
+      mockAxiosInstance.request.mockResolvedValueOnce({ data: { ok: true }, status: 200 });
+
+      await expect(errorHandler(error)).resolves.toEqual({ data: { ok: true }, status: 200 });
+      expect(mockAxiosInstance.request).toHaveBeenCalledTimes(1);
+    });
+
+    it('should throw service unavailable error on 500', async () => {
       const error = createAxiosError(500);
       const errorHandler = mockAxiosInstance.interceptors.response.use.mock.calls[0][1];
 
-      expect(() => errorHandler(error)).toThrow('Polymarket API is temporarily unavailable');
+      await expect(errorHandler(error)).rejects.toThrow(
+        'Polymarket API is temporarily unavailable'
+      );
     });
 
-    it('should throw service unavailable error on 502', () => {
+    it('should throw service unavailable error on 502', async () => {
       const error = createAxiosError(502);
       const errorHandler = mockAxiosInstance.interceptors.response.use.mock.calls[0][1];
 
-      expect(() => errorHandler(error)).toThrow('Polymarket API is temporarily unavailable');
+      await expect(errorHandler(error)).rejects.toThrow(
+        'Polymarket API is temporarily unavailable'
+      );
     });
 
-    it('should throw service unavailable error on 503', () => {
+    it('should throw service unavailable error on 503', async () => {
       const error = createAxiosError(503);
       const errorHandler = mockAxiosInstance.interceptors.response.use.mock.calls[0][1];
 
-      expect(() => errorHandler(error)).toThrow('Polymarket API is temporarily unavailable');
+      await expect(errorHandler(error)).rejects.toThrow(
+        'Polymarket API is temporarily unavailable'
+      );
     });
 
-    it('should throw generic error for other status codes', () => {
+    it('should throw generic error for other status codes', async () => {
       const error = createAxiosError(400, { message: 'Bad request' });
       const errorHandler = mockAxiosInstance.interceptors.response.use.mock.calls[0][1];
 
-      expect(() => errorHandler(error)).toThrow('API Error: 400');
+      await expect(errorHandler(error)).rejects.toThrow('API Error: 400');
     });
 
-    it('should throw network error when no response', () => {
+    it('should throw network error when no response', async () => {
       const error = new Error('Network Error') as AxiosError;
       error.request = {};
       error.message = 'Network Error';
+      error.config = {
+        url: '/test',
+        method: 'get',
+        __retryCount: 3,
+      } as InternalAxiosRequestConfig & { __retryCount?: number };
       const errorHandler = mockAxiosInstance.interceptors.response.use.mock.calls[0][1];
 
-      expect(() => errorHandler(error)).toThrow('Network error: Unable to reach Polymarket API');
+      await expect(errorHandler(error)).rejects.toThrow(
+        'Network error: Unable to reach Polymarket API'
+      );
     });
 
-    it('should rethrow request setup errors', () => {
+    it('should rethrow request setup errors', async () => {
       const error = new Error('Request setup failed') as AxiosError;
       error.message = 'Request setup failed';
       const errorHandler = mockAxiosInstance.interceptors.response.use.mock.calls[0][1];
 
-      expect(() => errorHandler(error)).toThrow('Request setup failed');
+      await expect(errorHandler(error)).rejects.toThrow('Request setup failed');
     });
   });
 

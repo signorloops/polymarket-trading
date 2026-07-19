@@ -359,8 +359,9 @@ export class DataPipeline {
 
       // Record order book update metrics
       const processingTime = performance.now() - processStartTime;
-      TradingMetrics.orderBookUpdateLatency.observe({ market_id: marketId }, processingTime);
-      TradingMetrics.orderBookUpdates.inc({ market_id: marketId });
+      // Aggregate without market_id — token ids are unbounded cardinality (INFRA-6).
+      TradingMetrics.orderBookUpdateLatency.observe({}, processingTime);
+      TradingMetrics.orderBookUpdates.inc({});
     }
   }
 

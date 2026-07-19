@@ -315,24 +315,25 @@ export class AnomalyDetector {
       const zScore = Math.abs(order.size - mean) / (stdDev || 1);
       if (zScore > 3) {
         reasons.push(`Size ${order.size.toString()} is ${zScore.toFixed(1)} std dev from mean`);
-        riskScore += 30;
+        // Strong single-signal weight so one clear anomaly can trip the gate (INFRA-8).
+        riskScore += 40;
       }
     }
 
     // Check for unusual price
     if (order.price < 0.01 || order.price > 0.99) {
       reasons.push(`Extreme price: ${order.price.toString()}`);
-      riskScore += 20;
+      riskScore += 40;
     }
 
     // Check large orders
     if (order.size > 10000) {
       reasons.push(`Large order size: ${order.size.toString()}`);
-      riskScore += 25;
+      riskScore += 40;
     }
 
     return {
-      isAnomalous: riskScore > 50,
+      isAnomalous: riskScore >= 40,
       riskScore,
       reasons,
     };

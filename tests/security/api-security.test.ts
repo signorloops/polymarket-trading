@@ -259,13 +259,13 @@ describe('AnomalyDetector', () => {
         id: 'order-11',
         marketId: 'market-1',
         side: 'buy',
-        size: 105,
+        size: 100,
         price: 0.51,
         orderType: 'limit',
       });
 
       expect(result.isAnomalous).toBe(false);
-      expect(result.riskScore).toBeLessThan(50);
+      expect(result.riskScore).toBeLessThan(40);
     });
 
     it('should flag extreme size trades', () => {
@@ -292,11 +292,11 @@ describe('AnomalyDetector', () => {
       });
 
       expect(result.isAnomalous).toBe(true);
-      expect(result.riskScore).toBeGreaterThan(50);
+      expect(result.riskScore).toBeGreaterThanOrEqual(40);
       expect(result.reasons.length).toBeGreaterThan(0);
     });
 
-    it('should flag extreme prices', () => {
+    it('should flag extreme prices as anomalous on a single signal (INFRA-8)', () => {
       const result = detector.checkAnomaly({
         id: 'order-1',
         marketId: 'market-1',
@@ -306,11 +306,12 @@ describe('AnomalyDetector', () => {
         orderType: 'limit',
       });
 
-      expect(result.riskScore).toBeGreaterThan(0);
+      expect(result.isAnomalous).toBe(true);
+      expect(result.riskScore).toBeGreaterThanOrEqual(40);
       expect(result.reasons.some((r) => r.includes('Extreme price'))).toBe(true);
     });
 
-    it('should flag large orders', () => {
+    it('should flag large orders as anomalous on a single signal (INFRA-8)', () => {
       const result = detector.checkAnomaly({
         id: 'order-1',
         marketId: 'market-1',
@@ -320,6 +321,7 @@ describe('AnomalyDetector', () => {
         orderType: 'limit',
       });
 
+      expect(result.isAnomalous).toBe(true);
       expect(result.reasons.some((r) => r.includes('Large order'))).toBe(true);
     });
   });
@@ -346,8 +348,9 @@ describe('AnomalyDetector', () => {
         orderType: 'limit',
       });
 
-      // Should not have std dev calculation
-      expect(result.riskScore).toBeLessThan(50);
+      // No history → no z-score; size == 10000 is not > 10000
+      expect(result.isAnomalous).toBe(false);
+      expect(result.riskScore).toBeLessThan(40);
     });
   });
 });

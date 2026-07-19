@@ -372,7 +372,20 @@ export class PolymarketUserWebSocketClient {
         this.logger.warn('Ignored unknown authenticated user-channel event');
         return;
       }
-      if (event.type === 'order') this.lastOrderUpdates.set(event.data.orderId, event.data);
+      if (event.type === 'order') {
+        this.lastOrderUpdates.set(event.data.orderId, event.data);
+        // Bound memory: drop oldest entries when the cache grows (API-6).
+        const MAX_CACHED_ORDER_UPDATES = 2_000;
+        if (this.lastOrderUpdates.size > MAX_CACHED_ORDER_UPDATES) {
+          const overflow = this.lastOrderUpdates.size - MAX_CACHED_ORDER_UPDATES;
+          let removed = 0;
+          for (const key of this.lastOrderUpdates.keys()) {
+            this.lastOrderUpdates.delete(key);
+            removed++;
+            if (removed >= overflow) break;
+          }
+        }
+      }
       for (const handler of this.handlers) handler(event);
     } catch (error) {
       this.logger.warn('Ignored malformed authenticated user-channel event', {

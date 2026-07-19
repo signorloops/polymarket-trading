@@ -69,4 +69,12 @@ describe('docker-compose runtime defaults', () => {
     expect(compose).toContain('- ALL');
     expect(compose).toContain('/tmp:size=64m,mode=1777');
   });
+
+  it('hides host .secrets from the dev profile bind-mount (INFRA-10)', () => {
+    const compose = readFileSync(join(process.cwd(), 'docker-compose.yml'), 'utf8');
+
+    expect(compose).toContain('trading-bot-dev:');
+    expect(compose).toContain('target: /app/.secrets');
+    expect(compose).toMatch(/profiles:\s*\n\s*- dev/);
+  });
 });

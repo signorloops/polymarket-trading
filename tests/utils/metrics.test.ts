@@ -282,15 +282,15 @@ describe('recordTrade', () => {
   it('should record successful trade', () => {
     recordTrade('market-1', 'buy', 100, 0.5, 50, true);
 
-    expect(TradingMetrics.ordersSubmitted.get({ market_id: 'market-1', side: 'buy' })).toBe(1);
-    expect(TradingMetrics.ordersFilled.get({ market_id: 'market-1', side: 'buy' })).toBe(1);
+    expect(TradingMetrics.ordersSubmitted.get({ side: 'buy' })).toBe(1);
+    expect(TradingMetrics.ordersFilled.get({ side: 'buy' })).toBe(1);
   });
 
   it('should record failed trade', () => {
     recordTrade('market-1', 'sell', 50, 0.6, 100, false);
 
-    expect(TradingMetrics.ordersSubmitted.get({ market_id: 'market-1', side: 'sell' })).toBe(1);
-    expect(TradingMetrics.ordersFailed.get({ market_id: 'market-1', side: 'sell' })).toBe(1);
+    expect(TradingMetrics.ordersSubmitted.get({ side: 'sell' })).toBe(1);
+    expect(TradingMetrics.ordersFailed.get({ side: 'sell' })).toBe(1);
   });
 });
 
@@ -313,14 +313,14 @@ describe('recordArbitrage', () => {
   it('should record found opportunity', () => {
     recordArbitrage('event-1', 0.05, false);
 
-    expect(TradingMetrics.arbitrageOpportunitiesFound.get({ event_id: 'event-1' })).toBe(1);
+    expect(TradingMetrics.arbitrageOpportunitiesFound.get({})).toBe(1);
   });
 
   it('should record executed arbitrage', () => {
     recordArbitrage('event-1', 0.05, true, 0.03);
 
-    expect(TradingMetrics.arbitrageExecuted.get({ event_id: 'event-1' })).toBe(1);
-    expect(TradingMetrics.arbitrageProfit.get({ event_id: 'event-1' })).toBeCloseTo(0.03, 5);
+    expect(TradingMetrics.arbitrageExecuted.get({})).toBe(1);
+    expect(TradingMetrics.arbitrageProfit.get({})).toBeCloseTo(0.03, 5);
   });
 });
 

@@ -25,10 +25,10 @@ import {
   type CanaryKillSwitchState,
   type CanaryKillSwitchStatePort,
 } from './canary-kill-switch.js';
+import { DEFAULT_TAKER_FEE_RATE, estimateTakerFee, reserveTakerFee } from './taker-fee.js';
 
 export const CANARY_CONFIRMATION_PHRASE = 'PLACE_ONE_REAL_POLYMARKET_CANARY_ORDER';
 export const CANARY_HARD_MAX_NOTIONAL_USD = 5;
-const CONSERVATIVE_TAKER_FEE_RATE = 0.07;
 export const DEFAULT_CANARY_POLL_INTERVAL_MS = 2_000;
 export const DEFAULT_CANARY_POLL_TIMEOUT_MS = 30_000;
 
@@ -581,17 +581,17 @@ function calculateMaximumBuyCostUsd(
     ) {
       throw new Error('Canary taker fee schedule is mismatched or stale');
     }
+    // Limit buys may improve; fee peaks at min(limit, 0.5) for the platform curve.
     const peakPrice = Math.min(config.price, 0.5);
     return (
       calculateNotionalUsd(config) +
-      config.size * feeSchedule.rate * Math.pow(peakPrice * (1 - peakPrice), feeSchedule.exponent)
+      estimateTakerFee(config.size, peakPrice, feeSchedule.rate, feeSchedule.exponent)
     );
   }
   return (
     calculateNotionalUsd(config) +
-    // A limit buy may fill at any better price below its limit. The platform
-    // fee curve p(1-p) peaks at 0.25 when p=0.5, so reserve that global maximum.
-    config.size * CONSERVATIVE_TAKER_FEE_RATE * 0.25
+    // No live schedule: reserve the global maximum for the default exponent (EXEC-10).
+    reserveTakerFee(config.size, DEFAULT_TAKER_FEE_RATE)
   );
 }
 

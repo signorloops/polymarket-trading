@@ -14,6 +14,7 @@ import { OrderStatus } from './execution-engine.js';
 import { createSingleton } from '../utils/singleton.js';
 import { TradingMetrics } from '../utils/metrics.js';
 import { acquireFileLock } from '../utils/file-lock.js';
+import { estimateTakerFee, reserveTakerFee } from './taker-fee.js';
 import {
   closeSync,
   existsSync,
@@ -98,6 +99,7 @@ interface PersistedRiskState {
 export class RiskManager {
   static readonly RECONCILE_TOLERANCE = 1e-6;
   private static readonly CONSERVATIVE_TAKER_FEE_RATE = 0.07;
+  private static readonly CONSERVATIVE_TAKER_FEE_EXPONENT = 1;
 
   private positions: Map<string, Position> = new Map();
   private marketPrices: Map<string, number> = new Map();
@@ -196,8 +198,26 @@ export class RiskManager {
       }
 
       if (trade.side === 'buy') {
-        requiredCollateral +=
-          trade.estimatedNotional + trade.size * RiskManager.CONSERVATIVE_TAKER_FEE_RATE * 0.25;
+        // Limit buys may improve; reserve fee at the worst peak on (0, limit] (EXEC-10).
+        const limitPrice = trade.size > 0 ? trade.estimatedNotional / trade.size : NaN;
+        const peakPrice =
+          Number.isFinite(limitPrice) && limitPrice > 0 && limitPrice < 1
+            ? Math.min(limitPrice, 0.5)
+            : undefined;
+        const feeReserve =
+          peakPrice === undefined
+            ? reserveTakerFee(
+                trade.size,
+                RiskManager.CONSERVATIVE_TAKER_FEE_RATE,
+                RiskManager.CONSERVATIVE_TAKER_FEE_EXPONENT
+              )
+            : estimateTakerFee(
+                trade.size,
+                peakPrice,
+                RiskManager.CONSERVATIVE_TAKER_FEE_RATE,
+                RiskManager.CONSERVATIVE_TAKER_FEE_EXPONENT
+              );
+        requiredCollateral += trade.estimatedNotional + feeReserve;
       }
 
       if (Math.abs(projectedSize) < RiskManager.RECONCILE_TOLERANCE) {
@@ -392,11 +412,12 @@ export class RiskManager {
     // exchange snapshot. Decrease it for local buys using the current maximum
     // platform taker-fee curve; do not optimistically add sell proceeds.
     if (side === 'buy' && this.collateralBalance !== undefined) {
-      const protocolFee =
-        orderStatus.filledSize *
-        RiskManager.CONSERVATIVE_TAKER_FEE_RATE *
-        orderStatus.avgPrice *
-        (1 - orderStatus.avgPrice);
+      const protocolFee = estimateTakerFee(
+        orderStatus.filledSize,
+        orderStatus.avgPrice,
+        RiskManager.CONSERVATIVE_TAKER_FEE_RATE,
+        RiskManager.CONSERVATIVE_TAKER_FEE_EXPONENT
+      );
       this.collateralBalance = Math.max(
         0,
         this.collateralBalance - orderStatus.filledSize * orderStatus.avgPrice - protocolFee

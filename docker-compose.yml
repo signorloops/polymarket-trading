@@ -34,7 +34,9 @@ services:
         max-size: '10m'
         max-file: '3'
 
-  # Development service with hot reload
+  # Development service with hot reload (INFRA-10: DEV-ONLY profile).
+  # Never enable on a shared/production host. The repo bind-mount is required for
+  # hot reload; a tmpfs overlay hides host `.secrets/` from the container.
   trading-bot-dev:
     build:
       context: .
@@ -46,6 +48,10 @@ services:
     volumes:
       - .:/app
       - /app/node_modules
+      - type: tmpfs
+        target: /app/.secrets
+    tmpfs:
+      - /tmp
     networks:
       - trading-network
     profiles:

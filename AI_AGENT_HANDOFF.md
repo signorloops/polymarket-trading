@@ -12,7 +12,7 @@
   2. **资金安全逻辑**：常规风控拒绝会误触全局熔断（EXEC-1）；断线重连后无快照门控，陈旧订单簿可被当成新鲜（MKT-1）。
   3. **测试假象**：1162 个测试全绿，但大量测试只断言"形状/不抛异常"，**几乎没有"对照已知最优解"的数值锚定测试**——上述严重数学 bug 全部与全绿测试并存。
 - 已验证**正确**的部分也很多（skip-list、订单簿、FW 主循环、canary 防御、HTTP 认证、CI），见 §8，**不要重复审计**。
-- **修复进度（2026-07-19 续 2）**：P0–P3 主体已落地。本轮低优：CORE-11、OPT-8/9、MKT-3..6 文档/边界、EXEC-9/11/12/13、API-5/8/9/10/11、INFRA-7/9 + Dockerfile.dev 风险注释。验证：`npm run typecheck` ✅、`npm test` 65 套件 / **1189** 用例全绿、`npm run lint` ✅。仍可选：EXEC-10 费用统一、API-7 REST 重试、INFRA-6/8、INFRA-10 实改（非注释）。
+- **修复进度（2026-07-19 续 3）**：交接台账内几乎全部已落地。本轮：EXEC-10 共享 taker-fee、API-7 GET 重试、INFRA-6 降基数、INFRA-8 单信号可触发、INFRA-10 dev `.secrets` tmpfs、API-6 订单缓存上限。验证：`typecheck`/`lint` ✅、`npm test` 66 套件 / **1194** 全绿。残留多为刻意保留的死代码清理或需产品确认项。
 
 ## 1. 项目速览
 
@@ -207,7 +207,7 @@ npm run lint && npm run build
 - **EXEC-7（中）** 成交成本基础用限价而非实际成交均价：`execution-engine.ts:473/340/353`（`avgPrice: response.price`）根源 `signed-clob-client.ts:594`。价格改善不反映 → 买入成本高估、浮亏高估、应急止损偏方向误触发。修复：从 getOrder/成交明细算实际 VWAP；至少文档标注近似方向。
 - **EXEC-8（中，测试缺口）** Kelly 只有 `>=0` 断言无数值锚定（EXEC-2/3 因此漏网）；无 `capital=0`/零流动性用例（此时 `fraction`/`riskAdjustedReturn` 为 NaN，已实证）；无"风控拒绝不触发熔断"回归测试；无陈旧 `.lock` 恢复测试；无乱序/重复终态回报测试；并发 claim 仅单进程/pg-mem 无双进程 fork 用例。
 - **EXEC-9（低）✅** 单腿 EV/stdev 按美元结果算；`capital=0` 早退；多腿 `sharpeRatio` 注明为 profit/maxLoss。
-- **EXEC-10（低）** 费用硬编码 exponent 峰值 0.25 与 canary 可变 exponent 仍脱节——启用前需统一。
+- **EXEC-10（低）✅** 抽出 `taker-fee.ts`；risk/canary 共用 `estimateTakerFee` / `reserveTakerFee`（峰值 `(1/4)^exponent`）。
 - **EXEC-11（低）✅** 保留 partial；清理时同步丢弃无订单的 riskReservations。
 - **EXEC-12（低）✅** |newSize|<1e-6 视为平仓删除。
 - **EXEC-13（低，安全）✅** RPC 仅允许 HTTPS。
@@ -219,8 +219,8 @@ npm run lint && npm run build
 - **API-3（中，测试缺口）✅** 已覆盖：reconnect_exhausted + ready 拒等、waitUntilReady 超时、disconnect 拒等 ready/order waiters、heartbeat stale→terminate。
 - **API-4（中，测试缺口）✅** 已覆盖：30s 无 PONG terminate、PONG 刷新死连窗口、reconnect_exhausted 事件与 `resetReconnect`。
 - **API-5（低）✅** market/user WS 重连 full-jitter。
-- **API-6（低）部分✅** `disconnect`/reconnect 耗尽会 reject `waitForOrderUpdate`；`lastOrderUpdates` 仍只增不删。
-- **API-7（低）** REST 客户端无重试/限流——可选增强。
+- **API-6（低）✅** disconnect/耗尽拒等 + `lastOrderUpdates` 上限 2000。
+- **API-7（低）✅** 幂等 GET/HEAD 对 429/5xx/网络错误有界重试，尊重 Retry-After。
 - **API-8（低，安全）✅** smoke publish 绑 127.0.0.1；token 可读 `DOCKER_SMOKE_METRICS_TOKEN`。
 - **API-9（低）✅** `maxPayload=1MiB`；解析失败只记 512 字符预览。
 - **API-10（低）✅** disconnect 后 2s 强制 terminate（保持同步 API）。
@@ -233,11 +233,11 @@ npm run lint && npm run build
 - **INFRA-3（中）** 模块级 child logger 在 `initLogger` 前冻结默认配置：`metric-types.ts:22`、`metric-registry.ts:15`、`crypto-utils.ts:8`、`config-encryption.ts:20` 在 import 时即 `getLogger().child(...)`，拷贝当时配置，之后不再更新。
 - **INFRA-4（中，安全）** `redact.ts:11-12` 正则漏：`CONFIG_ENCRYPTION_KEY`、`POLYGON_RPC_URL` 等 URL 内嵌 key；且只处理对象键值，message 字符串内嵌秘密永不脱敏。`config-encryption.ts:99-107` 与 redact 的秘密清单不一致。
 - **INFRA-5（中，安全）** `.dockerignore` 未排除 `.secrets/`（`.gitignore:23` 有），`Dockerfile:13` builder `COPY . .` 把 metrics token/grafana 密码带进中间层镜像（最终镜像干净）。
-- **INFRA-6（低）** metrics 高基数标签（`metric-registry.ts:172/193-201` market_id/event_id）；10000 上限后新市场指标静默丢弃仅 warn 一次。
+- **INFRA-6（低）✅** trade/arb/orderbook 热路径去掉 per-market/event 标签。
 - **INFRA-7（低）✅** metric alert id 稳定为 `metric-alert-${metricName}`。
-- **INFRA-8（低）** `AnomalyDetector` 单信号最高 30 < 阈值 50——需产品确认后再改。
+- **INFRA-8（低）✅** 单信号权重 40，阈值 `>= 40`，极端价/大单单独可触发。
 - **INFRA-9（低）✅** schema 注释改为 nats；`.env.example` 补 `HASH_SALT` 说明。
-- **INFRA-10（低，安全）部分✅** `Dockerfile.dev` 已标注 DEV-ONLY 风险；compose 收紧仍可选。
+- **INFRA-10（低，安全）✅** Dockerfile.dev 标注 + compose dev 用 tmpfs 遮盖 `/app/.secrets`。
 
 ## 7. 死代码 / 休眠代码清单（处理前先确认保留意图）
 
