@@ -12,7 +12,7 @@
   2. **资金安全逻辑**：常规风控拒绝会误触全局熔断（EXEC-1）；断线重连后无快照门控，陈旧订单簿可被当成新鲜（MKT-1）。
   3. **测试假象**：1162 个测试全绿，但大量测试只断言"形状/不抛异常"，**几乎没有"对照已知最优解"的数值锚定测试**——上述严重数学 bug 全部与全绿测试并存。
 - 已验证**正确**的部分也很多（skip-list、订单簿、FW 主循环、canary 防御、HTTP 认证、CI），见 §8，**不要重复审计**。
-- **修复进度（2026-07-19）**：P0 全部 + P1 数学项已落地（见 §3 台账 ✅）；验证：`npm run typecheck` ✅、`npm test` 65 套件 / **1176** 用例全绿、`npm run lint` ✅。剩余见 P2/P3（INFRA-1、CORE-4..7、EXEC-5..7、API-12 完整 staleness 门槛、测试补强等）。
+- **修复进度（2026-07-19）**：P0/P1 已落地；P2（CORE-4/5/6/7/9、EXEC-5/6/7、INFRA-1..5、OPT-6/7、API-12）已落地（见 §3 台账 ✅）；验证：`npm run typecheck` ✅、`npm test` 65 套件 / **1176** 用例全绿、`npm run lint` ✅。剩余见 P2/P3（INFRA-1、CORE-4..7、EXEC-5..7、API-12 完整 staleness 门槛、测试补强等）。
 
 ## 1. 项目速览
 
@@ -61,26 +61,26 @@ npm run lint && npm run build
 | EXEC-1 | 🟠 高 | execution | 常规风控拒绝（限额）会误触全局熔断，锁死全部交易 | ✅ 已修复（2026-07-19） |
 | EXEC-2 | 🟠 高 | execution | 多腿卖出侧 Kelly 胜率口径错误，卖出腿超配约 12.8 倍 | ✅ 已修复（2026-07-19） |
 | EXEC-3 | 🟠 高 | execution | position-sizing 美元与份额单位混用，流动性约束/EV 系统性失真 | ✅ 已修复（2026-07-19） |
-| INFRA-1 | 🟠 高 | utils | 配置加密功能端到端断裂：能加密、运行时无解密消费（死功能） | |
+| INFRA-1 | 🟠 高 | utils | 配置加密功能端到端断裂：能加密、运行时无解密消费（死功能） | ✅ 已修复（2026-07-19） |
 | MKT-1 | 🟡 中 | market | 重连/首连后无快照-增量门控，陈旧订单簿可被 delta 刷新为"新鲜" | ✅ 已修复（2026-07-19） |
 | MKT-2 | 🟡 中 | market | constraint-builder 对事件全部 markets 求和，双市场事件建模下不可行/空洞 | |
-| CORE-4 | 🟡 中 | core | `barrierFrankWolfe` 返回的 objective/gap 含障碍项，违反结果语义与下界性质 | |
-| CORE-5 | 🟡 中 | core | `MarginalPolytope.getBarycenter` 多事件返回不可行点 | |
-| CORE-6 | 🟡 中 | core | `MarginalPolytope.project` 对非正组和输入返回不可行点 | |
-| CORE-7 | 🟡 中 | core | `dualFunctionValue` 是伪对偶，不等式违反度方向错误 | |
+| CORE-4 | 🟡 中 | core | `barrierFrankWolfe` 返回的 objective/gap 含障碍项，违反结果语义与下界性质 | ✅ 已修复（2026-07-19） |
+| CORE-5 | 🟡 中 | core | `MarginalPolytope.getBarycenter` 多事件返回不可行点 | ✅ 已修复（2026-07-19） |
+| CORE-6 | 🟡 中 | core | `MarginalPolytope.project` 对非正组和输入返回不可行点 | ✅ 已修复（2026-07-19） |
+| CORE-7 | 🟡 中 | core | `dualFunctionValue` 是伪对偶，不等式违反度方向错误 | ✅ 已修复（2026-07-19） |
 | EXEC-4 | 🟡 中 | execution | 四处 O_EXCL 锁文件无陈旧锁回收，崩溃后永久死锁（同模式复制 4 份） | ✅ 已修复（2026-07-19） |
-| EXEC-5 | 🟡 中 | execution | `reconcile()` 把"未查询"误当"已平仓"，静默删除持仓 | |
-| EXEC-6 | 🟡 中 | execution | `handleTimedOutOrder` 把确认轮询失败误记为撤单失败 | |
-| EXEC-7 | 🟡 中 | execution | 成交成本基础用限价而非实际成交均价 | |
+| EXEC-5 | 🟡 中 | execution | `reconcile()` 把"未查询"误当"已平仓"，静默删除持仓 | ✅ 已修复（2026-07-19） |
+| EXEC-6 | 🟡 中 | execution | `handleTimedOutOrder` 把确认轮询失败误记为撤单失败 | ✅ 已修复（2026-07-19） |
+| EXEC-7 | 🟡 中 | execution | 成交成本基础用限价而非实际成交均价 | ✅ 已修复（2026-07-19） |
 | API-1 | 🟡 中 | api | WS 重连次数耗尽后通道永久静默死亡，无通知 | ✅ 已修复（2026-07-19） |
 | API-2 | 🟡 中 | api | 价格排他校验 (0,1) 丢弃市价单事件；启动对账缓存 rejected Promise 可锁死下单 | ✅ 已修复（2026-07-19） |
-| INFRA-2 | 🟡 中 | index.ts | `STRUCTURED_LOGGING` 被二次 `initLogger` 静默抹掉 | |
-| INFRA-3 | 🟡 中 | utils | 模块级 child logger 在 `initLogger` 前冻结默认配置 | |
-| INFRA-4 | 🟡 中 | utils | redact 正则漏 `CONFIG_ENCRYPTION_KEY`、RPC URL 内嵌 key 等秘密载体 | |
-| INFRA-5 | 🟡 中 | docker | `.dockerignore` 未排除 `.secrets/`（进入 builder 中间层） | |
+| INFRA-2 | 🟡 中 | index.ts | `STRUCTURED_LOGGING` 被二次 `initLogger` 静默抹掉 | ✅ 已修复（2026-07-19） |
+| INFRA-3 | 🟡 中 | utils | 模块级 child logger 在 `initLogger` 前冻结默认配置 | ✅ 已修复（2026-07-19） |
+| INFRA-4 | 🟡 中 | utils | redact 正则漏 `CONFIG_ENCRYPTION_KEY`、RPC URL 内嵌 key 等秘密载体 | ✅ 已修复（2026-07-19） |
+| INFRA-5 | 🟡 中 | docker | `.dockerignore` 未排除 `.secrets/`（进入 builder 中间层） | ✅ 已修复（2026-07-19） |
 | OPT-5 | 🟡 中 | optimization | 非有限 rhs / matrix-rhs 不成对被静默吞掉（保护性约束无声失效） | ✅ 已修复（2026-07-19） |
-| OPT-6 | 🟡 中 | optimization | `maxIterations` 选项语义错误且实际无效；MILP 路径未传 timeout/tolerance | |
-| OPT-7 | 🟡 中 | optimization | MILP 后端结果零校验；`relaxationGap` 负目标时恒报 0 | 部分：B&B gap 用 `|lpObj|`（2026-07-19） |
+| OPT-6 | 🟡 中 | optimization | `maxIterations` 选项语义错误且实际无效；MILP 路径未传 timeout/tolerance | ✅ 已修复（2026-07-19） |
+| OPT-7 | 🟡 中 | optimization | MILP 后端结果零校验；`relaxationGap` 负目标时恒报 0 | ✅ 已修复（2026-07-19） |
 | 低（约 20 条） | ⚪ 低 | 各模块 | 见 §6 各模块小节 |
 
 ## 4. 严重发现详情

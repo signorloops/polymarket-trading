@@ -9,6 +9,7 @@
 import dotenv from 'dotenv';
 import { getLogger } from './logger.js';
 import { parseConfigFromEnv, createDefaultConfig, type AppConfig } from './config-schema.js';
+import { isEncrypted, decryptValue } from './crypto-utils.js';
 
 // Load environment variables
 const result = dotenv.config();
@@ -16,10 +17,22 @@ if (result.error) {
   getLogger().warn('No .env file found, using default configuration');
 }
 
+// Decrypt ENC:v1: values before Zod validation so operators can store
+// PRIVATE_KEY / API secrets encrypted at rest (INFRA-1).
+decryptEncryptedEnvVars();
+
 // Invalid environment values must always fail closed. Silently replacing the
 // entire configuration with defaults can hide a typo in a canary or operator
 // command and makes the process run with settings the operator never approved.
 const config = parseConfigFromEnv();
+
+function decryptEncryptedEnvVars(): void {
+  for (const [key, value] of Object.entries(process.env)) {
+    if (typeof value === 'string' && isEncrypted(value)) {
+      process.env[key] = decryptValue(value);
+    }
+  }
+}
 
 /**
  * Algorithm parameters for Frank-Wolfe and Bregman projection

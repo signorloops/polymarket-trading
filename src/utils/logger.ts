@@ -1,5 +1,9 @@
 /**
- * Structured logging system with multiple log levels and context support
+ * Structured logging system with multiple log levels and context support.
+ *
+ * Child loggers share a mutable settings object with the root logger so that
+ * initLogger() updates (level / silent / structured) apply to module-level
+ * children created before initialization (INFRA-3).
  */
 
 import { createSingleton } from './singleton.js';
@@ -14,11 +18,15 @@ interface LogEntry {
   context?: Record<string, unknown>;
 }
 
+interface LogSettings {
+  level: LogLevel;
+  silent: boolean;
+  structured: boolean;
+}
+
 export class Logger {
-  private level: LogLevel;
-  private silent: boolean;
   private context: Record<string, unknown>;
-  private structured: boolean;
+  private readonly settings: LogSettings;
 
   private static readonly LEVEL_PRIORITY: Record<LogLevel, number> = {
     debug: 0,
@@ -31,23 +39,30 @@ export class Logger {
     level: LogLevel = 'info',
     silent = false,
     context: Record<string, unknown> = {},
-    structured = false
+    structured = false,
+    settings?: LogSettings
   ) {
-    this.level = level;
-    this.silent = silent;
+    this.settings = settings ?? { level, silent, structured };
+    // Keep constructor args as the initial settings when creating a fresh root.
+    if (!settings) {
+      this.settings.level = level;
+      this.settings.silent = silent;
+      this.settings.structured = structured;
+    }
     this.context = context;
-    this.structured = structured;
   }
 
   /**
-   * Create a child logger with additional context
+   * Create a child logger with additional context.
+   * Shares settings with the parent so initLogger updates propagate.
    */
   child(additionalContext: Record<string, unknown>): Logger {
     return new Logger(
-      this.level,
-      this.silent,
+      this.settings.level,
+      this.settings.silent,
       { ...this.context, ...additionalContext },
-      this.structured
+      this.settings.structured,
+      this.settings
     );
   }
 
@@ -55,25 +70,25 @@ export class Logger {
    * Set structured logging mode (JSON output)
    */
   setStructured(structured: boolean): void {
-    this.structured = structured;
+    this.settings.structured = structured;
   }
 
   /**
    * Set log level
    */
   setLevel(level: LogLevel): void {
-    this.level = level;
+    this.settings.level = level;
   }
 
   /**
    * Set silent mode (no console output)
    */
   setSilent(silent: boolean): void {
-    this.silent = silent;
+    this.settings.silent = silent;
   }
 
   private shouldLog(level: LogLevel): boolean {
-    return Logger.LEVEL_PRIORITY[level] >= Logger.LEVEL_PRIORITY[this.level];
+    return Logger.LEVEL_PRIORITY[level] >= Logger.LEVEL_PRIORITY[this.settings.level];
   }
 
   private formatLogEntry(entry: LogEntry, structured: boolean): string {
@@ -100,7 +115,7 @@ export class Logger {
   }
 
   private log(level: LogLevel, message: string, additionalContext?: Record<string, unknown>): void {
-    if (!this.shouldLog(level) || this.silent) {
+    if (!this.shouldLog(level) || this.settings.silent) {
       return;
     }
 
@@ -111,7 +126,7 @@ export class Logger {
       context: redactSecrets({ ...this.context, ...additionalContext }) as Record<string, unknown>,
     };
 
-    const formatted = this.formatLogEntry(entry, this.structured);
+    const formatted = this.formatLogEntry(entry, this.settings.structured);
 
     switch (level) {
       case 'debug':
@@ -146,24 +161,38 @@ export class Logger {
   }
 }
 
-// Global logger instance
+// Global logger instance — settings object is retained across reset so that
+// children created before initLogger still observe configuration updates.
+const _sharedSettings: LogSettings = {
+  level: 'info',
+  silent: false,
+  structured: false,
+};
 let _pendingLoggerArgs: { level: LogLevel; silent: boolean; structured: boolean } | null = null;
 
 const loggerSingleton = createSingleton(() => {
   if (_pendingLoggerArgs) {
     const { level, silent, structured } = _pendingLoggerArgs;
     _pendingLoggerArgs = null;
-    return new Logger(level, silent, {}, structured);
+    _sharedSettings.level = level;
+    _sharedSettings.silent = silent;
+    _sharedSettings.structured = structured;
+    return new Logger(level, silent, {}, structured, _sharedSettings);
   }
-  return new Logger();
+  return new Logger('info', false, {}, false, _sharedSettings);
 });
 
 /**
- * Initialize the global logger
+ * Initialize the global logger.
+ * Updates the shared settings object in place so pre-existing child loggers
+ * pick up level/silent/structured without being recreated (INFRA-2/3).
  */
 export function initLogger(level: LogLevel = 'info', silent = false, structured = false): Logger {
-  loggerSingleton.reset();
+  _sharedSettings.level = level;
+  _sharedSettings.silent = silent;
+  _sharedSettings.structured = structured;
   _pendingLoggerArgs = { level, silent, structured };
+  loggerSingleton.reset();
   return loggerSingleton.get();
 }
 
@@ -173,7 +202,8 @@ export function initLogger(level: LogLevel = 'info', silent = false, structured 
 export const getLogger = loggerSingleton.get;
 
 /**
- * Create a silent logger for testing
+ * Create a silent logger for testing (independent settings — does not share
+ * the global settings object).
  */
 export function createSilentLogger(): Logger {
   return new Logger('debug', true);

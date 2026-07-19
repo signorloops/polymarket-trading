@@ -535,11 +535,23 @@ describe('RiskManager', () => {
       rm.updatePosition(fill('o1', 100, 0.4), 'asset-A', 'buy');
       rm.updatePosition(fill('o2', 50, 0.3), 'asset-B', 'buy');
 
-      const result = rm.reconcile([{ assetId: 'asset-A', size: 100 }]); // B gone from exchange
+      // Both assets were queried; B is absent/zero on the exchange.
+      const result = rm.reconcile([{ assetId: 'asset-A', size: 100 }], ['asset-A', 'asset-B']);
 
       expect(result.removed).toEqual(['asset-B']);
       expect(rm.getPosition('asset-B')).toBeUndefined();
       expect(rm.getPosition('asset-A')?.size).toBe(100);
+    });
+
+    it('does not remove positions for assets that were never queried (EXEC-5)', () => {
+      const rm = new RiskManager();
+      rm.updatePosition(fill('o1', 100, 0.4), 'asset-A', 'buy');
+      rm.updatePosition(fill('o2', 50, 0.3), 'asset-held-elsewhere', 'buy');
+
+      const result = rm.reconcile([{ assetId: 'asset-A', size: 100 }], ['asset-A']);
+
+      expect(result.removed).toEqual([]);
+      expect(rm.getPosition('asset-held-elsewhere')?.size).toBe(50);
     });
 
     it('imports exchange-only positions with unknown cost basis (avgPrice 0)', () => {

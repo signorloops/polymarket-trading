@@ -62,7 +62,7 @@ export async function reconcileConfiguredBalances(
     throw new Error('Balance reconciliation returned invalid collateral data');
   }
 
-  const result = riskManager.reconcile(exchangeBalances);
+  const result = riskManager.reconcile(exchangeBalances, checkedAssetIds);
   riskManager.setCollateralBalance(collateral.size);
   return {
     checkedAssetIds,

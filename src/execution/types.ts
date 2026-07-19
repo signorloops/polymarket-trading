@@ -26,6 +26,12 @@ export interface OrderStatus {
   status: 'pending' | 'open' | 'filled' | 'partial' | 'cancelled' | 'error';
   filledSize: number;
   remainingSize: number;
+  /**
+   * Approximate average fill price. The CLOB open-order payload exposes the
+   * limit (or 0 for market orders), not trade VWAP — so buys may overstate
+   * cost and sells may understate proceeds until a trade-ledger VWAP is wired
+   * (EXEC-7). Callers must treat this as an upper/lower bound, not exact PnL.
+   */
   avgPrice: number;
   timestamp: number;
   error?: string;

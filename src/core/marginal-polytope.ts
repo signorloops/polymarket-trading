@@ -208,6 +208,13 @@ export class MarginalPolytope {
             result[idx] /= sum;
           }
         }
+      } else if (indices.length > 0) {
+        // Non-positive group mass cannot be normalized; fall back to the
+        // uniform feasible point within the event (CORE-6).
+        const uniform = 1 / indices.length;
+        for (const idx of indices) {
+          result[idx] = uniform;
+        }
       }
     }
 
@@ -223,12 +230,36 @@ export class MarginalPolytope {
   }
 
   /**
-   * Compute the barycenter (center of mass) of the polytope
-   * For a simplex, this is the uniform distribution
+   * Compute the barycenter (center of mass) of the polytope.
+   * For a product of simplices (one per event), each event group is uniform.
    */
   getBarycenter(): number[] {
-    const n = this.getDimension();
-    return new Array<number>(n).fill(1 / n);
+    const marketList = this.getMarkets();
+    const result = new Array<number>(marketList.length).fill(0);
+
+    for (const event of this.events.values()) {
+      const indices: number[] = [];
+      for (const market of event.markets) {
+        const idx = marketList.findIndex((m) => m.id === market.id);
+        if (idx >= 0) {
+          indices.push(idx);
+        }
+      }
+      if (indices.length === 0) {
+        continue;
+      }
+      const share = 1 / indices.length;
+      for (const idx of indices) {
+        result[idx] = share;
+      }
+    }
+
+    // Markets not attached to any event: fall back to global uniform.
+    if (this.events.size === 0 && marketList.length > 0) {
+      return new Array<number>(marketList.length).fill(1 / marketList.length);
+    }
+
+    return result;
   }
 
   /**

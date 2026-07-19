@@ -29,7 +29,12 @@ export interface IPSolution extends LPSolution {
 }
 
 export interface IPSolverOptions {
+  /**
+   * @deprecated Misnamed wall-clock timeout alias. Prefer timeoutMs.
+   */
   maxIterations?: number;
+  /** Wall-clock timeout in ms passed to the MILP backend (OPT-6). */
+  timeoutMs?: number;
   tolerance?: number;
   mipGap?: number;
   verbose?: boolean;
@@ -78,12 +83,11 @@ export function solveIP(problem: IPProblem, options: IPSolverOptions = {}): IPSo
 
     const backendResult = solveWithMilpBackend(problem, options);
     if (backendResult !== null) {
+      const denom = Math.abs(lpSolution.objectiveValue);
       return {
         ...backendResult,
         relaxationGap:
-          lpSolution.objectiveValue > 0
-            ? (backendResult.objectiveValue - lpSolution.objectiveValue) / lpSolution.objectiveValue
-            : 0,
+          denom > 0 ? (backendResult.objectiveValue - lpSolution.objectiveValue) / denom : 0,
       };
     }
 

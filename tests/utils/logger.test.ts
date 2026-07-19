@@ -3,7 +3,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
-import { Logger } from '../../src/utils/logger.js';
+import { Logger, initLogger, getLogger } from '../../src/utils/logger.js';
+import { redactSecrets } from '../../src/utils/redact.js';
 
 describe('Logger', () => {
   let originalConsole: {
@@ -138,5 +139,29 @@ describe('Logger', () => {
 
     expect(debugSpy).not.toHaveBeenCalled();
     expect(infoSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('propagates initLogger structured flag to pre-existing children (INFRA-3)', () => {
+    const spy = jest.fn();
+    console.info = spy;
+    const earlyChild = getLogger().child({ module: 'Early' });
+    initLogger('info', false, true);
+    earlyChild.info('after-init', { ok: true });
+
+    const line = spy.mock.calls[0]?.[0] as string;
+    expect(() => JSON.parse(line)).not.toThrow();
+    expect(line).toContain('"module":"Early"');
+  });
+
+  it('redacts encryption keys and RPC URL carriers (INFRA-4)', () => {
+    expect(
+      redactSecrets({
+        CONFIG_ENCRYPTION_KEY: 'aabb'.repeat(16),
+        POLYGON_RPC_URL: 'https://polygon.example/v1/super-secret-token',
+      })
+    ).toEqual({
+      CONFIG_ENCRYPTION_KEY: '[REDACTED]',
+      POLYGON_RPC_URL: '[REDACTED]',
+    });
   });
 });

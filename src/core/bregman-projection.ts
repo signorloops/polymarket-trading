@@ -241,38 +241,52 @@ export function bregmanDivergence(mu: number[], theta: number[]): number {
 }
 
 /**
- * Compute the dual function value g(μ)
- * This represents the "guaranteed profit" from the projection
+ * Divergence minus one-sided constraint violation (diagnostic only).
+ *
+ * Not a true Lagrangian dual. Equality violations use |c·μ − rhs|; inequality
+ * violations (coefficients · μ ≥ rhs) use max(0, rhs − c·μ) so feasible
+ * inequalities contribute zero (CORE-7).
  */
-export function dualFunctionValue(
+export function divergenceMinusConstraintViolation(
   mu: number[],
   theta: number[],
   constraints: Constraint[]
 ): number {
   const divergence = klDivergence(mu, theta);
 
-  // Add constraint violation penalties
   let penalty = 0;
   for (const constraint of constraints) {
-    const violation = Math.abs(vectorDot(constraint.coefficients, mu) - constraint.rhs);
-    penalty += violation;
+    const value = vectorDot(constraint.coefficients, mu);
+    if (constraint.type === 'equality') {
+      penalty += Math.abs(value - constraint.rhs);
+    } else {
+      penalty += Math.max(0, constraint.rhs - value);
+    }
   }
 
   return divergence - penalty;
 }
 
 /**
- * Check if the projection provides sufficient profit
+ * @deprecated Prefer divergenceMinusConstraintViolation — this is not a dual.
+ */
+export function dualFunctionValue(
+  mu: number[],
+  theta: number[],
+  constraints: Constraint[]
+): number {
+  return divergenceMinusConstraintViolation(mu, theta, constraints);
+}
+
+/**
+ * Check whether the KL incoherence lower bound exceeds a nats threshold.
  *
- * @param divergence KL divergence (potential profit)
- * @param gap Frank-Wolfe gap (optimality gap)
- * @param minProfit Minimum profit threshold
- * @returns Whether the arbitrage is profitable
+ * `divergence` and `gap` are dimensionless (nats), not dollar profit (CORE-9).
  */
 export function isProfitable(divergence: number, gap: number, minProfit?: number): boolean {
   const threshold = minProfit ?? ALGORITHM_CONFIG.MIN_PROFIT_THRESHOLD;
-  const guaranteedProfit = divergence - gap;
-  return guaranteedProfit >= threshold;
+  const incoherenceLowerBound = divergence - gap;
+  return incoherenceLowerBound >= threshold;
 }
 
 /**

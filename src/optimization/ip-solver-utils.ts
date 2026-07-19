@@ -3,6 +3,7 @@
  */
 
 import { solveLP, type LPProblem, type LPSolution } from './lp-solver.js';
+import { checkFeasibility } from './lp-solver-utils.js';
 import lpSolver from 'javascript-lp-solver';
 import type { IPProblem, IPSolution, IPSolverOptions } from './ip-solver.js';
 import { getLogger } from '../utils/logger.js';
@@ -103,7 +104,7 @@ function addBoundConstraint(
 
 export function solveWithMilpBackend(
   problem: IPProblem,
-  _options: IPSolverOptions
+  options: IPSolverOptions
 ): IPSolution | null {
   const n = problem.objective.length;
   if (n === 0) {
@@ -191,6 +192,12 @@ export function solveWithMilpBackend(
     if (Object.keys(ints).length > 0) model.ints = ints;
     if (Object.keys(binaries).length > 0) model.binaries = binaries;
     if (Object.keys(unrestricted).length > 0) model.unrestricted = unrestricted;
+    if (options.timeoutMs !== undefined || options.maxIterations !== undefined) {
+      model.timeout = Math.max(1, options.timeoutMs ?? options.maxIterations ?? 1);
+    }
+    if (options.mipGap !== undefined) {
+      model.tolerance = options.mipGap;
+    }
 
     const raw = milpBackend.Solve(model) as Record<string, unknown> & {
       feasible?: boolean;
@@ -227,16 +234,29 @@ export function solveWithMilpBackend(
       (sum, coef, i) => sum + coef * (solution[i] ?? 0),
       0
     );
+    const tolerance = options.tolerance ?? 1e-6;
+    const feasibility = checkFeasibility(solution, problem, tolerance);
+    if (!feasibility.feasible) {
+      return {
+        solution,
+        objectiveValue,
+        optimal: false,
+        status: 'error',
+        integerFeasible: false,
+        error: `MILP backend produced infeasible solution: ${feasibility.violations.join('; ')}`,
+      };
+    }
     const integerFeasible = isIntegerFeasible(solution, problem);
     const iter = Number(raw.iter);
 
     return {
       solution,
       objectiveValue,
-      optimal: true,
-      status: 'optimal',
+      optimal: integerFeasible,
+      status: integerFeasible ? 'optimal' : 'error',
       integerFeasible,
       relaxationGap: 0,
+      ...(integerFeasible ? {} : { error: 'MILP backend returned a non-integer solution' }),
       ...(Number.isFinite(iter) ? { iterations: iter } : {}),
     };
   } catch (error) {

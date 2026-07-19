@@ -9,7 +9,7 @@
  */
 
 export const SECRET_KEY_RE =
-  /(secret|password|passwd|passphrase|api[_-]?key|api[_-]?secret|private[_-]?key|authorization|access[_-]?token|auth[_-]?token|bearer|mnemonic)/i;
+  /(secret|password|passwd|passphrase|api[_-]?key|api[_-]?secret|private[_-]?key|authorization|access[_-]?token|auth[_-]?token|bearer|mnemonic|encryption[_-]?key|config[_-]?encryption|rpc[_-]?url|webhook)/i;
 
 /**
  * Recursively redact credential values from `value`. Primitive values pass

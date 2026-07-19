@@ -287,17 +287,22 @@ export function barrierFrankWolfe(
 
       const objectiveScale = Math.max(1, Math.abs(objective));
       if (gap <= tolerance * (1 - ALGORITHM_CONFIG.ALPHA) * objectiveScale) {
+        // Report pure KL objective/gap without the barrier term (CORE-4).
+        const pureObjective = objectiveFn(mu, 0);
+        const pureGrad = gradientFn(mu, 0);
+        copyTo(gradientNoBarrier, pureGrad);
+        const pureGap = Math.max(0, dot(gradientNoBarrier, tempDiff));
         logger.debug('Barrier Frank-Wolfe converged', {
           iterations: iter + 1,
-          objective,
-          gap,
+          objective: pureObjective,
+          gap: pureGap,
           epsilon,
         });
 
         return {
           mu: Array.from(mu),
-          objective,
-          gap,
+          objective: pureObjective,
+          gap: pureGap,
           iterations: iter + 1,
           converged: true,
           history,
@@ -309,8 +314,8 @@ export function barrierFrankWolfe(
       [mu, tempMu] = [tempMu, mu];
     }
 
-    const finalObjective = objectiveFn(mu, epsilon);
-    const finalGradient = gradientFn(mu, epsilon);
+    const finalObjective = objectiveFn(mu, 0);
+    const finalGradient = gradientFn(mu, 0);
     const finalS = lmoFn(finalGradient);
 
     copyTo(gradient, finalGradient);

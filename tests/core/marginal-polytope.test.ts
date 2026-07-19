@@ -270,7 +270,31 @@ describe('MarginalPolytope', () => {
       expect(barycenter).toEqual([0.5, 0.5]);
     });
 
-    it('should handle multiple markets', () => {
+    it('returns per-event uniform shares for multi-event polytopes (CORE-5)', () => {
+      polytope.addEvent({
+        id: 'event-1',
+        markets: [
+          { id: 'e1-yes', eventId: 'event-1', outcome: 'YES', price: 0.6 },
+          { id: 'e1-no', eventId: 'event-1', outcome: 'NO', price: 0.4 },
+        ],
+        outcomes: ['YES', 'NO'],
+      });
+      polytope.addEvent({
+        id: 'event-2',
+        markets: [
+          { id: 'e2-yes', eventId: 'event-2', outcome: 'YES', price: 0.55 },
+          { id: 'e2-no', eventId: 'event-2', outcome: 'NO', price: 0.45 },
+        ],
+        outcomes: ['YES', 'NO'],
+      });
+
+      const barycenter = polytope.getBarycenter();
+      expect(barycenter).toEqual([0.5, 0.5, 0.5, 0.5]);
+      expect(barycenter[0]! + barycenter[1]!).toBeCloseTo(1, 10);
+      expect(barycenter[2]! + barycenter[3]!).toBeCloseTo(1, 10);
+    });
+
+    it('should handle multiple markets in one event', () => {
       const event: Event = {
         id: 'event-1',
         markets: [

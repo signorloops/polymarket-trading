@@ -146,8 +146,9 @@ export function buildSolverModel(
     variables: {},
   };
 
-  if (options.maxIterations !== undefined) {
-    model.timeout = Math.max(1, options.maxIterations);
+  if (options.timeoutMs !== undefined || options.maxIterations !== undefined) {
+    // javascript-lp-solver reads `timeout` as wall-clock milliseconds (OPT-6).
+    model.timeout = Math.max(1, options.timeoutMs ?? options.maxIterations ?? 1);
   }
 
   for (let i = 0; i < n; i++) {

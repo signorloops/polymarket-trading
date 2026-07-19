@@ -108,8 +108,9 @@ export class PolymarketTradingSystem {
     validateConfig();
     printConfigSummary();
 
-    // Initialize logger
-    initLogger(LOG_CONFIG.LOG_LEVEL, LOG_CONFIG.SILENT);
+    // Logger is initialized once in main()/tests with STRUCTURED_LOGGING.
+    // Do not re-init here — a second init without the structured flag would
+    // wipe JSON logging (INFRA-2).
 
     // Set up event handlers
     this.setupEventHandlers();
@@ -372,6 +373,19 @@ export class PolymarketTradingSystem {
           this.logger.error('Emergency stop triggered, halting trading');
           this.requestStop();
           break;
+        }
+
+        // API-12: do not act on opportunities while the market channel is down
+        // or has permanently given up reconnecting — books may be empty/stale.
+        if (this.pipeline.isReconnectExhausted()) {
+          this.logger.error('Skipping cycle: market data reconnect exhausted');
+          await sleep(ERROR_RETRY_INTERVAL_MS, signal);
+          continue;
+        }
+        if (!this.pipeline.isConnected()) {
+          this.logger.warn('Skipping cycle: market data WebSocket is not connected');
+          await sleep(MAIN_LOOP_INTERVAL_MS, signal);
+          continue;
         }
 
         await this.refreshTakerFeesIfDue();

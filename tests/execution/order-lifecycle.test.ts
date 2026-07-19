@@ -215,4 +215,45 @@ describe('handleTimedOutOrder', () => {
     );
     expect(saved.at(-1)).toEqual(result.record);
   });
+
+  it('keeps cancelSucceeded true when confirmation polling fails (EXEC-6)', async () => {
+    const client = {
+      cancelOrder: jest.fn(async () => undefined),
+      getOrder: jest.fn(async () => {
+        throw new Error('network blip');
+      }),
+    };
+    const saved: LifecycleRecord[] = [];
+
+    const result = await handleTimedOutOrder({
+      tradingClient: client as never,
+      order: makeOrder(),
+      record: makeRecord({ status: 'timed_out' }),
+      saveRecord: (record) => {
+        saved.push(record);
+      },
+      now: () => 5_000,
+      sleep: async () => {},
+      pollIntervalMs: 1,
+      pollTimeoutMs: 10,
+      timedOutStatus: 'timed_out',
+      mapStatus: () => 'open',
+      openStatuses: new Set<LifecycleStatus>(['open', 'submitted']),
+      shouldRequireManualIntervention: () => true,
+      buildTransitionPatch: () => ({}),
+      cancelUnconfirmedReason: 'cancel requested but not confirmed',
+      buildCancelFailureReason: (message) => `cancel failed: ${message}`,
+    });
+
+    expect(client.cancelOrder).toHaveBeenCalled();
+    expect(result.record).toEqual(
+      expect.objectContaining({
+        cancelAttempted: true,
+        cancelSucceeded: true,
+        cancelConfirmed: false,
+        manualInterventionRequired: true,
+      })
+    );
+    expect(result.record.manualInterventionReason).toMatch(/confirmation polling failed/);
+  });
 });

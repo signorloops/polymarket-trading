@@ -501,6 +501,7 @@ export class ExecutionEngine {
         status: this.mapOrderStatus(response.status),
         filledSize,
         remainingSize,
+        // Limit/reference price from the adapter — not trade VWAP (EXEC-7).
         avgPrice: response.price,
         timestamp: Date.now(),
       };

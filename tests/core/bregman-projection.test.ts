@@ -259,6 +259,16 @@ describe('Bregman Projection', () => {
       expect(dualValue).toBeLessThan(divergence);
     });
 
+    it('does not penalize satisfied inequalities (CORE-7)', () => {
+      const mu = [0.6, 0.4];
+      const theta = [0.6, 0.4];
+      // coefficients · μ >= 0 is satisfied; old |·| logic wrongly charged 0.6+0.4.
+      const constraints = [{ coefficients: [1, 1], rhs: 0, type: 'inequality' as const }];
+
+      const dualValue = dualFunctionValue(mu, theta, constraints);
+      expect(dualValue).toBeCloseTo(klDivergence(mu, theta), 5);
+    });
+
     it('should accumulate penalties for multiple constraint violations', () => {
       const mu = [0.6, 0.4];
       const theta = [0.6, 0.4];

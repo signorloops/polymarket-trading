@@ -8,19 +8,17 @@ import { ALGORITHM_CONFIG } from '../utils/config.js';
 import type { FrankWolfeResult } from './frank-wolfe-types.js';
 
 /**
- * Check if the Frank-Wolfe result indicates profitable arbitrage
+ * Check if the Frank-Wolfe result indicates significant price incoherence.
  *
- * @param result Frank-Wolfe result
- * @param minProfit Minimum profit threshold
- * @returns Whether arbitrage is profitable
+ * The objective and gap are KL nats, not dollar profit (CORE-9). Prefer
+ * isSignificantIncoherence when naming matters for call-site clarity.
  */
 export function isProfitableArbitrage(
   result: FrankWolfeResult,
   minProfit: number = ALGORITHM_CONFIG.MIN_PROFIT_THRESHOLD
 ): boolean {
-  // Guaranteed profit = divergence - gap
-  const guaranteedProfit = result.objective - result.gap;
-  return guaranteedProfit >= minProfit;
+  const incoherenceLowerBound = result.objective - result.gap;
+  return incoherenceLowerBound >= minProfit;
 }
 
 /**

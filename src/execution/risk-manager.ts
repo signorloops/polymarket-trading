@@ -583,13 +583,22 @@ export class RiskManager {
    * stale if orders filled while the daemon was down, or if positions changed
    * externally. The exchange is authoritative for SIZE:
    *  - synced: correct in-memory size to the exchange value when they differ.
-   *  - removed: drop in-memory positions the exchange no longer holds.
+   *  - removed: drop in-memory positions that were explicitly queried and are
+   *    absent/zero on the exchange (EXEC-5). Positions for assets that were not
+   *    queried are left untouched.
    *  - imported: record exchange positions we didn't know about, with avgPrice 0
    *    (cost basis unknown) — these are excluded from unrealized PnL until a cost
    *    basis is supplied, so they can't inflate/deflate the circuit-breaker math.
    * Any drift is logged at WARN for operator review, and state is re-persisted.
+   *
+   * @param queriedAssetIds Asset ids that were actually requested from the
+   *   exchange. Defaults to the asset ids present in `balances` (including any
+   *   zero-size rows the caller included).
    */
-  reconcile(balances: readonly ExchangeBalance[]): ReconcileResult {
+  reconcile(
+    balances: readonly ExchangeBalance[],
+    queriedAssetIds?: readonly string[]
+  ): ReconcileResult {
     const exchange = new Map<string, number>();
     for (const b of balances) {
       if (!b.assetId || !Number.isFinite(b.size) || b.size < 0 || exchange.has(b.assetId)) {
@@ -603,10 +612,15 @@ export class RiskManager {
       }
     }
 
+    const queried = new Set(queriedAssetIds ?? balances.map((b) => b.assetId));
+
     const synced: string[] = [];
     const removed: string[] = [];
 
     for (const [assetId, pos] of this.positions) {
+      if (!queried.has(assetId)) {
+        continue;
+      }
       const exchangeSize = exchange.get(assetId);
       if (exchangeSize === undefined) {
         removed.push(assetId);

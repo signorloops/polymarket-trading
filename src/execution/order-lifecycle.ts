@@ -128,17 +128,37 @@ export async function handleTimedOutOrder<
 >(
   params: HandleTimedOutOrderParams<TRecord, TStatus>
 ): Promise<{ record: TRecord; order?: OrderResponse }> {
+  // Cancel and confirmation polling are separate: a transient getOrder failure
+  // after a successful cancel must not be recorded as cancelSucceeded:false (EXEC-6).
+  let cancelRequestedRecord: TRecord;
   try {
     await params.tradingClient.cancelOrder(params.order.id);
 
-    const cancelRequestedRecord = {
+    cancelRequestedRecord = {
       ...params.record,
       updatedAt: params.now(),
       cancelAttempted: true,
       cancelSucceeded: true,
     } satisfies TRecord;
     params.saveRecord(cancelRequestedRecord);
+  } catch (error) {
+    const errorMessage = getErrorMessage(error);
+    const failedCancelRecord = {
+      ...params.record,
+      updatedAt: params.now(),
+      status: params.timedOutStatus,
+      cancelAttempted: true,
+      cancelSucceeded: false,
+      cancelConfirmed: false,
+      cancelError: errorMessage,
+      manualInterventionRequired: true,
+      manualInterventionReason: params.buildCancelFailureReason(errorMessage),
+    } satisfies TRecord;
+    params.saveRecord(failedCancelRecord);
+    return { record: failedCancelRecord };
+  }
 
+  try {
     if (isTradingStatusClient(params.tradingClient)) {
       const confirmedOrder = await pollOrderUntilTerminal({
         tradingClient: params.tradingClient,
@@ -184,18 +204,16 @@ export async function handleTimedOutOrder<
     return { record: unconfirmedRecord };
   } catch (error) {
     const errorMessage = getErrorMessage(error);
-    const failedCancelRecord = {
-      ...params.record,
+    const pollFailedRecord = {
+      ...cancelRequestedRecord,
       updatedAt: params.now(),
-      status: params.timedOutStatus,
-      cancelAttempted: true,
-      cancelSucceeded: false,
+      cancelSucceeded: true,
       cancelConfirmed: false,
       cancelError: errorMessage,
       manualInterventionRequired: true,
-      manualInterventionReason: params.buildCancelFailureReason(errorMessage),
+      manualInterventionReason: `Cancel requested but confirmation polling failed: ${errorMessage}`,
     } satisfies TRecord;
-    params.saveRecord(failedCancelRecord);
-    return { record: failedCancelRecord };
+    params.saveRecord(pollFailedRecord);
+    return { record: pollFailedRecord };
   }
 }

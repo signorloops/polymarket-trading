@@ -39,6 +39,14 @@ export interface LPSolution {
 }
 
 export interface LPSolverOptions {
+  /**
+   * Wall-clock timeout in milliseconds for javascript-lp-solver (branch-and-cut).
+   * Prefer this over the legacy maxIterations alias (OPT-6).
+   */
+  timeoutMs?: number;
+  /**
+   * @deprecated Misnamed: historically mapped to solver timeout (ms). Use timeoutMs.
+   */
   maxIterations?: number;
   tolerance?: number;
   verbose?: boolean;
