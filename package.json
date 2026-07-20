@@ -46,7 +46,7 @@
     "prettier": "^3.9.5",
     "ts-jest": "^29.4.11",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.63.0"
+    "typescript-eslint": "^8.64.0"
   },
   "dependencies": {
     "@slack/webhook": "^7.2.0",
