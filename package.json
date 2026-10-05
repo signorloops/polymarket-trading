@@ -37,7 +37,7 @@
     "@jest/globals": "^30.5.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^25.9.3",
-    "@types/ws": "^8.18.1",
+    "@types/ws": "^8.18.2",
     "eslint": "^10.11.0",
     "eslint-config-prettier": "^10.1.8",
     "husky": "^8.0.0",
@@ -54,7 +54,7 @@
     "dotenv": "^17.4.2",
     "javascript-lp-solver": "^1.0.3",
     "nodemailer": "^8.0.10",
-    "ws": "^8.21.3",
+    "ws": "^8.22.0",
     "zod": "^4.6.5"
   },
   "lint-staged": {
