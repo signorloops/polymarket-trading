@@ -55,7 +55,7 @@
     "javascript-lp-solver": "^1.0.3",
     "nodemailer": "^8.0.10",
     "ws": "^8.22.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "lint-staged": {
     "*.{ts,tsx}": [
